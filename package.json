@@ -1,0 +1,21 @@
+{
+  "name": "nan2026-game",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "NAN 2026 Game x AI Hackathon 예선 제출작",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "phaser": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
+  }
+}
