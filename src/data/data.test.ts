@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SUPPORTS } from '@/data/supports';
-import { SKILLS, ARROW_SHOT, ANNIHILATION } from '@/data/skills';
+import { SKILLS, findSkill } from '@/data/skills';
+import { WEAPON_LIST, deliveryOf } from '@/data/weapons';
 import { canAttach, resolveSkill } from '@/engine/support';
 import { TAGS } from '@/engine/tags';
 
@@ -69,58 +70,116 @@ describe('보조능력 데이터 무결성', () => {
   });
 });
 
+const ARROW_SHOT_ = findSkill('arrow-shot')!;
+const ANNIHILATION_ = findSkill('annihilation')!;
+
 describe('스킬별 장착 가능 보조능력', () => {
   it('화살 사격에는 투사체 보조능력이 붙는다', () => {
-    const attachable = SUPPORTS.filter((s) => canAttach(ARROW_SHOT, s).ok);
+    const attachable = SUPPORTS.filter((s) => canAttach(ARROW_SHOT_, s).ok);
     expect(attachable.map((s) => s.name)).toContain('다중투사체');
     expect(attachable.map((s) => s.name)).toContain('관통');
   });
 
   it('화살 사격에는 지대 보조능력이 붙지 않는다', () => {
     const earthquake = SUPPORTS.find((s) => s.id === 'earthquake')!;
-    expect(canAttach(ARROW_SHOT, earthquake).ok).toBe(false);
+    expect(canAttach(ARROW_SHOT_, earthquake).ok).toBe(false);
   });
 
   it('멸검에는 지대 보조능력이 붙는다', () => {
     const earthquake = SUPPORTS.find((s) => s.id === 'earthquake')!;
-    expect(canAttach(ANNIHILATION, earthquake).ok).toBe(true);
+    expect(canAttach(ANNIHILATION_, earthquake).ok).toBe(true);
   });
 
   it('멸검에는 투사체 보조능력이 붙지 않는다', () => {
     const pierce = SUPPORTS.find((s) => s.id === 'pierce')!;
-    expect(canAttach(ANNIHILATION, pierce).ok).toBe(false);
+    expect(canAttach(ANNIHILATION_, pierce).ok).toBe(false);
   });
 });
 
 describe('실제 조합 결과', () => {
   it("'다중투사체' + '관통'을 붙인 화살 사격", () => {
     const combo = SUPPORTS.filter((s) => ['multiple-projectiles', 'pierce'].includes(s.id));
-    const resolved = resolveSkill(ARROW_SHOT, combo);
+    const resolved = resolveSkill(ARROW_SHOT_, combo);
 
-    expect(resolved.stats.projectileCount).toBe(3);
-    expect(resolved.stats.damage).toBeCloseTo(100 / 1.4, 10);
+    // 기본값은 밸런스에 따라 바뀌므로 스킬에서 읽어 비율로 검증한다.
+    expect(resolved.stats.projectileCount).toBe((ARROW_SHOT_.base.projectileCount ?? 1) + 2);
+    expect(resolved.stats.damage).toBeCloseTo((ARROW_SHOT_.base.damage ?? 0) / 1.4, 10);
     expect(resolved.behaviors).toContainEqual({ kind: 'pierce', count: 2 });
     expect(resolved.rejected).toHaveLength(0);
   });
 
   it("'지진'을 붙인 멸검은 틱이 빨라지고 범위가 넓어진다", () => {
     const earthquake = SUPPORTS.filter((s) => s.id === 'earthquake');
-    const resolved = resolveSkill(ANNIHILATION, earthquake);
+    const resolved = resolveSkill(ANNIHILATION_, earthquake);
 
-    // 원안 메모의 0.5 -> 0.34
-    expect(resolved.stats.tickInterval).toBeCloseTo(0.333, 3);
-    expect(resolved.stats.areaRadius).toBe(180);
-    expect(resolved.stats.damage).toBeCloseTo(24 / 1.2, 10);
+    // 지진: 틱 간격 50% 가속, 효과 범위 100% 증가, 피해 20% 감소
+    expect(resolved.stats.tickInterval).toBeCloseTo((ANNIHILATION_.base.tickInterval ?? 0) / 1.5, 10);
+    expect(resolved.stats.areaRadius).toBe((ANNIHILATION_.base.areaRadius ?? 0) * 2);
+    expect(resolved.stats.damage).toBeCloseTo((ANNIHILATION_.base.damage ?? 0) / 1.2, 10);
   });
 
   it('슬롯 수를 넘는 조합은 초과분이 거부된다', () => {
     // 슬롯 수는 밸런스에 따라 바뀌므로 스킬에서 읽는다.
-    const attachable = SUPPORTS.filter((s) => canAttach(ARROW_SHOT, s).ok);
-    const overflow = attachable.slice(0, ARROW_SHOT.supportSlots + 1);
-    expect(overflow.length).toBeGreaterThan(ARROW_SHOT.supportSlots);
+    const attachable = SUPPORTS.filter((s) => canAttach(ARROW_SHOT_, s).ok);
+    const overflow = attachable.slice(0, ARROW_SHOT_.supportSlots + 1);
+    expect(overflow.length).toBeGreaterThan(ARROW_SHOT_.supportSlots);
 
-    const resolved = resolveSkill(ARROW_SHOT, overflow);
-    expect(resolved.supports).toHaveLength(ARROW_SHOT.supportSlots);
+    const resolved = resolveSkill(ARROW_SHOT_, overflow);
+    expect(resolved.supports).toHaveLength(ARROW_SHOT_.supportSlots);
     expect(resolved.rejected).toHaveLength(1);
+  });
+});
+
+describe('무기 데이터 무결성', () => {
+  it('무기 4종이 모두 정의되어 있다', () => {
+    expect(WEAPON_LIST).toHaveLength(4);
+  });
+
+  it('무기마다 상태이상이 서로 다르다', () => {
+    const statuses = WEAPON_LIST.map((w) => w.status);
+    expect(new Set(statuses).size).toBe(statuses.length);
+  });
+
+  it('스킬 id가 중복되지 않는다', () => {
+    const ids = SKILLS.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('전달 방식이 태그에서 올바르게 유도된다', () => {
+    expect(deliveryOf(findSkill('sword-slash')!)).toBe('melee');
+    expect(deliveryOf(findSkill('shield-bash')!)).toBe('melee');
+    expect(deliveryOf(findSkill('arrow-shot')!)).toBe('projectile');
+    expect(deliveryOf(findSkill('arcane-bolt')!)).toBe('projectile');
+    expect(deliveryOf(findSkill('annihilation')!)).toBe('area');
+    expect(deliveryOf(findSkill('fracture-wave')!)).toBe('area');
+  });
+
+  it('근접 스킬은 사거리와 부채꼴 각도를 갖는다', () => {
+    for (const weapon of WEAPON_LIST) {
+      if (deliveryOf(weapon.basic) !== 'melee') continue;
+      expect(weapon.basic.base.meleeRange, weapon.name).toBeGreaterThan(0);
+      expect(weapon.basic.base.meleeArc, weapon.name).toBeGreaterThan(0);
+    }
+  });
+
+  it('기본 공격은 모두 콤보를 쌓을 수 있다', () => {
+    for (const weapon of WEAPON_LIST) {
+      expect(weapon.basic.base.comboGain, weapon.name).toBeGreaterThan(0);
+    }
+  });
+
+  it('무기마다 보조능력 후보가 하나 이상 있다', () => {
+    for (const weapon of WEAPON_LIST) {
+      const basic = SUPPORTS.filter((s) => canAttach(weapon.basic, s).ok);
+      const combo = SUPPORTS.filter((s) => canAttach(weapon.combo, s).ok);
+      expect(basic.length, `${weapon.name} 기본 공격`).toBeGreaterThan(0);
+      expect(combo.length, `${weapon.name} 발동 스킬`).toBeGreaterThan(0);
+    }
+  });
+
+  it('슬롯은 원안대로 스킬당 2개다', () => {
+    for (const skill of SKILLS) {
+      expect(skill.supportSlots, skill.name).toBe(2);
+    }
   });
 });

@@ -157,15 +157,19 @@ const MODIFIER_SUPPORTS: Support[] = [
     description: '보조 대상 스킬의 피해 25% 증가',
   },
   {
+    // 원안의 "콤보 50% 확률로 2배 획득"은 확률 대신 결정적인 1.5배로 구현했다.
+    // 3-5분짜리 한 판에서 콤보 획득량이 운에 좌우되면 발동 스킬을 한 번도
+    // 못 보는 판이 생길 수 있어, 기댓값은 유지하되 분산을 없앴다.
     id: 'bold-resolve',
     name: '과감한 결단',
     tags: ['공격'],
     requires: ['공격'],
     modifiers: [
-      { stat: 'comboGain', mode: 'more', value: 1.0 },
+      { stat: 'comboDuration', mode: 'more', value: 1.0 },
+      { stat: 'comboGain', mode: 'more', value: 0.5 },
       { stat: 'damage', mode: 'increase', value: 0.1 },
     ],
-    description: '콤보 지속시간 100% 증폭, 콤보 50% 확률로 2배 획득, 피해 10% 증가',
+    description: '콤보 지속시간 100% 증폭, 콤보 획득 1.5배, 피해 10% 증가',
   },
   {
     id: 'added-stacks',

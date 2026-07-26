@@ -1,3 +1,5 @@
+import { createStatusHost, type StatusHost } from '@/engine/status';
+
 /**
  * 적 정의.
  *
@@ -51,7 +53,7 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   },
 };
 
-export interface Enemy {
+export interface Enemy extends StatusHost {
   id: number;
   kind: EnemyKind;
   x: number;
@@ -72,6 +74,7 @@ export function resetEnemyIds(): void {
 export function createEnemy(kind: EnemyKind, x: number, y: number): Enemy {
   const stats = ENEMY_STATS[kind];
   return {
+    ...createStatusHost(),
     id: nextId++,
     kind,
     x,

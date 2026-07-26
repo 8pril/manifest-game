@@ -1,5 +1,7 @@
 import type { Support } from '@/engine/support';
 import { TOTAL_WAVES } from '@/game/waves';
+import { attachSupport, createLoadout, type Loadout } from '@/game/loadout';
+import type { WeaponId } from '@/data/weapons';
 
 /**
  * 한 판(run)의 상태 기계.
@@ -36,7 +38,8 @@ export interface RunState {
   waveIndex: number;
   hp: number;
   maxHp: number;
-  attached: readonly Support[];
+  /** 무기 2종과 스킬별 보조능력. */
+  loadout: Loadout;
   /** 남은 무적 시간(초). 0이면 피해를 받는다. */
   invulnerable: number;
   /** 처치한 적 수. 결과 화면에 쓴다. */
@@ -45,13 +48,13 @@ export interface RunState {
   elapsed: number;
 }
 
-export function createRun(): RunState {
+export function createRun(left: WeaponId, right: WeaponId): RunState {
   return {
     phase: 'combat',
     waveIndex: 0,
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
-    attached: [],
+    loadout: createLoadout(left, right),
     invulnerable: 0,
     kills: 0,
     elapsed: 0,
@@ -76,15 +79,22 @@ export function clearWave(run: RunState, offersSupport: boolean): RunState {
   return { ...run, phase: 'offer' };
 }
 
-/** 보조능력을 골랐을 때. 고르지 않고 넘기려면 support에 undefined를 준다. */
-export function pickSupport(run: RunState, support: Support | undefined): RunState {
+/**
+ * 보조능력을 골랐을 때.
+ * 보조능력은 스킬 단위로 붙으므로 어느 스킬에 붙일지도 함께 받는다.
+ * 고르지 않고 넘기려면 pick에 undefined를 준다.
+ */
+export function pickSupport(
+  run: RunState,
+  pick: { support: Support; skillId: string } | undefined,
+): RunState {
   if (run.phase !== 'offer') return run;
 
   return {
     ...run,
     phase: 'combat',
     waveIndex: run.waveIndex + 1,
-    attached: support ? [...run.attached, support] : run.attached,
+    loadout: pick ? attachSupport(run.loadout, pick.skillId, pick.support) : run.loadout,
   };
 }
 

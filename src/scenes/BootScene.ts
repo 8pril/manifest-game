@@ -43,7 +43,7 @@ export class BootScene extends Phaser.Scene {
       repeat: -1,
     });
 
-    this.input.once('pointerdown', () => this.scene.start('Play'));
-    this.input.keyboard?.once('keydown', () => this.scene.start('Play'));
+    this.input.once('pointerdown', () => this.scene.start('Select'));
+    this.input.keyboard?.once('keydown', () => this.scene.start('Select'));
   }
 }

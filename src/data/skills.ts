@@ -1,64 +1,19 @@
 import type { Skill } from '@/engine/support';
+import { WEAPON_LIST } from '@/data/weapons';
 
 /**
- * 스킬 데이터.
+ * 스킬 목록.
  *
- * M3에서는 엔진을 검증할 최소 2종만 둔다.
- * 투사체 계열 하나, 지대 계열 하나로 세 엔진이 모두 걸린다.
- * 무기 4종의 기본 공격과 콤보 발동 스킬은 M5 콘텐츠 단계에서 채운다.
+ * 스킬은 무기에 속하므로 `weapons.ts`가 유일한 정의처다.
+ * 여기서는 무기 정의에서 스킬만 펼쳐 놓아, 데이터 무결성 검사처럼
+ * 전체 스킬을 훑어야 하는 곳에서 쓰게 한다.
  */
 
-/**
- * 활의 기본 공격. 투사체 보조능력이 붙는다.
- *
- * 슬롯이 3개인 이유: 원안은 스킬당 보조젬 2개지만, M4 MVP는 플레이어가
- * 스킬 하나만 쓰는데 웨이브가 3개라 선택 기회도 3번이다. 슬롯이 2개면
- * 세 번째 선택이 죽는다. M5에서 무기 2종을 동시에 들게 되면
- * 스킬당 2슬롯 × 2무기 = 4슬롯이 되므로 원안 값으로 되돌린다.
- */
-export const ARROW_SHOT: Skill = {
-  id: 'arrow-shot',
-  name: '화살 사격',
-  tags: ['공격', '투사체', '물리'],
-  base: {
-    damage: 100,
-    projectileCount: 1,
-    projectileSpeed: 420,
-  },
-  supportSlots: 3,
-};
+export const SKILLS: readonly Skill[] = WEAPON_LIST.flatMap((weapon) => [
+  weapon.basic,
+  weapon.combo,
+]);
 
-/** 검의 콤보 발동 스킬. 원안의 '멸검'. 지대 보조능력이 붙는다. */
-export const ANNIHILATION = {
-  id: 'annihilation',
-  name: '멸검',
-  tags: ['공격', '지대', '물리', '지속시간'],
-  base: {
-    damage: 24,
-    areaRadius: 90,
-    duration: 2,
-    tickInterval: 0.5,
-  },
-  supportSlots: 2,
-} as const satisfies Skill;
-
-/**
- * 검의 콤보 발동 스킬. 원안의 '꿰뚫기'.
- * 중첩 보조능력이 붙는 유일한 스킬이라, 중첩 계열 수정자의 검증 대상이다.
- *
- * 원안: "공격 명중 시 적에게 꿰뚫기 중첩 1회(무한 지속시간).
- *        최대중첩 시 폭발. 폭발 후 적에게 걸린 중첩 절반 상실.
- *        폭발 피해에 중첩 당 물리 피해 추가. 기본최대중첩 4"
- */
-export const IMPALE = {
-  id: 'impale',
-  name: '꿰뚫기',
-  tags: ['공격', '파괴', '물리', '중첩'],
-  base: {
-    damage: 30,
-    maxStacks: 4,
-  },
-  supportSlots: 2,
-} as const satisfies Skill;
-
-export const SKILLS: readonly Skill[] = [ARROW_SHOT, ANNIHILATION, IMPALE];
+export function findSkill(id: string): Skill | undefined {
+  return SKILLS.find((skill) => skill.id === id);
+}

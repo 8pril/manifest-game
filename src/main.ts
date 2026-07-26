@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@/config';
 import { BootScene } from '@/scenes/BootScene';
+import { SelectScene } from '@/scenes/SelectScene';
 import { PlayScene } from '@/scenes/PlayScene';
 
 /**
@@ -8,7 +9,7 @@ import { PlayScene } from '@/scenes/PlayScene';
  * 특정 화면을 반복 확인할 때 클릭 단계를 없애기 위한 장치이며,
  * 값이 없거나 모르는 이름이면 평소대로 타이틀부터 시작한다.
  */
-const SCENES = [BootScene, PlayScene];
+const SCENES = [BootScene, SelectScene, PlayScene];
 const requested = new URLSearchParams(location.search).get('scene');
 const startIndex = SCENES.findIndex((s) => s.name === `${requested}Scene`);
 const scene = startIndex > 0 ? [SCENES[startIndex], ...SCENES.filter((_, i) => i !== startIndex)] : SCENES;
