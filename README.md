@@ -8,7 +8,7 @@ NHN **NAN 2026 (Next AI Network) Game × AI Hackathon** 사전 과제 제출물�
 
 브라우저에서 바로 실행됩니다. 설치가 필요 없습니다.
 
-- 플레이 링크: (배포 후 기입)
+- **플레이 링크: https://8pril.github.io/nan2026-game/**
 
 | 입력 | 동작 |
 | --- | --- |

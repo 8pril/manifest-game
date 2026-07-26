@@ -249,3 +249,18 @@ AI를 사용한 모든 의사결정, 프롬프트, 결과, 사람의 검토 및 
 - 게임/문서 반영 여부: 코드와 문서 모두에 반영
 - 관련 파일: `package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`, `README.md`, `src/main.ts`, `src/config.ts`, `src/scenes/BootScene.ts`, `src/scenes/PlayScene.ts`
 - 남은 이슈: GitHub 원격 저장소 생성 및 Pages 배포 검증. 이후 M3 엔진 3종(태그 시스템, 수정자 파이프라인, 투사체·지대) 골격 구현
+
+### 2026-07-26 - GitHub Pages 배포 검증 완료 (M2)
+
+- 단계: Phase 1 프로젝트 세팅 / M2
+- 사용 AI 도구: Claude Code (Opus 5)
+- 목적: 게임 로직을 채우기 전에 배포 경로를 먼저 뚫어, 제출 불가 리스크를 조기에 제거
+- 입력 프롬프트 / 지시: "저장소 이름 정해줘. 공개로.", "nan으로 하자", "git@github.com:8pril/nan2026-game.git", "\"GitHub Actions\"로 바꿨어"
+- AI 출력 요약: 저장소 이름을 `nan2026-game`으로 제안. 근거는 (1) 게임 제목이 미정인 상태에서 제목 기반 이름을 쓰면 제목 변경 시 Pages URL이 깨지는데 그 URL은 신청 폼과 PDF에 들어가 심사 종료까지 유지되어야 함 (2) 주최사명 NHN을 개인 계정 공개 저장소 이름에 쓰면 NHN 소유 프로젝트로 오인될 수 있고, 약관 제4조의 '참가자 본인의 순수 창작물' 조건과 어긋나 보일 수 있음. NAN 2026은 회사명이 아닌 대회명이므로 문제없음
+- 사람이 검토한 기준: 저장소 이름 후보 중 NHN 포함 여부를 직접 검토한 뒤 `nan2026-game` 채택. 공개 저장소로 결정
+- 수정한 내용: `.github/workflows/deploy.yml` 작성 (build 잡에서 `npm ci` + `npm run build`로 타입 검사까지 수행, `concurrency.cancel-in-progress: false`로 심사 기간 중 링크가 비는 상황 방지). README와 액션 트래커에 플레이 링크 기입
+- 검증 방법: 첫 배포는 Pages Source가 기본값(브랜치 배포)이어서 deploy 잡이 실패했고, build 잡은 성공하여 clean install 기준 툴체인 정상 동작을 확인. 사람이 Source를 GitHub Actions로 전환한 뒤 빈 커밋으로 재트리거하여 배포 성공. 배포된 URL을 헤드리스 Chrome으로 접속해 타이틀 화면 렌더링을 스크린샷으로 확인
+- 사람이 직접 수행한 작업: GitHub 저장소 생성, Pages Source 설정. `gh` CLI가 없고 이 세션에서 GitHub 로그인을 진행할 수 없어 AI가 수행할 수 없는 범위였음. push는 로컬에 이미 등록된 SSH 키로 수행
+- 게임/문서 반영 여부: 코드와 문서 모두에 반영
+- 관련 파일: `.github/workflows/deploy.yml`, `README.md`, `docs/action-tracker.md`
+- 남은 이슈: M3 엔진 3종 골격 구현. 게임 제목이 아직 미정이며 게임 소개 문서의 필수 항목이므로 기획 담당이 결정해야 함
