@@ -21,9 +21,11 @@ export const WAVES: readonly WaveDef[] = [
     offersSupport: true,
   },
   {
+    // 사수가 처음 등장한다. 여기서부터 거리를 벌리는 것만으로는 안전하지 않다.
     label: '웨이브 2',
     spawns: [
-      { kind: 'chaser', count: 7 },
+      { kind: 'chaser', count: 6 },
+      { kind: 'archer', count: 2 },
       { kind: 'brute', count: 1 },
     ],
     offersSupport: true,
@@ -31,8 +33,9 @@ export const WAVES: readonly WaveDef[] = [
   {
     label: '웨이브 3',
     spawns: [
-      { kind: 'chaser', count: 8 },
-      { kind: 'brute', count: 3 },
+      { kind: 'chaser', count: 7 },
+      { kind: 'archer', count: 3 },
+      { kind: 'brute', count: 2 },
     ],
     offersSupport: true,
   },
@@ -41,6 +44,7 @@ export const WAVES: readonly WaveDef[] = [
     spawns: [
       { kind: 'boss', count: 1 },
       { kind: 'chaser', count: 4 },
+      { kind: 'archer', count: 2 },
     ],
     offersSupport: false,
   },

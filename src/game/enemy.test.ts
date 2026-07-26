@@ -1,0 +1,111 @@
+import { describe, it, expect } from 'vitest';
+import {
+  createEnemy,
+  desiredDirection,
+  readyToFire,
+  markFired,
+  enemySpeed,
+  resetEnemyIds,
+  ENEMY_STATS,
+  HINDER_SPEED_FACTOR,
+} from '@/game/enemy';
+import { beforeEach } from 'vitest';
+
+beforeEach(() => resetEnemyIds());
+
+const player = { x: 0, y: 0 };
+
+describe('desiredDirection - 추적형', () => {
+  it('플레이어를 향해 곧장 온다', () => {
+    const enemy = createEnemy('chaser', 100, 0);
+    expect(desiredDirection(enemy, player)).toEqual({ x: -1, y: 0 });
+  });
+
+  it('같은 자리에 겹치면 움직이지 않는다', () => {
+    const enemy = createEnemy('chaser', 0, 0);
+    expect(desiredDirection(enemy, player)).toBeNull();
+  });
+});
+
+describe('desiredDirection - 원거리형', () => {
+  const preferred = ENEMY_STATS.archer.preferredRange!;
+
+  it('너무 가까우면 물러난다', () => {
+    const enemy = createEnemy('archer', 50, 0);
+    const direction = desiredDirection(enemy, player)!;
+    // 플레이어 반대 방향(+x)으로 간다
+    expect(direction.x).toBeGreaterThan(0);
+  });
+
+  it('너무 멀면 다가온다', () => {
+    const enemy = createEnemy('archer', preferred * 2, 0);
+    const direction = desiredDirection(enemy, player)!;
+    expect(direction.x).toBeLessThan(0);
+  });
+
+  it('적정 거리에서는 옆으로 돈다', () => {
+    // 멈춰서 쏘면 맞히기 쉬워지므로 항상 움직여야 한다.
+    const enemy = createEnemy('archer', preferred, 0);
+    const direction = desiredDirection(enemy, player)!;
+    expect(Math.abs(direction.x)).toBeLessThan(0.01);
+    expect(Math.abs(direction.y)).toBeCloseTo(1, 5);
+  });
+
+  it('돌려주는 방향은 단위 벡터다', () => {
+    for (const distance of [30, 200, 330, 900]) {
+      const enemy = createEnemy('archer', distance, 0);
+      const d = desiredDirection(enemy, player)!;
+      expect(Math.hypot(d.x, d.y)).toBeCloseTo(1, 10);
+    }
+  });
+});
+
+describe('readyToFire', () => {
+  it('추적형은 사격하지 않는다', () => {
+    const enemy = createEnemy('chaser', 100, 0);
+    enemy.sinceAttack = 999;
+    expect(readyToFire(enemy)).toBe(false);
+  });
+
+  it('쿨다운이 차면 사격할 수 있다', () => {
+    const enemy = createEnemy('archer', 300, 0);
+    expect(readyToFire(enemy)).toBe(false);
+
+    enemy.sinceAttack = ENEMY_STATS.archer.attackCooldown!;
+    expect(readyToFire(enemy)).toBe(true);
+  });
+
+  it('사격하면 쿨다운이 초기화된다', () => {
+    const enemy = createEnemy('archer', 300, 0);
+    enemy.sinceAttack = 99;
+    markFired(enemy);
+    expect(readyToFire(enemy)).toBe(false);
+  });
+});
+
+describe('enemySpeed', () => {
+  it('이동 방해가 걸리면 느려진다', () => {
+    const enemy = createEnemy('chaser', 0, 0);
+    const base = enemySpeed(enemy);
+    enemy.hindered = true;
+    expect(enemySpeed(enemy)).toBeCloseTo(base * HINDER_SPEED_FACTOR, 10);
+  });
+});
+
+describe('적 구성', () => {
+  it('원거리형은 사격에 필요한 값을 모두 갖는다', () => {
+    for (const stats of Object.values(ENEMY_STATS)) {
+      if (stats.behavior !== 'ranged') continue;
+      expect(stats.preferredRange).toBeGreaterThan(0);
+      expect(stats.attackCooldown).toBeGreaterThan(0);
+      expect(stats.projectileDamage).toBeGreaterThan(0);
+      expect(stats.projectileSpeed).toBeGreaterThan(0);
+    }
+  });
+
+  it('원거리형이 최소 한 종류 있다', () => {
+    // 추적형만 있으면 플레이어가 계속 도망치는 것만으로 무적이 된다.
+    const ranged = Object.values(ENEMY_STATS).filter((s) => s.behavior === 'ranged');
+    expect(ranged.length).toBeGreaterThan(0);
+  });
+});

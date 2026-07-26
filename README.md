@@ -44,7 +44,8 @@ Node 20.19 이상이 필요합니다.
 `?scene=<이름>`으로 특정 씬부터 시작할 수 있습니다. 타이틀을 건너뛰고 반복 확인할 때 사용합니다.
 
 ```
-http://localhost:5173/?scene=Play
+http://localhost:5173/?scene=Play          특정 씬부터 시작
+http://localhost:5173/?scene=Play&wave=3   특정 웨이브부터 시작
 ```
 
 ## 기술 스택

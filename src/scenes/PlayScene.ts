@@ -32,7 +32,17 @@ import {
   ARCANE_FLOW_DURATION,
   type StatusKind,
 } from '@/engine/status';
-import { ENEMY_STATS, createEnemy, enemySpeed, isAlive, resetEnemyIds, type Enemy } from '@/game/enemy';
+import {
+  ENEMY_STATS,
+  createEnemy,
+  enemySpeed,
+  isAlive,
+  resetEnemyIds,
+  desiredDirection,
+  readyToFire,
+  markFired,
+  type Enemy,
+} from '@/game/enemy';
 import { WAVES, TOTAL_WAVES } from '@/game/waves';
 import { rollOffer, type OfferItem } from '@/game/offer';
 import { leftWeapon, rightWeapon, resolveFor, describeSupports } from '@/game/loadout';
@@ -79,6 +89,8 @@ export class PlayScene extends Phaser.Scene {
   private enemies: EnemyEntity[] = [];
   private projectiles: ProjectileEntity[] = [];
   private areas: { state: Area; view: Phaser.GameObjects.Arc }[] = [];
+  /** 적이 쏜 투사체. 플레이어 투사체와 충돌 대상이 반대라 따로 관리한다. */
+  private enemyShots: { state: Projectile; view: Phaser.GameObjects.Arc; damage: number }[] = [];
 
   private hud!: Phaser.GameObjects.Text;
   private hpBarFill!: Phaser.GameObjects.Rectangle;
@@ -92,6 +104,7 @@ export class PlayScene extends Phaser.Scene {
   private arcaneFlowUntil = 0;
   private currentOffer: OfferItem[] = [];
   private weapons: { left: WeaponId; right: WeaponId } = { left: 'sword', right: 'bow' };
+  private startWaveIndex = 0;
 
   constructor() {
     super('Play');
@@ -100,6 +113,12 @@ export class PlayScene extends Phaser.Scene {
   init(data: { left?: WeaponId; right?: WeaponId }): void {
     // 씬을 직접 열었을 때(개발용 ?scene=Play)를 위한 기본값.
     this.weapons = { left: data?.left ?? 'sword', right: data?.right ?? 'bow' };
+
+    // 개발용: ?wave=2 로 특정 웨이브부터 시작한다.
+    // 후반 웨이브를 확인할 때마다 앞 웨이브를 다시 클리어하지 않아도 되게 한다.
+    const requested = Number(new URLSearchParams(location.search).get('wave'));
+    this.startWaveIndex =
+      Number.isFinite(requested) && requested >= 1 && requested <= TOTAL_WAVES ? requested - 1 : 0;
   }
 
   create(): void {
@@ -108,11 +127,12 @@ export class PlayScene extends Phaser.Scene {
     resetEnemyIds();
     this.enemies = [];
     this.projectiles = [];
+    this.enemyShots = [];
     this.areas = [];
     this.overlay = null;
     this.arcaneFlowUntil = 0;
 
-    this.run = createRun(this.weapons.left, this.weapons.right);
+    this.run = { ...createRun(this.weapons.left, this.weapons.right), waveIndex: this.startWaveIndex };
     this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
     this.right = { weapon: rightWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
 
@@ -367,6 +387,7 @@ export class PlayScene extends Phaser.Scene {
     this.updateAreas(dt);
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
+    this.updateEnemyShots(dt);
     this.checkWaveCleared();
   }
 
@@ -394,13 +415,17 @@ export class PlayScene extends Phaser.Scene {
       if (!isAlive(enemy)) continue;
 
       tickStatuses(enemy, dt);
+      enemy.sinceAttack += dt;
 
-      // 기절한 적은 움직이지 않는다.
+      // 기절한 적은 움직이지도 쏘지도 않는다.
       if (!isStunned(enemy)) {
-        const toPlayer = Math.atan2(this.player.y - enemy.y, this.player.x - enemy.x);
-        const step = enemySpeed(enemy) * dt;
-        enemy.x += Math.cos(toPlayer) * step;
-        enemy.y += Math.sin(toPlayer) * step;
+        const direction = desiredDirection(enemy, { x: this.player.x, y: this.player.y });
+        if (direction) {
+          const step = enemySpeed(enemy) * dt;
+          enemy.x = Phaser.Math.Clamp(enemy.x + direction.x * step, 20, GAME_WIDTH - 20);
+          enemy.y = Phaser.Math.Clamp(enemy.y + direction.y * step, 20, GAME_HEIGHT - 20);
+        }
+        if (readyToFire(enemy)) this.enemyFire(enemy);
       }
 
       this.syncEnemyView(entity);
@@ -424,6 +449,63 @@ export class PlayScene extends Phaser.Scene {
             return;
           }
         }
+      }
+    }
+  }
+
+  /** 원거리형 적이 플레이어를 향해 쏜다. 플레이어와 같은 투사체 엔진을 쓴다. */
+  private enemyFire(enemy: Enemy): void {
+    const stats = ENEMY_STATS[enemy.kind];
+    markFired(enemy);
+
+    const angle = Math.atan2(this.player.y - enemy.y, this.player.x - enemy.x);
+    const [state] = spawnProjectiles(
+      { damage: stats.projectileDamage ?? 10, projectileCount: 1, projectileSpeed: stats.projectileSpeed ?? 280 },
+      [],
+      { x: enemy.x, y: enemy.y },
+      angle,
+    );
+
+    this.enemyShots.push({
+      state,
+      view: this.add.circle(state.x, state.y, 6, stats.color).setDepth(8),
+      damage: stats.projectileDamage ?? 10,
+    });
+  }
+
+  /** 적 투사체를 진행시키고 플레이어 피격을 판정한다. */
+  private updateEnemyShots(dt: number): void {
+    const dashing = this.time.now < this.dashUntil;
+
+    for (let i = this.enemyShots.length - 1; i >= 0; i--) {
+      const shot = this.enemyShots[i];
+      advance(shot.state, dt);
+
+      const outOfBounds =
+        shot.state.x < -40 || shot.state.x > GAME_WIDTH + 40 || shot.state.y < -40 || shot.state.y > GAME_HEIGHT + 40;
+      const hitPlayer =
+        !dashing && Math.hypot(shot.state.x - this.player.x, shot.state.y - this.player.y) <= PLAYER_RADIUS + 6;
+
+      if (hitPlayer) {
+        const before = this.run;
+        this.run = damagePlayer(this.run, shot.damage);
+        if (this.run !== before) {
+          this.flashPlayer();
+          this.refreshHud();
+        }
+        if (this.run.phase === 'lost') {
+          shot.view.destroy();
+          this.enemyShots.splice(i, 1);
+          this.showResult(false);
+          return;
+        }
+      }
+
+      if (outOfBounds || hitPlayer) {
+        shot.view.destroy();
+        this.enemyShots.splice(i, 1);
+      } else {
+        shot.view.setPosition(shot.state.x, shot.state.y);
       }
     }
   }
