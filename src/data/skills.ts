@@ -8,7 +8,14 @@ import type { Skill } from '@/engine/support';
  * 무기 4종의 기본 공격과 콤보 발동 스킬은 M5 콘텐츠 단계에서 채운다.
  */
 
-/** 활의 기본 공격. 투사체 보조능력이 붙는다. */
+/**
+ * 활의 기본 공격. 투사체 보조능력이 붙는다.
+ *
+ * 슬롯이 3개인 이유: 원안은 스킬당 보조젬 2개지만, M4 MVP는 플레이어가
+ * 스킬 하나만 쓰는데 웨이브가 3개라 선택 기회도 3번이다. 슬롯이 2개면
+ * 세 번째 선택이 죽는다. M5에서 무기 2종을 동시에 들게 되면
+ * 스킬당 2슬롯 × 2무기 = 4슬롯이 되므로 원안 값으로 되돌린다.
+ */
 export const ARROW_SHOT: Skill = {
   id: 'arrow-shot',
   name: '화살 사격',
@@ -18,7 +25,7 @@ export const ARROW_SHOT: Skill = {
     projectileCount: 1,
     projectileSpeed: 420,
   },
-  supportSlots: 2,
+  supportSlots: 3,
 };
 
 /** 검의 콤보 발동 스킬. 원안의 '멸검'. 지대 보조능력이 붙는다. */

@@ -113,12 +113,14 @@ describe('실제 조합 결과', () => {
     expect(resolved.stats.damage).toBeCloseTo(24 / 1.2, 10);
   });
 
-  it('슬롯 2개를 넘는 조합은 세 번째가 거부된다', () => {
-    const three = SUPPORTS.filter((s) =>
-      ['multiple-projectiles', 'pierce', 'chain'].includes(s.id),
-    );
-    const resolved = resolveSkill(ARROW_SHOT, three);
-    expect(resolved.supports).toHaveLength(2);
+  it('슬롯 수를 넘는 조합은 초과분이 거부된다', () => {
+    // 슬롯 수는 밸런스에 따라 바뀌므로 스킬에서 읽는다.
+    const attachable = SUPPORTS.filter((s) => canAttach(ARROW_SHOT, s).ok);
+    const overflow = attachable.slice(0, ARROW_SHOT.supportSlots + 1);
+    expect(overflow.length).toBeGreaterThan(ARROW_SHOT.supportSlots);
+
+    const resolved = resolveSkill(ARROW_SHOT, overflow);
+    expect(resolved.supports).toHaveLength(ARROW_SHOT.supportSlots);
     expect(resolved.rejected).toHaveLength(1);
   });
 });
