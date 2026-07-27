@@ -11,6 +11,7 @@ import {
   type Projectile,
 } from '@/engine/projectile';
 import { targetsInArc } from '@/engine/melee';
+import { applyKnockback } from '@/engine/knockback';
 import {
   createArea,
   tickArea,
@@ -55,6 +56,8 @@ const DASH_DURATION_MS = 130;
 const DASH_COOLDOWN_MS = 900;
 const PLAYER_RADIUS = 14;
 const STATUS_ORDER: StatusKind[] = ['wound', 'exposed', 'brand', 'fracture'];
+/** 벽까지 밀린 적이 받는 추가 피해. */
+const WALL_SLAM_DAMAGE = 40;
 
 interface EnemyEntity {
   state: Enemy;
@@ -95,6 +98,8 @@ export class PlayScene extends Phaser.Scene {
   private hud!: Phaser.GameObjects.Text;
   private hpBarFill!: Phaser.GameObjects.Rectangle;
   private comboText!: Phaser.GameObjects.Text;
+  /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
+  private comboRings!: { left: Phaser.GameObjects.Arc; right: Phaser.GameObjects.Arc };
   private overlay: Phaser.GameObjects.Container | null = null;
 
   private keys!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
@@ -140,6 +145,12 @@ export class PlayScene extends Phaser.Scene {
 
     this.player = this.add.circle(GAME_WIDTH / 2, GAME_HEIGHT / 2, PLAYER_RADIUS, COLORS.player).setDepth(10);
     this.aimLine = this.add.line(0, 0, 0, 0, 0, 0, COLORS.accent).setOrigin(0, 0).setLineWidth(2).setDepth(9);
+
+    // 콤보가 차면 숫자를 읽지 않아도 알 수 있게 플레이어에 링을 띄운다.
+    this.comboRings = {
+      left: this.add.circle(0, 0, 24).setStrokeStyle(3, this.left.weapon.color).setDepth(11).setVisible(false),
+      right: this.add.circle(0, 0, 30).setStrokeStyle(3, this.right.weapon.color).setDepth(11).setVisible(false),
+    };
 
     this.buildHud();
     this.bindInput();
@@ -255,12 +266,34 @@ export class PlayScene extends Phaser.Scene {
   ): void {
     const range = stats.meleeRange ?? 90;
     const arc = stats.meleeArc ?? 1.7;
+    const duration = runtime.weapon.swingDuration || 140;
 
-    // 휘두른 범위를 짧게 보여준다.
+    // 무기 성격을 연출로 드러낸다.
+    // 검은 짧고 빠르게 스쳐 지나가고, 방패는 느리게 밀고 나간다.
     const wedge = this.add
-      .arc(this.player.x, this.player.y, range, Phaser.Math.RadToDeg(angle - arc / 2), Phaser.Math.RadToDeg(angle + arc / 2), false, runtime.weapon.color, 0.3)
+      .arc(
+        this.player.x,
+        this.player.y,
+        range,
+        Phaser.Math.RadToDeg(angle - arc / 2),
+        Phaser.Math.RadToDeg(angle + arc / 2),
+        false,
+        runtime.weapon.color,
+        0.32,
+      )
       .setDepth(7);
-    this.tweens.add({ targets: wedge, alpha: 0, duration: 160, onComplete: () => wedge.destroy() });
+
+    const heavy = (stats.knockback ?? 0) > 60;
+    wedge.setScale(heavy ? 0.55 : 1);
+    this.tweens.add({
+      targets: wedge,
+      // 무거운 무기는 범위가 밀고 나가듯 커지고, 가벼운 무기는 그대로 스러진다.
+      scale: heavy ? 1 : 1.08,
+      alpha: 0,
+      duration,
+      ease: heavy ? 'Quad.easeOut' : 'Cubic.easeIn',
+      onComplete: () => wedge.destroy(),
+    });
 
     const targets = targetsInArc(
       { origin: { x: this.player.x, y: this.player.y }, angle, range, arc },
@@ -269,8 +302,37 @@ export class PlayScene extends Phaser.Scene {
 
     for (const target of targets) {
       const entity = this.enemies.find((e) => e.state.id === target.id);
-      if (entity) this.resolveHit(entity, stats.damage ?? 0, runtime.weapon, basic, runtime);
+      if (!entity) continue;
+
+      this.resolveHit(entity, stats.damage ?? 0, runtime.weapon, basic, runtime);
+      this.pushEnemy(entity, stats.knockback ?? 0);
     }
+  }
+
+  /**
+   * 적을 밀어낸다. 벽까지 밀리면 추가 피해와 확정 기절을 준다.
+   * 방패의 정체성이 수치가 아니라 이 동작에서 나온다.
+   */
+  private pushEnemy(entity: EnemyEntity, distance: number): void {
+    if (distance <= 0 || !isAlive(entity.state)) return;
+
+    const radius = ENEMY_STATS[entity.state.kind].radius;
+    const result = applyKnockback(
+      { x: this.player.x, y: this.player.y },
+      entity.state,
+      distance,
+      { minX: radius, minY: radius, maxX: GAME_WIDTH - radius, maxY: GAME_HEIGHT - radius },
+    );
+
+    entity.state.x = result.x;
+    entity.state.y = result.y;
+
+    if (result.hitWall) {
+      // 벽꿍. 확률 판정을 건너뛰고 확정으로 건다.
+      applyStatus(entity.state, 'fracture', Math.random, true);
+      this.damageEnemy(entity, WALL_SLAM_DAMAGE);
+    }
+    this.syncEnemyView(entity);
   }
 
   private dropArea(
@@ -384,6 +446,7 @@ export class PlayScene extends Phaser.Scene {
 
     this.movePlayer(dt);
     this.updateAim();
+    this.updateComboRings();
     this.updateAreas(dt);
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
@@ -400,6 +463,20 @@ export class PlayScene extends Phaser.Scene {
     const step = (dashing ? DASH_SPEED : MOVE_SPEED) * dt;
     this.player.x = Phaser.Math.Clamp(this.player.x + direction.x * step, PLAYER_RADIUS, GAME_WIDTH - PLAYER_RADIUS);
     this.player.y = Phaser.Math.Clamp(this.player.y + direction.y * step, PLAYER_RADIUS, GAME_HEIGHT - PLAYER_RADIUS);
+  }
+
+  private updateComboRings(): void {
+    for (const [side, runtime] of [['left', this.left], ['right', this.right]] as const) {
+      const ring = this.comboRings[side];
+      const ready = isComboReady(runtime.combo);
+      ring.setVisible(ready);
+      if (!ready) continue;
+
+      ring.setPosition(this.player.x, this.player.y);
+      // 회전하는 대신 맥동시켜 준비 상태를 눈에 띄게 한다.
+      const pulse = 1 + Math.sin(this.time.now / 110) * 0.12;
+      ring.setScale(pulse);
+    }
   }
 
   private updateAim(): void {

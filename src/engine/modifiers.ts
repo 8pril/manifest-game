@@ -23,6 +23,7 @@ export type Stat =
   | 'areaRadius'
   | 'meleeRange'
   | 'meleeArc'
+  | 'knockback'
   | 'tickInterval'
   | 'maxStacks'
   | 'comboGain'

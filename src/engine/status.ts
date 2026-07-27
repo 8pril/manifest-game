@@ -82,11 +82,13 @@ export function applyStatus(
   host: StatusHost,
   kind: StatusKind,
   random: () => number = Math.random,
+  /** 확률 판정을 건너뛴다. 벽 충돌처럼 확정적으로 걸려야 하는 경우에 쓴다. */
+  force = false,
 ): ApplyResult {
   const rule = STATUS_RULES[kind];
 
   if ((host.immunity[kind] ?? 0) > 0) return { applied: false, burst: false };
-  if (rule.chance < 1 && random() >= rule.chance) return { applied: false, burst: false };
+  if (!force && rule.chance < 1 && random() >= rule.chance) return { applied: false, burst: false };
 
   const existing = findStatus(host, kind);
   if (!existing) {

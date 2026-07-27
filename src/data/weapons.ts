@@ -27,6 +27,8 @@ export interface Weapon {
   color: number;
   /** 기본 공격 간격(ms). */
   cooldown: number;
+  /** 근접 휘두르기 연출 길이(ms). 무기 성격을 동작으로 드러낸다. */
+  swingDuration: number;
 }
 
 /** 스킬이 어떻게 전달되는지를 태그에서 유도한다. */
@@ -46,11 +48,13 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'wound',
     color: 0xc9d1e8,
     cooldown: 300,
+    // 검은 짧고 빠르게 벤다.
+    swingDuration: 110,
     basic: {
       id: 'sword-slash',
       name: '베기',
       tags: ['공격', '근접', '물리', '중첩'],
-      base: { damage: 46, meleeRange: 96, meleeArc: 1.7, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 46, meleeRange: 96, meleeArc: 1.7, knockback: 18, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
     // 원안의 '멸검': n타마다 주변 적들에게 광역 장판
@@ -70,6 +74,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'exposed',
     color: 0x9ae6a0,
     cooldown: 320,
+    swingDuration: 0,
     basic: {
       id: 'arrow-shot',
       name: '화살 사격',
@@ -93,6 +98,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'brand',
     color: 0xb08bff,
     cooldown: 380,
+    swingDuration: 0,
     basic: {
       id: 'arcane-bolt',
       name: '비전 탄',
@@ -117,11 +123,13 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'fracture',
     color: 0xffc55c,
     cooldown: 420,
+    // 방패는 느리고 넓게 밀어낸다. 넉백이 검의 6배 이상이다.
+    swingDuration: 240,
     basic: {
       id: 'shield-bash',
       name: '밀치기',
       tags: ['공격', '근접', '물리'],
-      base: { damage: 38, meleeRange: 78, meleeArc: 2.4, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 38, meleeRange: 78, meleeArc: 2.4, knockback: 115, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
     combo: {
