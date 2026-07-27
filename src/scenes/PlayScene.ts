@@ -58,6 +58,14 @@ const PLAYER_RADIUS = 14;
 const STATUS_ORDER: StatusKind[] = ['wound', 'exposed', 'brand', 'fracture'];
 /** 벽까지 밀린 적이 받는 추가 피해. */
 const WALL_SLAM_DAMAGE = 40;
+/**
+ * 보조능력 선택 화면이 뜬 뒤 입력을 받기까지의 지연(ms).
+ *
+ * 전투 중 연타하던 클릭이 화면이 뜨자마자 그대로 카드에 꽂혀서,
+ * 선택지를 읽기도 전에 골라지는 문제가 있었다.
+ * 이 시간 동안 카드는 흐리게 떠 있고 입력을 받지 않는다.
+ */
+const OFFER_INPUT_DELAY = 800;
 
 interface EnemyEntity {
   state: Enemy;
@@ -108,6 +116,8 @@ export class PlayScene extends Phaser.Scene {
   private dashAngle = 0;
   private arcaneFlowUntil = 0;
   private currentOffer: OfferItem[] = [];
+  /** 이 시각 이후에야 보조능력을 고를 수 있다. */
+  private offerReadyAt = 0;
   private weapons: { left: WeaponId; right: WeaponId } = { left: 'sword', right: 'bow' };
   private startWaveIndex = 0;
 
@@ -744,6 +754,8 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
+    this.offerReadyAt = this.time.now + OFFER_INPUT_DELAY;
+
     const container = this.add.container(0, 0).setDepth(30);
     container.add(this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x0a0b0f, 0.82));
     container.add(
@@ -787,14 +799,25 @@ export class PlayScene extends Phaser.Scene {
       );
     }
 
-    container.add(
-      this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 120, '숫자키 1-3 또는 클릭', { fontSize: '15px', color: COLORS.textDim }).setOrigin(0.5),
-    );
+    const hint = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 120, '', { fontSize: '15px', color: COLORS.textDim })
+      .setOrigin(0.5);
+    container.add(hint);
+
+    // 입력을 받기 전까지는 흐리게 떠 있어서, 아직 고를 수 없다는 게 눈에 보인다.
+    container.setAlpha(0.35);
+    hint.setText('...');
+    this.tweens.add({ targets: container, alpha: 1, duration: OFFER_INPUT_DELAY, ease: 'Quad.easeOut' });
+    this.time.delayedCall(OFFER_INPUT_DELAY, () => hint.setText('숫자키 1-3 또는 클릭'));
+
     this.overlay = container;
   }
 
   private choose(index: number): void {
     if (this.run.phase !== 'offer') return;
+    // 전투 중 연타가 그대로 선택으로 이어지지 않도록 잠깐 입력을 막는다.
+    if (this.time.now < this.offerReadyAt) return;
+
     const item = this.currentOffer[index];
     if (!item) return;
 
