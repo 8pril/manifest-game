@@ -13,6 +13,7 @@
 - **배경 투명 PNG.** 배경색이 칠해져 오면 못 쓴다.
 - 배경이 거의 검정(`#0a0b0f`)에 어두운 격자다. **실루엣이 살아야 하므로 외곽이 밝아야 한다.**
 - 화면 논리 해상도는 1280×720이고, 아래 표시 크기는 그 기준이다.
+- 전투가 벌어지는 영역은 화면 전체가 아니라 `x 24~1256`, `y 100~660` 구간이다. 나머지는 HUD가 쓴다.
 
 ## 필요한 이미지
 
@@ -20,22 +21,24 @@
 
 | 파일명 | 대상 | 표시 크기 | 권장 캔버스 | 기준 색 |
 | --- | --- | --- | --- | --- |
-| `player.png` | 플레이어 | 28px | 96×96 | `#6ea8ff` 하늘색 |
-| `enemy-chaser.png` | 추적자 | 32px | 96×96 | `#d4574e` 붉은색 |
-| `enemy-brute.png` | 중장갑 | 48px | 128×128 | `#b0453d` 짙은 붉은색 |
-| `enemy-archer.png` | 사수 | 30px | 96×96 | `#e0b055` 황토색 |
-| `enemy-boss.png` | 보스 | 80px | 192×192 | `#ff6b3d` 주황색 |
+| `player.png` | 플레이어 | 40px | 128×128 | `#6ea8ff` 하늘색 |
+| `enemy-chaser.png` | 추적자 | 44px | 128×128 | `#d4574e` 붉은색 |
+| `enemy-brute.png` | 중장갑 | 68px | 192×192 | `#b0453d` 짙은 붉은색 |
+| `enemy-archer.png` | 사수 | 42px | 128×128 | `#e0b055` 황토색 |
+| `enemy-boss.png` | 보스 | 112px | 256×256 | `#ff6b3d` 주황색 |
 
 표시 크기가 작으므로 **디테일보다 실루엣이 중요하다.** 축소했을 때 뭉개지지 않는 단순한 형태로.
+
+표시 크기는 캐릭터가 화면에서 차지하는 지름이다. 권장 캔버스는 그보다 크게 잡아 여유를 두었으니, 캔버스를 꽉 채우지 말고 가장자리에 여백을 남기면 된다.
 
 ### 투사체
 
 | 파일명 | 대상 | 표시 크기 | 권장 캔버스 |
 | --- | --- | --- | --- |
-| `bolt-sword.png` | 검 계열 | 10px | 48×48 |
-| `bolt-bow.png` | 활 화살 | 10px | 48×48 |
-| `bolt-arcane.png` | 비전 탄 | 10px | 48×48 |
-| `bolt-enemy.png` | 적 탄 | 12px | 48×48 |
+| `bolt-sword.png` | 검 계열 | 14px | 64×64 |
+| `bolt-bow.png` | 활 화살 | 14px | 64×64 |
+| `bolt-arcane.png` | 비전 탄 | 14px | 64×64 |
+| `bolt-enemy.png` | 적 탄 | 16px | 64×64 |
 
 투사체도 오른쪽을 향하게. 회전해서 쓴다.
 
@@ -49,6 +52,8 @@
 | `area-chill.png` | 냉각 | `#6ec8ff` |
 
 원형이고 캔버스 256×256. **가운데가 비치고 가장자리로 갈수록 진해지는** 형태가 좋다. 적과 플레이어가 그 위에 올라가므로 너무 불투명하면 안 된다.
+
+실제 표시 지름은 멸검 230px, 균열 파동 300px이고 보조능력에 따라 더 커진다.
 
 ### 배경
 
@@ -83,28 +88,28 @@
 top-down view of a lone swordfighter game sprite, seen directly from above,
 facing right, compact silhouette, glowing cyan-blue accents (#6ea8ff),
 dark armor, clean readable shape, transparent background, no shadow,
-centered, game asset, 96x96
+centered, game asset, 128x128
 ```
 
 **추적자**
 ```
 top-down view of a small aggressive creature game sprite, seen directly from
 above, facing right, hunched forward, dull red tone (#d4574e), simple bold
-silhouette readable at small size, transparent background, no shadow, 96x96
+silhouette readable at small size, transparent background, no shadow, 128x128
 ```
 
 **중장갑**
 ```
 top-down view of a heavy armored brute game sprite, seen directly from above,
 facing right, broad and bulky, dark red plating (#b0453d), thick shoulders,
-simple readable silhouette, transparent background, no shadow, 128x128
+simple readable silhouette, transparent background, no shadow, 192x192
 ```
 
 **사수**
 ```
 top-down view of a ranged archer creature game sprite, seen directly from
 above, facing right, slender, holding a bow forward, ochre yellow (#e0b055),
-simple readable silhouette, transparent background, no shadow, 96x96
+simple readable silhouette, transparent background, no shadow, 128x128
 ```
 
 **보스**
@@ -112,14 +117,14 @@ simple readable silhouette, transparent background, no shadow, 96x96
 top-down view of a large menacing boss creature game sprite, seen directly
 from above, facing right, imposing mass, burning orange core (#ff6b3d),
 dark carapace, dramatic but readable silhouette, transparent background,
-no shadow, 192x192
+no shadow, 256x256
 ```
 
 **투사체 (색만 바꿔 반복)**
 ```
 top-down view of a small glowing projectile, pointing right, elongated
 teardrop shape, bright core with soft outer glow, color #9ae6a0,
-transparent background, centered, 48x48
+transparent background, centered, 64x64
 ```
 
 **지대 (색만 바꿔 반복)**

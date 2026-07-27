@@ -54,7 +54,20 @@ const MOVE_SPEED = 300;
 const DASH_SPEED = 900;
 const DASH_DURATION_MS = 130;
 const DASH_COOLDOWN_MS = 900;
-const PLAYER_RADIUS = 14;
+const PLAYER_RADIUS = 20;
+/**
+ * 실제 전투가 벌어지는 영역.
+ *
+ * HUD가 위쪽(체력·웨이브·조작 안내)과 아래쪽(콤보 게이지)을 쓰므로,
+ * 적과 플레이어가 그 위로 올라오면 글자와 겹쳐 둘 다 읽기 어려워진다.
+ * 개체가 커질수록 눈에 띄어서 영역을 분리했다.
+ */
+const PLAYFIELD = {
+  minX: 24,
+  minY: 100,
+  maxX: GAME_WIDTH - 24,
+  maxY: GAME_HEIGHT - 60,
+};
 const STATUS_ORDER: StatusKind[] = ['wound', 'exposed', 'brand', 'fracture'];
 /** 벽까지 밀린 적이 받는 추가 피해. */
 const WALL_SLAM_DAMAGE = 40;
@@ -152,14 +165,26 @@ export class PlayScene extends Phaser.Scene {
     this.right = { weapon: rightWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
 
     this.add.grid(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 64, 64, COLORS.background, 1, 0x1b1e2b, 1);
+    // 전장 경계. 어디까지 움직일 수 있는지 보이게 한다.
+    this.add
+      .rectangle(
+        (PLAYFIELD.minX + PLAYFIELD.maxX) / 2,
+        (PLAYFIELD.minY + PLAYFIELD.maxY) / 2,
+        PLAYFIELD.maxX - PLAYFIELD.minX,
+        PLAYFIELD.maxY - PLAYFIELD.minY,
+      )
+      .setStrokeStyle(1, 0x2a2f42)
+      .setDepth(0);
 
-    this.player = this.add.circle(GAME_WIDTH / 2, GAME_HEIGHT / 2, PLAYER_RADIUS, COLORS.player).setDepth(10);
+    this.player = this.add
+      .circle(GAME_WIDTH / 2, (PLAYFIELD.minY + PLAYFIELD.maxY) / 2, PLAYER_RADIUS, COLORS.player)
+      .setDepth(10);
     this.aimLine = this.add.line(0, 0, 0, 0, 0, 0, COLORS.accent).setOrigin(0, 0).setLineWidth(2).setDepth(9);
 
     // 콤보가 차면 숫자를 읽지 않아도 알 수 있게 플레이어에 링을 띄운다.
     this.comboRings = {
-      left: this.add.circle(0, 0, 24).setStrokeStyle(3, this.left.weapon.color).setDepth(11).setVisible(false),
-      right: this.add.circle(0, 0, 30).setStrokeStyle(3, this.right.weapon.color).setDepth(11).setVisible(false),
+      left: this.add.circle(0, 0, 32).setStrokeStyle(3, this.left.weapon.color).setDepth(11).setVisible(false),
+      right: this.add.circle(0, 0, 40).setStrokeStyle(3, this.right.weapon.color).setDepth(11).setVisible(false),
     };
 
     this.buildHud();
@@ -260,7 +285,7 @@ export class PlayScene extends Phaser.Scene {
     for (const state of spawnProjectiles(stats, behaviors, { x: this.player.x, y: this.player.y }, angle)) {
       this.projectiles.push({
         state,
-        view: this.add.circle(state.x, state.y, 5, weapon.color).setDepth(8),
+        view: this.add.circle(state.x, state.y, 7, weapon.color).setDepth(8),
         weapon,
         basic,
       });
@@ -331,7 +356,12 @@ export class PlayScene extends Phaser.Scene {
       { x: this.player.x, y: this.player.y },
       entity.state,
       distance,
-      { minX: radius, minY: radius, maxX: GAME_WIDTH - radius, maxY: GAME_HEIGHT - radius },
+      {
+        minX: PLAYFIELD.minX + radius,
+        minY: PLAYFIELD.minY + radius,
+        maxX: PLAYFIELD.maxX - radius,
+        maxY: PLAYFIELD.maxY - radius,
+      },
     );
 
     entity.state.x = result.x;
@@ -408,10 +438,10 @@ export class PlayScene extends Phaser.Scene {
         const stats = ENEMY_STATS[enemy.kind];
 
         const view = this.add.rectangle(enemy.x, enemy.y, stats.radius * 2, stats.radius * 2, stats.color).setDepth(5);
-        const hpBar = this.add.rectangle(enemy.x, enemy.y - stats.radius - 7, stats.radius * 2, 3, 0x6ee7a8).setDepth(6);
+        const hpBar = this.add.rectangle(enemy.x, enemy.y - stats.radius - 9, stats.radius * 2, 4, 0x6ee7a8).setDepth(6);
         const statusDots = STATUS_ORDER.map((kind, index) =>
           this.add
-            .rectangle(enemy.x + (index - 1.5) * 7, enemy.y - stats.radius - 14, 5, 5, STATUS_COLORS[kind])
+            .rectangle(enemy.x + (index - 1.5) * 9, enemy.y - stats.radius - 16, 5, 5, STATUS_COLORS[kind])
             .setDepth(6)
             .setVisible(false),
         );
@@ -426,11 +456,17 @@ export class PlayScene extends Phaser.Scene {
     for (let attempt = 0; attempt < 12; attempt++) {
       const onVertical = Math.random() < 0.5;
       const point = onVertical
-        ? { x: Math.random() < 0.5 ? 40 : GAME_WIDTH - 40, y: Phaser.Math.Between(40, GAME_HEIGHT - 40) }
-        : { x: Phaser.Math.Between(40, GAME_WIDTH - 40), y: Math.random() < 0.5 ? 40 : GAME_HEIGHT - 40 };
+        ? {
+            x: Math.random() < 0.5 ? PLAYFIELD.minX + 30 : PLAYFIELD.maxX - 30,
+            y: Phaser.Math.Between(PLAYFIELD.minY + 30, PLAYFIELD.maxY - 30),
+          }
+        : {
+            x: Phaser.Math.Between(PLAYFIELD.minX + 30, PLAYFIELD.maxX - 30),
+            y: Math.random() < 0.5 ? PLAYFIELD.minY + 30 : PLAYFIELD.maxY - 30,
+          };
       if (Math.hypot(point.x - this.player.x, point.y - this.player.y) > 220) return point;
     }
-    return { x: 40, y: 40 };
+    return { x: PLAYFIELD.minX + 30, y: PLAYFIELD.minY + 30 };
   }
 
   private checkWaveCleared(): void {
@@ -471,8 +507,16 @@ export class PlayScene extends Phaser.Scene {
     if (!direction) return;
 
     const step = (dashing ? DASH_SPEED : MOVE_SPEED) * dt;
-    this.player.x = Phaser.Math.Clamp(this.player.x + direction.x * step, PLAYER_RADIUS, GAME_WIDTH - PLAYER_RADIUS);
-    this.player.y = Phaser.Math.Clamp(this.player.y + direction.y * step, PLAYER_RADIUS, GAME_HEIGHT - PLAYER_RADIUS);
+    this.player.x = Phaser.Math.Clamp(
+      this.player.x + direction.x * step,
+      PLAYFIELD.minX + PLAYER_RADIUS,
+      PLAYFIELD.maxX - PLAYER_RADIUS,
+    );
+    this.player.y = Phaser.Math.Clamp(
+      this.player.y + direction.y * step,
+      PLAYFIELD.minY + PLAYER_RADIUS,
+      PLAYFIELD.maxY - PLAYER_RADIUS,
+    );
   }
 
   private updateComboRings(): void {
@@ -509,8 +553,9 @@ export class PlayScene extends Phaser.Scene {
         const direction = desiredDirection(enemy, { x: this.player.x, y: this.player.y });
         if (direction) {
           const step = enemySpeed(enemy) * dt;
-          enemy.x = Phaser.Math.Clamp(enemy.x + direction.x * step, 20, GAME_WIDTH - 20);
-          enemy.y = Phaser.Math.Clamp(enemy.y + direction.y * step, 20, GAME_HEIGHT - 20);
+          const radius = ENEMY_STATS[enemy.kind].radius;
+          enemy.x = Phaser.Math.Clamp(enemy.x + direction.x * step, PLAYFIELD.minX + radius, PLAYFIELD.maxX - radius);
+          enemy.y = Phaser.Math.Clamp(enemy.y + direction.y * step, PLAYFIELD.minY + radius, PLAYFIELD.maxY - radius);
         }
         if (readyToFire(enemy)) this.enemyFire(enemy);
       }
@@ -555,7 +600,7 @@ export class PlayScene extends Phaser.Scene {
 
     this.enemyShots.push({
       state,
-      view: this.add.circle(state.x, state.y, 6, stats.color).setDepth(8),
+      view: this.add.circle(state.x, state.y, 8, stats.color).setDepth(8),
       damage: stats.projectileDamage ?? 10,
     });
   }
@@ -571,7 +616,7 @@ export class PlayScene extends Phaser.Scene {
       const outOfBounds =
         shot.state.x < -40 || shot.state.x > GAME_WIDTH + 40 || shot.state.y < -40 || shot.state.y > GAME_HEIGHT + 40;
       const hitPlayer =
-        !dashing && Math.hypot(shot.state.x - this.player.x, shot.state.y - this.player.y) <= PLAYER_RADIUS + 6;
+        !dashing && Math.hypot(shot.state.x - this.player.x, shot.state.y - this.player.y) <= PLAYER_RADIUS + 8;
 
       if (hitPlayer) {
         const before = this.run;
@@ -603,12 +648,12 @@ export class PlayScene extends Phaser.Scene {
 
     entity.view.setPosition(enemy.x, enemy.y);
     entity.view.setAlpha(isStunned(enemy) ? 0.5 : 1);
-    entity.hpBar.setPosition(enemy.x, enemy.y - radius - 7);
+    entity.hpBar.setPosition(enemy.x, enemy.y - radius - 9);
 
     for (const [index, kind] of STATUS_ORDER.entries()) {
       const dot = entity.statusDots[index];
       dot.setVisible(hasStatus(enemy, kind));
-      dot.setPosition(enemy.x + (index - 1.5) * 7, enemy.y - radius - 14);
+      dot.setPosition(enemy.x + (index - 1.5) * 9, enemy.y - radius - 16);
     }
   }
 
@@ -660,7 +705,7 @@ export class PlayScene extends Phaser.Scene {
           for (const spawned of outcome.spawned) {
             this.projectiles.push({
               state: spawned,
-              view: this.add.circle(spawned.x, spawned.y, 5, entity.weapon.color).setDepth(8),
+              view: this.add.circle(spawned.x, spawned.y, 7, entity.weapon.color).setDepth(8),
               weapon: entity.weapon,
               basic: entity.basic,
             });
