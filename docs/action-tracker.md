@@ -233,7 +233,7 @@
 **여기서 개발을 멈추고 플레이 테스트로 넘긴다.** 이후 폴리싱 항목은
 실제 플레이 피드백을 받아서 정한다. 지금 추측으로 손대면 헛일이 된다.
 
-인계 문서: `docs/playtest-brief.md`
+인계 문서: `docs/playtest-brief.md`, `docs/art-spec.md`
 
 기획 담당이 확인할 것:
 
