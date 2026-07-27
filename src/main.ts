@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@/config';
+import { CANVAS_WIDTH, CANVAS_HEIGHT, COLORS } from '@/config';
 import { BootScene } from '@/scenes/BootScene';
 import { SelectScene } from '@/scenes/SelectScene';
 import { PlayScene } from '@/scenes/PlayScene';
@@ -17,8 +17,9 @@ const scene = startIndex > 0 ? [SCENES[startIndex], ...SCENES.filter((_, i) => i
 new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
-  width: GAME_WIDTH,
-  height: GAME_HEIGHT,
+  // 월드는 1280x720이지만 백버퍼는 그보다 크게 잡는다. 이유는 config.ts 참고.
+  width: CANVAS_WIDTH,
+  height: CANVAS_HEIGHT,
   backgroundColor: COLORS.background,
   // FIT + CENTER_BOTH: 데스크톱 우선이지만 모바일 브라우저에서 열어도
   // 캔버스가 화면에 맞춰 축소되어 레이아웃이 깨지지 않는다.

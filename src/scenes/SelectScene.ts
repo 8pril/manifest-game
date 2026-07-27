@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { applyRenderScale } from '@/render';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@/config';
 import { WEAPON_LIST, type WeaponId } from '@/data/weapons';
 import { STATUS_RULES } from '@/engine/status';
@@ -27,6 +28,7 @@ export class SelectScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyRenderScale(this);
     this.picked = [];
     this.cards = [];
 

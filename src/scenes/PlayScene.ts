@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { applyRenderScale } from '@/render';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { SUPPORTS } from '@/data/supports';
 import { deliveryOf, type Weapon, type WeaponId } from '@/data/weapons';
@@ -150,6 +151,7 @@ export class PlayScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyRenderScale(this);
     resetProjectileIds();
     resetAreaIds();
     resetEnemyIds();

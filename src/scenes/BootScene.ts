@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { applyRenderScale } from '@/render';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@/config';
 
 /**
@@ -11,6 +12,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyRenderScale(this);
     const cx = GAME_WIDTH / 2;
 
     this.add
