@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { applyRenderScale } from '@/render';
-import { ring, flash, floatingNumber, impact } from '@/effects';
+import { ring, flash, floatingText, impact } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { SUPPORTS } from '@/data/supports';
@@ -388,7 +388,8 @@ export class PlayScene extends Phaser.Scene {
       applyStatus(entity.state, 'fracture', Math.random, true);
       this.ruleEvents.wallSlam++;
       impact(this, entity.state.x, entity.state.y);
-      floatingNumber(this, entity.state.x, entity.state.y, `+${WALL_SLAM_DAMAGE}`, '#ffe08a');
+      const slamRadius = ENEMY_STATS[entity.state.kind].radius;
+      floatingText(this, entity.state.x, entity.state.y - slamRadius - 12, `벽 충돌 ${WALL_SLAM_DAMAGE}`, '#ffe08a');
       this.damageEnemy(entity, WALL_SLAM_DAMAGE);
     }
     this.syncEnemyView(entity);
@@ -432,7 +433,7 @@ export class PlayScene extends Phaser.Scene {
         this.arcaneFlowUntil = this.time.now + ARCANE_FLOW_DURATION * 1000;
         this.ruleEvents.brand++;
         ring(this, enemy.x, enemy.y, BRAND_COLOR, { to: 110, duration: 420 });
-        floatingNumber(this, this.player.x, this.player.y - 24, '비전 흐름', '#c9a8ff');
+        floatingText(this, this.player.x, this.player.y - 24, '비전 흐름', '#c9a8ff');
       }
 
       const result = applyStatus(enemy, weapon.status);
@@ -443,7 +444,8 @@ export class PlayScene extends Phaser.Scene {
         const radius = ENEMY_STATS[enemy.kind].radius;
         ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 3.2 });
         flash(this, enemy.x, enemy.y, radius * 2.2, BURST_COLOR);
-        floatingNumber(this, enemy.x, enemy.y, `+${WOUND_BURST_DAMAGE}`, '#ff9b9b');
+        // 플래시와 겹치지 않도록 적 위쪽에서 띄운다. 가장 읽혀야 할 순간이다.
+        floatingText(this, enemy.x, enemy.y - radius - 12, `상처 폭발 ${WOUND_BURST_DAMAGE}`, '#ff9b9b');
       }
 
       if (runtime) {
