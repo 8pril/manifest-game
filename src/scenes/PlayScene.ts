@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { applyRenderScale } from '@/render';
 import { ring, flash, floatingNumber, impact } from '@/effects';
+import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { SUPPORTS } from '@/data/supports';
 import { deliveryOf, type Weapon, type WeaponId } from '@/data/weapons';
@@ -136,6 +137,8 @@ export class PlayScene extends Phaser.Scene {
   private dashAngle = 0;
   private arcaneFlowUntil = 0;
   private currentOffer: OfferItem[] = [];
+  /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
+  private ruleEvents = { burst: 0, wallSlam: 0, brand: 0 };
   /** 이 시각 이후에야 보조능력을 고를 수 있다. */
   private offerReadyAt = 0;
   private weapons: { left: WeaponId; right: WeaponId } = { left: 'sword', right: 'bow' };
@@ -383,6 +386,7 @@ export class PlayScene extends Phaser.Scene {
     if (result.hitWall) {
       // 벽꿍. 확률 판정을 건너뛰고 확정으로 건다.
       applyStatus(entity.state, 'fracture', Math.random, true);
+      this.ruleEvents.wallSlam++;
       impact(this, entity.state.x, entity.state.y);
       floatingNumber(this, entity.state.x, entity.state.y, `+${WALL_SLAM_DAMAGE}`, '#ffe08a');
       this.damageEnemy(entity, WALL_SLAM_DAMAGE);
@@ -426,6 +430,7 @@ export class PlayScene extends Phaser.Scene {
       // 낙인이 걸린 적을 비전으로 때리면 낙인을 소비하고 비전 흐름을 얻는다.
       if (weapon.id === 'arcane' && consumeBrand(enemy)) {
         this.arcaneFlowUntil = this.time.now + ARCANE_FLOW_DURATION * 1000;
+        this.ruleEvents.brand++;
         ring(this, enemy.x, enemy.y, BRAND_COLOR, { to: 110, duration: 420 });
         floatingNumber(this, this.player.x, this.player.y - 24, '비전 흐름', '#c9a8ff');
       }
@@ -433,6 +438,7 @@ export class PlayScene extends Phaser.Scene {
       const result = applyStatus(enemy, weapon.status);
       if (result.burst) {
         damage += WOUND_BURST_DAMAGE;
+        this.ruleEvents.burst++;
         // 규칙상으로만 터지고 화면에는 아무것도 안 나오던 지점.
         const radius = ENEMY_STATS[enemy.kind].radius;
         ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 3.2 });
@@ -502,6 +508,8 @@ export class PlayScene extends Phaser.Scene {
     if (this.run.phase === 'offer') this.showOffer();
     else if (this.run.phase === 'won') this.showResult(true);
     else this.startWave();
+
+    if (DEBUG_ENABLED) this.publishDebug();
   }
 
   // ───────────────────────── 갱신 루프
@@ -518,11 +526,43 @@ export class PlayScene extends Phaser.Scene {
     this.updateAim();
     this.updateComboRings();
     this.updateArcaneAura();
+    if (DEBUG_ENABLED) this.publishDebug();
     this.updateAreas(dt);
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
     this.updateEnemyShots(dt);
     this.checkWaveCleared();
+  }
+
+  /** 개발 빌드에서만 상태를 노출한다. 헤드리스 검증 드라이버가 읽는다. */
+  private publishDebug(): void {
+    publishDebugState({
+      phase: this.run.phase,
+      waveIndex: this.run.waveIndex,
+      totalWaves: TOTAL_WAVES,
+      hp: this.run.hp,
+      maxHp: this.run.maxHp,
+      kills: this.run.kills,
+      elapsed: this.run.elapsed,
+      player: { x: this.player.x, y: this.player.y },
+      enemies: this.enemies
+        .filter((e) => isAlive(e.state))
+        .map((e) => ({
+          id: e.state.id,
+          kind: e.state.kind,
+          x: e.state.x,
+          y: e.state.y,
+          hp: e.state.hp,
+          maxHp: e.state.maxHp,
+        })),
+      combo: {
+        left: this.left.combo.value,
+        right: this.right.combo.value,
+        required: COMBO_REQUIRED,
+      },
+      offerCount: this.currentOffer.length,
+      events: { ...this.ruleEvents },
+    });
   }
 
   private movePlayer(dt: number): void {
@@ -616,6 +656,7 @@ export class PlayScene extends Phaser.Scene {
           }
           if (this.run.phase === 'lost') {
             this.showResult(false);
+            if (DEBUG_ENABLED) this.publishDebug();
             return;
           }
         }
@@ -667,6 +708,7 @@ export class PlayScene extends Phaser.Scene {
           shot.view.destroy();
           this.enemyShots.splice(i, 1);
           this.showResult(false);
+          if (DEBUG_ENABLED) this.publishDebug();
           return;
         }
       }
