@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { applyRenderScale } from '@/render';
+import { ring, flash, floatingNumber, impact } from '@/effects';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { SUPPORTS } from '@/data/supports';
 import { deliveryOf, type Weapon, type WeaponId } from '@/data/weapons';
@@ -72,6 +73,9 @@ const PLAYFIELD = {
 const STATUS_ORDER: StatusKind[] = ['wound', 'exposed', 'brand', 'fracture'];
 /** 벽까지 밀린 적이 받는 추가 피해. */
 const WALL_SLAM_DAMAGE = 40;
+/** 상태 연출 색. 상태 표시 점과 같은 색을 써서 무엇이 터졌는지 연결되게 한다. */
+const BURST_COLOR = 0xff6b6b;
+const BRAND_COLOR = 0xb08bff;
 /**
  * 보조능력 선택 화면이 뜬 뒤 입력을 받기까지의 지연(ms).
  *
@@ -122,6 +126,8 @@ export class PlayScene extends Phaser.Scene {
   private comboText!: Phaser.GameObjects.Text;
   /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
   private comboRings!: { left: Phaser.GameObjects.Arc; right: Phaser.GameObjects.Arc };
+  /** 비전 흐름이 걸린 동안 플레이어를 감싸는 오라. 버프가 살아 있다는 유일한 표시다. */
+  private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
 
   private keys!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
@@ -188,6 +194,11 @@ export class PlayScene extends Phaser.Scene {
       left: this.add.circle(0, 0, 32).setStrokeStyle(3, this.left.weapon.color).setDepth(11).setVisible(false),
       right: this.add.circle(0, 0, 40).setStrokeStyle(3, this.right.weapon.color).setDepth(11).setVisible(false),
     };
+
+    this.arcaneAura = this.add
+      .circle(0, 0, PLAYER_RADIUS + 9, BRAND_COLOR, 0.22)
+      .setDepth(9)
+      .setVisible(false);
 
     this.buildHud();
     this.bindInput();
@@ -372,6 +383,8 @@ export class PlayScene extends Phaser.Scene {
     if (result.hitWall) {
       // 벽꿍. 확률 판정을 건너뛰고 확정으로 건다.
       applyStatus(entity.state, 'fracture', Math.random, true);
+      impact(this, entity.state.x, entity.state.y);
+      floatingNumber(this, entity.state.x, entity.state.y, `+${WALL_SLAM_DAMAGE}`, '#ffe08a');
       this.damageEnemy(entity, WALL_SLAM_DAMAGE);
     }
     this.syncEnemyView(entity);
@@ -413,10 +426,19 @@ export class PlayScene extends Phaser.Scene {
       // 낙인이 걸린 적을 비전으로 때리면 낙인을 소비하고 비전 흐름을 얻는다.
       if (weapon.id === 'arcane' && consumeBrand(enemy)) {
         this.arcaneFlowUntil = this.time.now + ARCANE_FLOW_DURATION * 1000;
+        ring(this, enemy.x, enemy.y, BRAND_COLOR, { to: 110, duration: 420 });
+        floatingNumber(this, this.player.x, this.player.y - 24, '비전 흐름', '#c9a8ff');
       }
 
       const result = applyStatus(enemy, weapon.status);
-      if (result.burst) damage += WOUND_BURST_DAMAGE;
+      if (result.burst) {
+        damage += WOUND_BURST_DAMAGE;
+        // 규칙상으로만 터지고 화면에는 아무것도 안 나오던 지점.
+        const radius = ENEMY_STATS[enemy.kind].radius;
+        ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 3.2 });
+        flash(this, enemy.x, enemy.y, radius * 2.2, BURST_COLOR);
+        floatingNumber(this, enemy.x, enemy.y, `+${WOUND_BURST_DAMAGE}`, '#ff9b9b');
+      }
 
       if (runtime) {
         const stats = resolveFor(this.run.loadout, weapon.basic).stats;
@@ -495,6 +517,7 @@ export class PlayScene extends Phaser.Scene {
     this.movePlayer(dt);
     this.updateAim();
     this.updateComboRings();
+    this.updateArcaneAura();
     this.updateAreas(dt);
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
@@ -519,6 +542,19 @@ export class PlayScene extends Phaser.Scene {
       PLAYFIELD.minY + PLAYER_RADIUS,
       PLAYFIELD.maxY - PLAYER_RADIUS,
     );
+  }
+
+  /** 비전 흐름 오라를 갱신한다. 남은 시간이 줄면 점점 옅어진다. */
+  private updateArcaneAura(): void {
+    const remaining = this.arcaneFlowUntil - this.time.now;
+    const active = remaining > 0;
+    this.arcaneAura.setVisible(active);
+    if (!active) return;
+
+    this.arcaneAura.setPosition(this.player.x, this.player.y);
+    const ratio = remaining / (ARCANE_FLOW_DURATION * 1000);
+    this.arcaneAura.setAlpha(0.1 + 0.2 * ratio);
+    this.arcaneAura.setScale(1 + Math.sin(this.time.now / 140) * 0.06);
   }
 
   private updateComboRings(): void {
