@@ -95,3 +95,48 @@ export function impact(scene: Phaser.Scene, x: number, y: number, color = 0xffff
   ring(scene, x, y, color, { from: 10, to: 70, duration: 260, width: 4 });
   scene.cameras.main.shake(120, 0.003);
 }
+
+/**
+ * 평범한 명중에 뜨는 작은 불꽃.
+ *
+ * 초당 수십 번 발생할 수 있으므로 가볍고 짧아야 한다.
+ * 크게 만들면 다중투사체 빌드에서 화면이 뒤덮인다.
+ */
+export function hitSpark(scene: Phaser.Scene, x: number, y: number, color: number): void {
+  const spark = scene.add.circle(x, y, 7, color, 0.9).setDepth(11);
+  scene.tweens.add({
+    targets: spark,
+    scale: 1.9,
+    alpha: 0,
+    duration: 130,
+    ease: 'Quad.easeOut',
+    onComplete: () => spark.destroy(),
+  });
+}
+
+/**
+ * 적이 죽을 때의 연출.
+ * 사라지는 자리에 무엇이 있었는지 남기기 위해 파편을 사방으로 흩는다.
+ */
+export function deathBurst(scene: Phaser.Scene, x: number, y: number, color: number, size: number): void {
+  ring(scene, x, y, color, { from: size * 0.4, to: size * 1.6, duration: 300, width: 2 });
+
+  const pieces = 5;
+  for (let i = 0; i < pieces; i++) {
+    const angle = (Math.PI * 2 * i) / pieces + Math.random() * 0.6;
+    const distance = size * (0.9 + Math.random() * 0.7);
+    const piece = scene.add.rectangle(x, y, size * 0.28, size * 0.28, color).setDepth(10);
+
+    scene.tweens.add({
+      targets: piece,
+      x: x + Math.cos(angle) * distance,
+      y: y + Math.sin(angle) * distance,
+      alpha: 0,
+      angle: Phaser.Math.Between(-140, 140),
+      scale: 0.4,
+      duration: 320,
+      ease: 'Quad.easeOut',
+      onComplete: () => piece.destroy(),
+    });
+  }
+}

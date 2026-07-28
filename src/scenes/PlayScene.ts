@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { applyRenderScale } from '@/render';
-import { ring, flash, floatingText, impact } from '@/effects';
+import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { SUPPORTS } from '@/data/supports';
@@ -422,6 +422,9 @@ export class PlayScene extends Phaser.Scene {
     const enemy = entity.state;
     let damage = rawDamage * incomingDamageMultiplier(enemy);
 
+    // 평범한 명중에도 반응이 있어야 한다. 지금까지는 체력바만 줄었다.
+    hitSpark(this, enemy.x, enemy.y, weapon.color);
+
     // 비전 흐름: 낙인을 소비해 얻은 증폭
     if (weapon.id === 'arcane' && this.time.now < this.arcaneFlowUntil) {
       damage *= 1 + ARCANE_FLOW_MORE;
@@ -814,6 +817,7 @@ export class PlayScene extends Phaser.Scene {
     entity.hpBar.width = (radius * 2 * enemy.hp) / enemy.maxHp;
 
     if (enemy.hp <= 0) {
+      deathBurst(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, radius * 2);
       entity.view.destroy();
       entity.hpBar.destroy();
       for (const dot of entity.statusDots) dot.destroy();
