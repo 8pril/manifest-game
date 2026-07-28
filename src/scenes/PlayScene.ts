@@ -231,7 +231,18 @@ export class PlayScene extends Phaser.Scene {
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.run.phase !== 'combat') return;
-      this.useWeapon(pointer.rightButtonDown() ? this.right : this.left);
+      // 트랙패드에서는 두 손가락 탭이 꺼져 있거나 브라우저가 다르게 넘겨줄 수 있어
+      // 눌린 버튼 상태와 이벤트의 버튼 번호를 모두 본다.
+      const isRight = pointer.rightButtonDown() || pointer.button === 2;
+      this.useWeapon(isRight ? this.right : this.left);
+    });
+
+    // 오른손 무기를 키로도 쓸 수 있게 한다.
+    // 트랙패드에서 우클릭을 반복하는 것은 사실상 불가능하고,
+    // 왼손이 WASD에 있으므로 새끼손가락으로 닿는 Shift가 가장 편하다.
+    keyboard.on('keydown-SHIFT', () => {
+      if (this.run.phase !== 'combat') return;
+      this.useWeapon(this.right);
     });
   }
 
@@ -843,7 +854,7 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(20);
 
     this.add
-      .text(GAME_WIDTH - 24, 20, 'WASD 이동 · 좌클릭 왼손 · 우클릭 오른손 · Space 대시 · R 재시작', {
+      .text(GAME_WIDTH - 24, 20, 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 재시작', {
         fontSize: '13px',
         color: COLORS.textDim,
       })
