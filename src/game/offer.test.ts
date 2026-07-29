@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { rollOffer, offerCandidates, seededRandom } from '@/game/offer';
 import { SUPPORTS } from '@/data/supports';
-import { createLoadout, attachSupport, allSkills } from '@/game/loadout';
+import { createLoadout, attachSupport, allSkills, supportsFor } from '@/game/loadout';
 import { canAttach } from '@/engine/support';
 
 /** 검(근접·중첩) + 활(투사체) 조합. 태그가 서로 달라 후보가 갈린다. */
@@ -130,6 +130,48 @@ describe('rollOffer', () => {
       }
     }
     expect(rollOffer(loadout, SUPPORTS, seededRandom(5))).toHaveLength(0);
+  });
+});
+
+describe('보조능력 집중', () => {
+  it('이미 투자한 스킬에 더 붙는다', () => {
+    // 선택 3회에 스킬 4개라 균등 추첨이면 빌드가 흩어져 어느 스킬도
+    // 눈에 띄게 달라지지 않는다. 가중 추첨으로 한 스킬에 겹치게 만든다.
+    // 측정값: 균등 57%, 가중 88%. 균등 수준으로 떨어지면 편향이 사라진 것이다.
+    let concentrated = 0;
+    const runs = 300;
+
+    for (let seed = 1; seed <= runs; seed++) {
+      const random = seededRandom(seed);
+      let loadout = createLoadout('bow', 'arcane');
+
+      for (let i = 0; i < 3; i++) {
+        const offer = rollOffer(loadout, SUPPORTS, random);
+        if (!offer.length) break;
+        const choice = offer[Math.floor(random() * offer.length)];
+        loadout = attachSupport(loadout, choice.skill.id, choice.support);
+      }
+
+      const most = Math.max(...allSkills(loadout).map((s) => supportsFor(loadout, s.id).length));
+      if (most >= 2) concentrated++;
+    }
+
+    expect(concentrated / runs).toBeGreaterThan(0.7);
+  });
+
+  it('편향이 있어도 장착 가능 조건은 지킨다', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const random = seededRandom(seed);
+      let loadout = createLoadout('sword', 'shield');
+
+      for (let i = 0; i < 3; i++) {
+        const offer = rollOffer(loadout, SUPPORTS, random);
+        for (const item of offer) {
+          expect(canAttach(item.skill, item.support, supportsFor(loadout, item.skill.id)).ok).toBe(true);
+        }
+        if (offer.length) loadout = attachSupport(loadout, offer[0].skill.id, offer[0].support);
+      }
+    }
   });
 });
 
