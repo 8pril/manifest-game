@@ -29,6 +29,8 @@ export interface Weapon {
   cooldown: number;
   /** 근접 휘두르기 연출 길이(ms). 무기 성격을 동작으로 드러낸다. */
   swingDuration: number;
+  /** 콤보가 유지되는 동안 발동 스킬이 함께 나가는 간격(ms). */
+  comboInterval: number;
 }
 
 /** 스킬이 어떻게 전달되는지를 태그에서 유도한다. */
@@ -48,6 +50,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'wound',
     color: 0xc9d1e8,
     cooldown: 300,
+    comboInterval: 900,
     // 검은 짧고 빠르게 벤다.
     swingDuration: 110,
     basic: {
@@ -74,6 +77,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'exposed',
     color: 0x9ae6a0,
     cooldown: 320,
+    comboInterval: 1000,
     swingDuration: 0,
     basic: {
       id: 'arrow-shot',
@@ -98,6 +102,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'brand',
     color: 0xb08bff,
     cooldown: 380,
+    comboInterval: 1100,
     swingDuration: 0,
     basic: {
       id: 'arcane-bolt',
@@ -123,6 +128,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'fracture',
     color: 0xffc55c,
     cooldown: 420,
+    comboInterval: 1200,
     // 방패는 느리고 넓게 밀어낸다. 넉백이 검의 6배 이상이다.
     swingDuration: 240,
     basic: {

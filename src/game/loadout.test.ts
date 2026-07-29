@@ -5,7 +5,8 @@ import {
   supportsFor,
   allSkills,
   totalSupports,
-  describeSupports,
+  describeByHand,
+  handOf,
   resolveFor,
   leftWeapon,
   rightWeapon,
@@ -69,10 +70,32 @@ describe('resolveFor', () => {
   });
 });
 
-describe('describeSupports', () => {
-  it('스킬 이름과 함께 나열한다', () => {
+describe('describeByHand', () => {
+  it('손별로 무기와 보조능력을 묶는다', () => {
+    // 스킬 이름만 나열하면 어느 손을 강화한 것인지 알 수 없다.
     let loadout = createLoadout('sword', 'bow');
     loadout = attachSupport(loadout, 'arrow-shot', pierce);
-    expect(describeSupports(loadout)).toEqual(['화살 사격: 관통']);
+
+    const hands = describeByHand(loadout);
+    expect(hands[0]).toEqual({ hand: '왼손', weapon: '검', lines: [] });
+    expect(hands[1]).toEqual({ hand: '오른손', weapon: '활', lines: ['화살 사격: 관통'] });
+  });
+
+  it('한 스킬에 여러 개가 붙으면 함께 적는다', () => {
+    let loadout = createLoadout('sword', 'bow');
+    loadout = attachSupport(loadout, 'arrow-shot', pierce);
+    loadout = attachSupport(loadout, 'arrow-shot', opulence);
+    expect(describeByHand(loadout)[1].lines).toEqual(['화살 사격: 관통, 부귀']);
+  });
+});
+
+describe('handOf', () => {
+  it('스킬이 어느 손에 속하는지 알려준다', () => {
+    const loadout = createLoadout('sword', 'bow');
+    expect(handOf(loadout, 'sword-slash')).toBe('왼손');
+    expect(handOf(loadout, 'annihilation')).toBe('왼손');
+    expect(handOf(loadout, 'arrow-shot')).toBe('오른손');
+    expect(handOf(loadout, 'volley')).toBe('오른손');
+    expect(handOf(loadout, 'arcane-bolt')).toBeNull();
   });
 });

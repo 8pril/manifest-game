@@ -51,8 +51,8 @@ import {
 } from '@/game/enemy';
 import { WAVES, TOTAL_WAVES } from '@/game/waves';
 import { rollOffer, type OfferItem } from '@/game/offer';
-import { leftWeapon, rightWeapon, resolveFor, describeSupports } from '@/game/loadout';
-import { createCombo, gainCombo, tickCombo, isComboReady, consumeCombo, COMBO_REQUIRED, type ComboState } from '@/game/combo';
+import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf } from '@/game/loadout';
+import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
 import { createRun, clearWave, pickSupport, damagePlayer, addKill, advanceTime, type RunState } from '@/game/run';
 
 const MOVE_SPEED = 300;
@@ -108,6 +108,8 @@ interface WeaponRuntime {
   weapon: Weapon;
   combo: ComboState;
   readyAt: number;
+  /** 발동 스킬이 다시 나갈 수 있는 시각. */
+  comboReadyAt: number;
 }
 
 /** 한 판의 전투 화면. 진행 규칙과 승패 판정은 game/run.ts가 갖는다. */
@@ -120,7 +122,8 @@ export class PlayScene extends Phaser.Scene {
   private aimLine!: Phaser.GameObjects.Line;
   private enemies: EnemyEntity[] = [];
   private projectiles: ProjectileEntity[] = [];
-  private areas: { state: Area; view: Phaser.GameObjects.Arc }[] = [];
+  /** 지대는 어느 무기가 만들었는지 함께 들고 있는다. 지속피해로도 콤보가 유지되게 하기 위함이다. */
+  private areas: { state: Area; view: Phaser.GameObjects.Arc; owner: WeaponRuntime | null }[] = [];
   /** 적이 쏜 투사체. 플레이어 투사체와 충돌 대상이 반대라 따로 관리한다. */
   private enemyShots: { state: Projectile; view: Phaser.GameObjects.Arc; damage: number }[] = [];
 
@@ -174,8 +177,8 @@ export class PlayScene extends Phaser.Scene {
     this.arcaneFlowUntil = 0;
 
     this.run = { ...createRun(this.weapons.left, this.weapons.right), waveIndex: this.startWaveIndex };
-    this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
-    this.right = { weapon: rightWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
+    this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
+    this.right = { weapon: rightWeapon(this.run.loadout), combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
 
     this.add.grid(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 64, 64, COLORS.background, 1, 0x1b1e2b, 1);
     // 전장 경계. 어디까지 움직일 수 있는지 보이게 한다.
@@ -281,26 +284,37 @@ export class PlayScene extends Phaser.Scene {
     if (this.time.now < runtime.readyAt) return;
     runtime.readyAt = this.time.now + runtime.weapon.cooldown;
 
-    // 콤보가 차 있으면 이번 공격이 발동 스킬로 전환된다.
-    const useCombo = isComboReady(runtime.combo);
-    const skill = useCombo ? runtime.weapon.combo : runtime.weapon.basic;
-    if (useCombo) runtime.combo = consumeCombo();
-
-    const resolved = resolveFor(this.run.loadout, skill);
     const angle = this.aimAngle();
+
+    // 기본 공격은 언제나 나간다. 발동 스킬이 이를 대체하면 콤보 달성이
+    // 보상이 아니라 손해가 된다. 멸검(지대 26/0.4초)이 베기(46/0.3초)를
+    // 대체했을 때 웨이브 1도 넘기지 못하는 것을 측정으로 확인했다.
+    this.useSkill(runtime, runtime.weapon.basic, angle, true);
+
+    // 콤보가 유지되는 동안에는 발동 스킬이 자기 간격으로 함께 나간다.
+    // 원안의 "n콤보 이상 시 전환"과 기획의 "추가효과가 계속 유지"를 합친 형태다.
+    if (isComboReady(runtime.combo) && this.time.now >= runtime.comboReadyAt) {
+      runtime.comboReadyAt = this.time.now + runtime.weapon.comboInterval;
+      this.useSkill(runtime, runtime.weapon.combo, angle, false);
+    }
+    this.refreshHud();
+  }
+
+  /** 스킬 하나를 전달 방식에 맞게 내보낸다. */
+  private useSkill(runtime: WeaponRuntime, skill: Skill, angle: number, basic: boolean): void {
+    const resolved = resolveFor(this.run.loadout, skill);
 
     switch (deliveryOf(skill)) {
       case 'projectile':
-        this.fireProjectiles(runtime.weapon, skill, resolved.stats, resolved.behaviors, angle, !useCombo);
+        this.fireProjectiles(runtime.weapon, skill, resolved.stats, resolved.behaviors, angle, basic);
         break;
       case 'melee':
-        this.swingMelee(runtime, skill, resolved.stats, angle, !useCombo);
+        this.swingMelee(runtime, skill, resolved.stats, angle, basic);
         break;
       case 'area':
-        this.dropArea(resolved.stats, resolved.behaviors, angle);
+        this.dropArea(resolved.stats, resolved.behaviors, angle, basic ? null : runtime);
         break;
     }
-    this.refreshHud();
   }
 
   private fireProjectiles(
@@ -412,6 +426,7 @@ export class PlayScene extends Phaser.Scene {
     stats: ReturnType<typeof resolveFor>['stats'],
     behaviors: ReturnType<typeof resolveFor>['behaviors'],
     angle: number,
+    owner: WeaponRuntime | null,
   ): void {
     // 지대는 조준 방향 앞쪽에 깔린다.
     const distance = 90;
@@ -421,6 +436,7 @@ export class PlayScene extends Phaser.Scene {
     this.areas.push({
       state: area,
       view: this.add.circle(area.x, area.y, area.radius, AREA_COLORS[area.kind], 0.3).setDepth(1),
+      owner,
     });
   }
 
@@ -485,6 +501,10 @@ export class PlayScene extends Phaser.Scene {
         const stats = resolveFor(this.run.loadout, weapon.basic).stats;
         runtime.combo = gainCombo(runtime.combo, stats);
       }
+    } else if (runtime) {
+      // 발동 스킬 명중은 게이지를 올리지 않고 지속시간만 갱신한다.
+      // 계속 맞혀야 발동 상태가 유지된다.
+      runtime.combo = sustainCombo(runtime.combo, resolveFor(this.run.loadout, weapon.basic).stats);
     }
 
     this.damageEnemy(entity, damage);
@@ -777,13 +797,22 @@ export class PlayScene extends Phaser.Scene {
     for (const entity of this.enemies) entity.state.hindered = false;
 
     for (let i = this.areas.length - 1; i >= 0; i--) {
-      const { state, view } = this.areas[i];
+      const { state, view, owner } = this.areas[i];
       const result = tickArea(state, dt);
+      let damagedSomething = false;
 
       for (const entity of this.enemies) {
         if (!isAlive(entity.state) || !containsPoint(state, entity.state)) continue;
         if (state.hinders) entity.state.hindered = true;
-        if (result.ticked) this.damageEnemy(entity, state.damagePerTick * incomingDamageMultiplier(entity.state));
+        if (result.ticked) {
+          this.damageEnemy(entity, state.damagePerTick * incomingDamageMultiplier(entity.state));
+          damagedSomething = true;
+        }
+      }
+
+      // 지대형 발동 스킬도 지속피해가 들어가는 동안은 콤보를 유지시킨다.
+      if (damagedSomething && owner) {
+        owner.combo = sustainCombo(owner.combo, resolveFor(this.run.loadout, owner.weapon.basic).stats);
       }
 
       view.setAlpha(0.15 + 0.35 * remainingRatio(state));
@@ -886,13 +915,14 @@ export class PlayScene extends Phaser.Scene {
     const remaining = this.enemies.filter((e) => isAlive(e.state)).length;
     this.hpBarFill.width = (240 * this.run.hp) / this.run.maxHp;
 
-    const supports = describeSupports(this.run.loadout);
+    const hands = describeByHand(this.run.loadout);
     this.hud.setText(
       [
         `체력 ${Math.ceil(this.run.hp)} / ${this.run.maxHp}`,
         `${wave?.label ?? '-'} (${this.run.waveIndex + 1}/${TOTAL_WAVES})   남은 적 ${remaining}   처치 ${this.run.kills}`,
-        `왼손 ${this.left.weapon.name}   오른손 ${this.right.weapon.name}`,
-        supports.length ? `보조  ${supports.join(' / ')}` : '보조  없음',
+        ...hands.map(
+          (h) => `${h.hand} ${h.weapon}` + (h.lines.length ? `   ${h.lines.join('  ·  ')}` : ''),
+        ),
       ].join('\n'),
     );
     this.updateComboText();
@@ -944,8 +974,14 @@ export class PlayScene extends Phaser.Scene {
         this.add.text(x, GAME_HEIGHT / 2 - 50, item.support.name, { fontSize: '24px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0.5),
       );
       // 어느 스킬에 붙는지 함께 보여준다. 태그 때문에 붙을 곳이 정해진다.
+      const hand = handOf(this.run.loadout, item.skill.id);
       container.add(
-        this.add.text(x, GAME_HEIGHT / 2 - 18, `→ ${item.skill.name}`, { fontSize: '15px', color: COLORS.accentText }).setOrigin(0.5),
+        this.add
+          .text(x, GAME_HEIGHT / 2 - 18, `→ ${hand ? `${hand} ` : ''}${item.skill.name}`, {
+            fontSize: '15px',
+            color: COLORS.accentText,
+          })
+          .setOrigin(0.5),
       );
       container.add(
         this.add
@@ -1001,7 +1037,7 @@ export class PlayScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
 
-    const supports = describeSupports(this.run.loadout);
+    const hands = describeByHand(this.run.loadout);
     container.add(
       this.add
         .text(
@@ -1010,7 +1046,7 @@ export class PlayScene extends Phaser.Scene {
           [
             `${this.left.weapon.name} + ${this.right.weapon.name}`,
             `처치 ${this.run.kills}   시간 ${this.run.elapsed.toFixed(1)}초`,
-            supports.length ? supports.join('   ') : '보조능력 없음',
+            hands.map((h) => `${h.hand} ${h.weapon}` + (h.lines.length ? ` — ${h.lines.join(', ')}` : '')).join('\n'),
           ].join('\n'),
           { fontSize: '16px', color: COLORS.text, align: 'center', lineSpacing: 8 },
         )

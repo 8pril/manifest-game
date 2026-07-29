@@ -63,9 +63,33 @@ export function totalSupports(loadout: Loadout): number {
   return Object.values(loadout.supports).reduce((sum, list) => sum + list.length, 0);
 }
 
-/** 장착된 보조능력을 스킬 이름과 함께 나열한다. */
-export function describeSupports(loadout: Loadout): string[] {
-  return allSkills(loadout).flatMap((skill) =>
-    supportsFor(loadout, skill.id).map((support) => `${skill.name}: ${support.name}`),
-  );
+/**
+ * 손별로 장착된 보조능력을 정리한다.
+ *
+ * 스킬 이름만 나열하면 그 스킬이 왼손 것인지 오른손 것인지 알 수 없다.
+ * 어느 손을 강화했는지가 보여야 선택의 결과를 알 수 있다.
+ */
+export function describeByHand(loadout: Loadout): { hand: string; weapon: string; lines: string[] }[] {
+  const sides = [
+    { hand: '왼손', weapon: leftWeapon(loadout) },
+    { hand: '오른손', weapon: rightWeapon(loadout) },
+  ];
+
+  return sides.map(({ hand, weapon }) => ({
+    hand,
+    weapon: weapon.name,
+    lines: [weapon.basic, weapon.combo].flatMap((skill) => {
+      const supports = supportsFor(loadout, skill.id);
+      return supports.length ? [`${skill.name}: ${supports.map((s) => s.name).join(', ')}`] : [];
+    }),
+  }));
+}
+
+/** 어떤 스킬이 어느 손에 속하는지. 선택 화면에서 쓴다. */
+export function handOf(loadout: Loadout, skillId: string): '왼손' | '오른손' | null {
+  const left = leftWeapon(loadout);
+  if (left.basic.id === skillId || left.combo.id === skillId) return '왼손';
+  const right = rightWeapon(loadout);
+  if (right.basic.id === skillId || right.combo.id === skillId) return '오른손';
+  return null;
 }

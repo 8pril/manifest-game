@@ -4,7 +4,8 @@ import {
   gainCombo,
   tickCombo,
   isComboReady,
-  consumeCombo,
+  sustainCombo,
+  breakCombo,
   COMBO_REQUIRED,
   COMBO_BASE_DURATION,
 } from '@/game/combo';
@@ -60,7 +61,7 @@ describe('tickCombo', () => {
   });
 });
 
-describe('isComboReady / consumeCombo', () => {
+describe('isComboReady', () => {
   it('목표치에 도달해야 발동할 수 있다', () => {
     let combo = createCombo();
     for (let i = 0; i < COMBO_REQUIRED - 1; i++) combo = gainCombo(combo, base);
@@ -69,10 +70,55 @@ describe('isComboReady / consumeCombo', () => {
     combo = gainCombo(combo, base);
     expect(isComboReady(combo)).toBe(true);
   });
+});
 
-  it('발동하면 콤보가 소모된다', () => {
-    const combo = consumeCombo();
-    expect(combo.value).toBe(0);
+describe('발동 상태 유지 - 원안: n콤보 이상 시 전환, 콤보는 지속시간 n초', () => {
+  const filled = () => {
+    let combo = createCombo();
+    for (let i = 0; i < COMBO_REQUIRED; i++) combo = gainCombo(combo, base);
+    return combo;
+  };
+
+  it('발동 스킬을 써도 콤보가 소모되지 않는다', () => {
+    // 한 번 쓰고 끝나면 '이상 시'와 '지속시간'이 무의미해진다.
+    const combo = filled();
+    expect(isComboReady(combo)).toBe(true);
+    // 발동 스킬 사용은 상태를 바꾸지 않는다
+    expect(isComboReady(combo)).toBe(true);
+  });
+
+  it('발동 스킬이 명중하면 지속시간만 갱신된다', () => {
+    let combo = filled();
+    combo = tickCombo(combo, 2);
+    expect(combo.remaining).toBeCloseTo(COMBO_BASE_DURATION - 2, 10);
+
+    combo = sustainCombo(combo, base);
+    expect(combo.remaining).toBe(COMBO_BASE_DURATION);
+    expect(combo.value).toBe(COMBO_REQUIRED);
+  });
+
+  it('맞히지 못하면 지속시간이 다해 끊긴다', () => {
+    let combo = filled();
+    combo = tickCombo(combo, COMBO_BASE_DURATION + 0.1);
     expect(isComboReady(combo)).toBe(false);
+    expect(combo.value).toBe(0);
+  });
+
+  it('계속 맞히면 발동 상태가 유지된다', () => {
+    let combo = filled();
+    for (let i = 0; i < 20; i++) {
+      combo = tickCombo(combo, COMBO_BASE_DURATION * 0.6);
+      combo = sustainCombo(combo, base);
+    }
+    expect(isComboReady(combo)).toBe(true);
+  });
+
+  it('콤보가 없으면 유지 대상이 아니다', () => {
+    const empty = createCombo();
+    expect(sustainCombo(empty, base)).toBe(empty);
+  });
+
+  it('breakCombo는 명시적으로 끊는다', () => {
+    expect(isComboReady(breakCombo())).toBe(false);
   });
 });
