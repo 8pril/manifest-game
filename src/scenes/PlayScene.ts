@@ -32,6 +32,8 @@ import {
   incomingDamageMultiplier,
   hasStatus,
   WOUND_BURST_DAMAGE,
+  consumeWound,
+  WOUND_CONSUME_PER_STACK,
   ARCANE_FLOW_MORE,
   ARCANE_FLOW_DURATION,
   type StatusKind,
@@ -138,7 +140,7 @@ export class PlayScene extends Phaser.Scene {
   private arcaneFlowUntil = 0;
   private currentOffer: OfferItem[] = [];
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
-  private ruleEvents = { burst: 0, wallSlam: 0, brand: 0 };
+  private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0 };
   /** 이 시각 이후에야 보조능력을 고를 수 있다. */
   private offerReadyAt = 0;
   private weapons: { left: WeaponId; right: WeaponId } = { left: 'sword', right: 'bow' };
@@ -439,6 +441,23 @@ export class PlayScene extends Phaser.Scene {
     // 비전 흐름: 낙인을 소비해 얻은 증폭
     if (weapon.id === 'arcane' && this.time.now < this.arcaneFlowUntil) {
       damage *= 1 + ARCANE_FLOW_MORE;
+    }
+
+    // 교차 반응: 상처를 남긴 무기가 아닌 다른 무기로 때리면 쌓인 만큼 소모한다.
+    // 상처 폭발은 5스택이 필요한데 추적자(3타)와 사수(2타)는 그 전에 죽어
+    // 규칙이 구조적으로 발동하지 않았다. 이 반응이 그 구멍을 메우고,
+    // 동시에 무기를 두 개 고르는 선택에 의미를 만든다.
+    if (weapon.status !== 'wound') {
+      const stacks = consumeWound(enemy);
+      if (stacks > 0) {
+        const bonus = stacks * WOUND_CONSUME_PER_STACK;
+        damage += bonus;
+        this.ruleEvents.woundConsume++;
+
+        const radius = ENEMY_STATS[enemy.kind].radius;
+        ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 2.4, duration: 280 });
+        floatingText(this, enemy.x, enemy.y - radius - 12, `상처 소모 ${bonus}`, '#ffb4a2');
+      }
     }
 
     if (basic) {

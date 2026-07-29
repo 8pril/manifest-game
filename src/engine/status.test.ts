@@ -12,6 +12,9 @@ import {
   STATUS_RULES,
   FRACTURE_IMMUNITY,
   EXPOSED_DAMAGE_INCREASE,
+  consumeWound,
+  WOUND_CONSUME_PER_STACK,
+  WOUND_BURST_DAMAGE,
 } from '@/engine/status';
 
 /** 확률 판정을 항상 통과시키는 난수. */
@@ -172,5 +175,44 @@ describe('tickStatuses', () => {
     applyStatus(host, 'wound', always);
     removeStatus(host, 'wound');
     expect(hasStatus(host, 'wound')).toBe(false);
+  });
+});
+
+describe('상처 소모 - 다른 무기로 때렸을 때', () => {
+  it('쌓인 스택 수를 돌려주고 상처를 제거한다', () => {
+    const host = createStatusHost();
+    applyStatus(host, 'wound', always);
+    applyStatus(host, 'wound', always);
+    applyStatus(host, 'wound', always);
+
+    expect(consumeWound(host)).toBe(3);
+    expect(hasStatus(host, 'wound')).toBe(false);
+  });
+
+  it('상처가 없으면 0을 돌려준다', () => {
+    expect(consumeWound(createStatusHost())).toBe(0);
+  });
+
+  it('연달아 소모하면 두 번째는 0이다', () => {
+    const host = createStatusHost();
+    applyStatus(host, 'wound', always);
+    expect(consumeWound(host)).toBe(1);
+    expect(consumeWound(host)).toBe(0);
+  });
+
+  it('5스택 폭발이 소모보다 이득이다', () => {
+    // 검이 있다면 한 대 더 때려 터뜨리는 쪽이 낫도록 값을 잡았다.
+    const maxConsume = 4 * WOUND_CONSUME_PER_STACK;
+    expect(maxConsume).toBeLessThan(WOUND_BURST_DAMAGE);
+  });
+
+  it('추적자가 죽기 전에도 반응할 수 있다', () => {
+    // 추적자는 검 3타에 죽어 5스택에 도달하지 못한다.
+    // 2스택 시점에 다른 무기로 소모하면 30의 추가 피해가 나온다.
+    const host = createStatusHost();
+    applyStatus(host, 'wound', always);
+    applyStatus(host, 'wound', always);
+
+    expect(consumeWound(host) * WOUND_CONSUME_PER_STACK).toBe(30);
   });
 });

@@ -42,6 +42,18 @@ export const ARCANE_FLOW_DURATION = 5;
 /** 기절한 적이 다시 기절하기까지의 면역 시간. */
 export const FRACTURE_IMMUNITY = 7;
 
+/**
+ * 상처를 남긴 무기가 아닌 다른 무기로 때렸을 때, 스택 하나당 추가 피해.
+ *
+ * 상처 폭발은 5스택이 필요한데 추적자(3타)와 사수(2타)는 그 전에 죽어
+ * 규칙이 구조적으로 발동하지 않았다. 다른 무기가 쌓인 만큼을 소모하게 하면
+ * 그 구멍이 메워지고, 동시에 무기를 두 개 고르는 선택에 의미가 생긴다.
+ *
+ * 4스택을 소모하면 60으로 검 한 대(46)보다 조금 크다. 5스택 폭발(90)보다는
+ * 작으므로, 검이 있다면 한 대 더 때려 터뜨리는 쪽이 여전히 이득이다.
+ */
+export const WOUND_CONSUME_PER_STACK = 15;
+
 export interface StatusInstance {
   kind: StatusKind;
   stacks: number;
@@ -148,4 +160,17 @@ export function consumeBrand(host: StatusHost): boolean {
   if (!hasStatus(host, 'brand')) return false;
   removeStatus(host, 'brand');
   return true;
+}
+
+/**
+ * 상처를 소모하고 소모한 스택 수를 돌려준다.
+ * 상처가 없으면 0. 상처를 남긴 무기 본인이 때렸을 때는 호출하지 않는다.
+ */
+export function consumeWound(host: StatusHost): number {
+  const wound = findStatus(host, 'wound');
+  if (!wound) return 0;
+
+  const stacks = wound.stacks;
+  removeStatus(host, 'wound');
+  return stacks;
 }
