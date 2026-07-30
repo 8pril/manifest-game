@@ -206,8 +206,8 @@ describe('상처 소모 - 다른 무기로 때렸을 때', () => {
     expect(maxConsume).toBeLessThan(WOUND_BURST_DAMAGE);
   });
 
-  it('추적자가 죽기 전에도 반응할 수 있다', () => {
-    // 추적자는 검 3타에 죽어 5스택에 도달하지 못한다.
+  it('사냥개가 죽기 전에도 반응할 수 있다', () => {
+    // 사냥개는 검 2타에 죽어 5스택에 도달하지 못한다.
     // 2스택 시점에 다른 무기로 소모하면 30의 추가 피해가 나온다.
     const host = createStatusHost();
     applyStatus(host, 'wound', always);

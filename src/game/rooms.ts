@@ -5,6 +5,10 @@ import type { EnemyKind } from '@/game/enemy';
  *
  * 한 판은 방 3개와 보스 방으로 이루어지며, 각 방을 정리할 때마다
  * 보조능력을 하나 고른다. 전체 3-5분을 목표로 한다.
+ *
+ * 적 수를 정하는 기준은 **방 전체 체력이 아니라 처치 횟수**다.
+ * 방마다 총 체력은 예전과 비슷하게 두고 마리당 체력을 낮춰 수를 두 배 이상
+ * 늘렸다. 같은 시간 안에 죽는 것이 훨씬 많아야 "썰면서 나아가는" 감각이 난다.
  */
 
 export interface RoomDef {
@@ -25,17 +29,17 @@ export const ROOMS: readonly RoomDef[] = [
   {
     // 첫 방은 조금 작게 잡아 조작을 익히게 한다.
     label: '1번 방',
-    spawns: [{ kind: 'chaser', count: 5 }],
+    spawns: [{ kind: 'chaser', count: 12 }],
     offersSupport: true,
     width: 1900,
     height: 1150,
   },
   {
-    // 사수가 처음 등장한다. 여기서부터 거리를 벌리는 것만으로는 안전하지 않다.
+    // 몰이꾼이 처음 등장한다. 여기서부터 거리를 벌리는 것만으로는 안전하지 않다.
     label: '2번 방',
     spawns: [
-      { kind: 'chaser', count: 6 },
-      { kind: 'archer', count: 2 },
+      { kind: 'chaser', count: 16 },
+      { kind: 'archer', count: 3 },
       { kind: 'brute', count: 1 },
     ],
     offersSupport: true,
@@ -45,8 +49,8 @@ export const ROOMS: readonly RoomDef[] = [
   {
     label: '3번 방',
     spawns: [
-      { kind: 'chaser', count: 7 },
-      { kind: 'archer', count: 3 },
+      { kind: 'chaser', count: 20 },
+      { kind: 'archer', count: 4 },
       { kind: 'brute', count: 2 },
     ],
     offersSupport: true,
@@ -58,8 +62,8 @@ export const ROOMS: readonly RoomDef[] = [
     label: '보스 방',
     spawns: [
       { kind: 'boss', count: 1 },
-      { kind: 'chaser', count: 4 },
-      { kind: 'archer', count: 2 },
+      { kind: 'chaser', count: 10 },
+      { kind: 'archer', count: 3 },
     ],
     offersSupport: false,
     width: 2000,

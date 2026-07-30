@@ -40,19 +40,24 @@ export interface EnemyStats {
 }
 
 export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
+  // 사냥개는 수가 많고 개별로는 약하다. 두 대면 죽는다.
+  // 기획 방향이 "잡몹 수량이 엄청 많고 걔네는 그냥 다 쉽게 썰면서 나아간다"이므로
+  // 방 전체 체력은 유지한 채 마리당 체력을 낮추고 수를 늘렸다.
   chaser: {
-    label: '추적자',
-    hp: 120,
-    speed: 92,
-    radius: 22,
-    contactDamage: 8,
+    label: '사냥개',
+    hp: 52,
+    speed: 96,
+    radius: 20,
+    // 마리당 죽는 속도가 빨라진 만큼 한 대의 무게를 올린다.
+    contactDamage: 11,
     contactCooldown: 0.8,
     color: 0xd4574e,
     behavior: 'chase',
   },
+  // 껍데기는 수가 아니라 단단함으로 존재감을 갖는다. 여기서 속도가 끊긴다.
   brute: {
-    label: '중장갑',
-    hp: 320,
+    label: '껍데기',
+    hp: 260,
     speed: 58,
     radius: 28,
     contactDamage: 16,
@@ -62,8 +67,8 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   },
 
   archer: {
-    label: '사수',
-    hp: 90,
+    label: '몰이꾼',
+    hp: 60,
     speed: 118,
     radius: 21,
     contactDamage: 5,
@@ -75,11 +80,12 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
     projectileDamage: 11,
     projectileSpeed: 290,
   },
+  // 문지기는 잡몹보다 확연히 커야 한다. 반지름이 사냥개의 3.4배다.
   boss: {
-    label: '보스',
+    label: '문지기',
     hp: 1600,
     speed: 74,
-    radius: 48,
+    radius: 68,
     contactDamage: 22,
     contactCooldown: 0.9,
     color: 0xff6b3d,

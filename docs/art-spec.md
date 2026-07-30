@@ -30,10 +30,10 @@
 | 파일명 | 대상 | 표시 크기 | 권장 캔버스 | 기준 색 |
 | --- | --- | --- | --- | --- |
 | `player.png` | 플레이어 | 40px | 128×128 | `#6ea8ff` 하늘색 |
-| `enemy-chaser.png` | 추적자 | 44px | 128×128 | `#d4574e` 붉은색 |
-| `enemy-brute.png` | 중장갑 | 56px | 192×192 | `#b0453d` 짙은 붉은색 |
-| `enemy-archer.png` | 사수 | 42px | 128×128 | `#e0b055` 황토색 |
-| `enemy-boss.png` | 보스 | 96px | 256×256 | `#ff6b3d` 주황색 |
+| `enemy-chaser.png` | 사냥개 | 40px | 128×128 | `#d4574e` 붉은색 |
+| `enemy-brute.png` | 껍데기 | 56px | 192×192 | `#b0453d` 짙은 붉은색 |
+| `enemy-archer.png` | 몰이꾼 | 42px | 128×128 | `#e0b055` 황토색 |
+| `enemy-boss.png` | 문지기 (보스) | 136px | 320×320 | `#ff6b3d` 주황색 |
 
 표시 크기가 작으므로 **디테일보다 실루엣이 중요하다.** 축소했을 때 뭉개지지 않는 단순한 형태로.
 
@@ -137,7 +137,7 @@ palette, transparent background, no shadow, centered, 128x128
 **현대 복장과 이세계의 대비가 이 게임의 가장 강한 훅이다.** 판타지 갑옷이나
 로브가 섞여 들어오면 다시 뽑는다. 후드티·재킷·운동화 같은 것이 보여야 한다.
 
-**추적자** — 개 형태
+**사냥개** — 개 형태
 
 ```
 top-down view of a game sprite: a gaunt dog-like beast seen directly from
@@ -146,7 +146,7 @@ hand-drawn grimy texture, unsettling but simple bold silhouette readable at
 small size, transparent background, no shadow, 128x128
 ```
 
-**중장갑** — 속이 빈 갑옷
+**껍데기** — 속이 빈 갑옷
 
 ```
 top-down view of a game sprite: a suit of heavy plate armor standing upright
@@ -159,7 +159,7 @@ no shadow, 192x192
 **"갑옷 안에 아무것도 없다"가 이 적의 정체다.** 사람이 입고 있는 것처럼 보이면
 다시 뽑는다. 목 부분이나 투구 틈으로 빈 어둠이 보여야 한다.
 
-**사수** — 가죽 장비, 마후라로 가린 하관
+**몰이꾼** — 가죽 장비, 마후라로 가린 하관
 
 ```
 top-down view of a game sprite: a lean humanoid archer seen directly from
@@ -176,11 +176,11 @@ top-down view of a game sprite: a massive looming boss creature seen directly
 from above, facing right, several times larger than a human, heavy imposing
 mass, burning orange core glowing through its body (#ff6b3d), hand-drawn
 grimy texture, dramatic but readable silhouette, transparent background,
-no shadow, 256x256
+no shadow, 320x320
 ```
 
-표시 크기가 잡몹의 2배 이상(96px vs 42~56px)이므로 **캔버스 안에서도 확실히
-꽉 차게** 그려야 한다. 잡몹과 비슷한 덩치로 나오면 다시 뽑는다.
+표시 크기가 사냥개의 **3.4배**(136px vs 40px)다. 캔버스 안에서도 확실히 꽉 차게
+그려야 한다. 잡몹과 비슷한 덩치로 나오면 다시 뽑는다.
 
 > 기획 답변에 **"보스는 한 종류로 하면 절대 안될듯"**이 있다. 예선 빌드는 아직
 > 보스 1종이므로 이미지도 1장이다. 보스가 늘어나면 늘어난 수만큼 추가로 필요하다.
@@ -229,9 +229,9 @@ four edges, 128x128
 
 - [ ] 플레이어가 **현대 복장**인가 (판타지 갑옷·로브로 바뀌지 않았는가)
 - [ ] 플레이어의 **양팔에 실체화 장비**가 보이는가
-- [ ] 중장갑의 **속이 비어 있는가** (사람이 입은 것처럼 보이지 않는가)
-- [ ] 사수의 **하관이 가려져** 있는가
-- [ ] 추적자가 **네 발 짐승 형태**인가 (사람 형태로 바뀌지 않았는가)
+- [ ] 껍데기의 **속이 비어 있는가** (사람이 입은 것처럼 보이지 않는가)
+- [ ] 몰이꾼의 **하관이 가려져** 있는가
+- [ ] 사냥개가 **네 발 짐승 형태**인가 (사람 형태로 바뀌지 않았는가)
 - [ ] 보스가 잡몹보다 **확연히 거대**한가
 
 ## 넘기는 방법

@@ -51,6 +51,7 @@ import {
   type Enemy,
 } from '@/game/enemy';
 import { ROOMS, TOTAL_ROOMS } from '@/game/rooms';
+import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { rollOffer, type OfferItem } from '@/game/offer';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
@@ -158,6 +159,14 @@ export class PlayScene extends Phaser.Scene {
   };
   /** 현재 방을 미니맵 크기에 맞추는 배율. 방마다 다시 계산한다. */
   private minimapRoom = { width: GAME_WIDTH, height: GAME_HEIGHT, scale: 1 };
+  /** 이 방의 배경 서술 오브젝트. 다가가면 글이 뜬다. */
+  private loreNotes: {
+    x: number;
+    y: number;
+    mark: Phaser.GameObjects.Rectangle;
+    plate: Phaser.GameObjects.Rectangle;
+    text: Phaser.GameObjects.Text;
+  }[] = [];
   private startRoomIndex = 0;
 
   constructor() {
@@ -458,7 +467,7 @@ export class PlayScene extends Phaser.Scene {
     }
 
     // 교차 반응: 상처를 남긴 무기가 아닌 다른 무기로 때리면 쌓인 만큼 소모한다.
-    // 상처 폭발은 5스택이 필요한데 추적자(3타)와 사수(2타)는 그 전에 죽어
+    // 상처 폭발은 5스택이 필요한데 사냥개(2타)와 몰이꾼(2타)은 그 전에 죽어
     // 규칙이 구조적으로 발동하지 않았다. 이 반응이 그 구멍을 메우고,
     // 동시에 무기를 두 개 고르는 선택에 의미를 만든다.
     if (weapon.status !== 'wound') {
@@ -545,6 +554,8 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(2);
     this.roomFloor.push(this.exit, this.exitLabel);
 
+    this.placeLore(room);
+
     // 플레이어는 왼쪽에서 들어온다.
     this.player.setPosition(WALL + 90, cy);
     followInRoom(this, this.player, room.width, room.height);
@@ -568,6 +579,54 @@ export class PlayScene extends Phaser.Scene {
       }
     }
     this.refreshHud();
+  }
+
+  /**
+   * 배경 서술 오브젝트를 방에 놓는다.
+   *
+   * 다가가야만 읽히고, 읽지 않아도 게임은 끝까지 진행된다.
+   * 전투 중에 시선을 뺏지 않도록 표시는 작고 어둡게 둔다.
+   */
+  private placeLore(room: (typeof ROOMS)[number]): void {
+    this.loreNotes = loreFor(this.run.roomIndex).map((note) => {
+      const x = note.at.x * room.width;
+      const y = note.at.y * room.height;
+
+      // 바닥에 놓인 작은 표식. 마름모로 두어 적(사각형)과 헷갈리지 않게 한다.
+      const mark = this.add.rectangle(x, y, 15, 15, 0x3a4059).setAngle(45).setDepth(1);
+      const text = this.add
+        .text(x, y - 46, note.text, {
+          fontSize: '15px',
+          color: COLORS.textDim,
+          align: 'center',
+          lineSpacing: 5,
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(12)
+        .setAlpha(0);
+
+      // 글자만 띄우면 적 위에 겹쳤을 때 읽히지 않는다. 어두운 판을 깔아준다.
+      const plate = this.add
+        .rectangle(x, text.y - text.height / 2, text.width + 22, text.height + 14, 0x0a0b0f, 0.82)
+        .setDepth(11)
+        .setAlpha(0);
+
+      this.roomFloor.push(mark, plate, text);
+      return { x, y, mark, plate, text };
+    });
+  }
+
+  /** 가까이 있는 서술만 보이게 한다. */
+  private updateLore(): void {
+    for (const note of this.loreNotes) {
+      const near = Math.hypot(this.player.x - note.x, this.player.y - note.y) <= LORE_RADIUS;
+      // 갑자기 켜지고 꺼지면 지나갈 때마다 깜빡인다. 부드럽게 오간다.
+      const target = near ? 1 : 0;
+      const alpha = Phaser.Math.Linear(note.text.alpha, target, 0.12);
+      note.text.setAlpha(alpha);
+      note.plate.setAlpha(alpha);
+      note.mark.setFillStyle(near ? 0x6b7396 : 0x3a4059);
+    }
   }
 
   private edgeSpawnPoint(): { x: number; y: number } {
@@ -640,6 +699,7 @@ export class PlayScene extends Phaser.Scene {
     this.updateArcaneAura();
     this.updateOffscreenMarks();
     this.updateMinimap();
+    this.updateLore();
     if (DEBUG_ENABLED) this.publishDebug();
     this.updateAreas(dt);
     this.updateEnemies(dt);
@@ -1046,7 +1106,7 @@ export class PlayScene extends Phaser.Scene {
       player: this.add.circle(0, 0, 3, COLORS.player).setDepth(21).setScrollFactor(0),
       exit: this.add.rectangle(0, 0, 6, 6, COLORS.accent).setDepth(21).setScrollFactor(0).setVisible(false),
       // 방마다 최대 적 수보다 넉넉하게 잡아둔다. 매 프레임 만들고 지우지 않는다.
-      enemies: Array.from({ length: 24 }, () =>
+      enemies: Array.from({ length: 40 }, () =>
         this.add.circle(0, 0, 2.5, 0xff6b6b).setDepth(20).setScrollFactor(0).setVisible(false),
       ),
     };
