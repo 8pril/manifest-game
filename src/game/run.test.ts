@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   createRun,
-  clearWave,
+  clearRoom,
   pickSupport,
   damagePlayer,
   addKill,
@@ -11,7 +11,7 @@ import {
   PLAYER_MAX_HP,
   INVULNERABLE_SECONDS,
 } from '@/game/run';
-import { TOTAL_WAVES } from '@/game/waves';
+import { TOTAL_ROOMS } from '@/game/rooms';
 import { SUPPORTS } from '@/data/supports';
 import { totalSupports, supportsFor } from '@/game/loadout';
 
@@ -24,7 +24,7 @@ const newRun = () => createRun('sword', 'bow');
 function advanceWaves(count: number) {
   let run = newRun();
   for (let i = 0; i < count; i++) {
-    run = clearWave(run, true);
+    run = clearRoom(run, true);
     if (run.phase === 'offer') run = pickSupport(run, undefined);
   }
   return run;
@@ -34,51 +34,51 @@ describe('createRun', () => {
   it('첫 웨이브 전투 상태로 시작한다', () => {
     const run = newRun();
     expect(run.phase).toBe('combat');
-    expect(run.waveIndex).toBe(0);
+    expect(run.roomIndex).toBe(0);
     expect(run.hp).toBe(PLAYER_MAX_HP);
     expect(totalSupports(run.loadout)).toBe(0);
   });
 });
 
-describe('clearWave', () => {
+describe('clearRoom', () => {
   it('웨이브를 정리하면 보조능력 선택으로 넘어간다', () => {
-    const run = clearWave(newRun(), true);
+    const run = clearRoom(newRun(), true);
     expect(run.phase).toBe('offer');
     // 선택하기 전에는 웨이브가 넘어가지 않는다
-    expect(run.waveIndex).toBe(0);
+    expect(run.roomIndex).toBe(0);
   });
 
   it('보조능력을 주지 않는 웨이브는 선택 없이 다음으로 간다', () => {
-    const run = clearWave(newRun(), false);
+    const run = clearRoom(newRun(), false);
     expect(run.phase).toBe('combat');
-    expect(run.waveIndex).toBe(1);
+    expect(run.roomIndex).toBe(1);
   });
 
   it('마지막 웨이브를 정리하면 승리한다', () => {
-    const run = clearWave(advanceWaves(TOTAL_WAVES - 1), false);
+    const run = clearRoom(advanceWaves(TOTAL_ROOMS - 1), false);
     expect(run.phase).toBe('won');
   });
 
   it('전투 중이 아니면 아무 일도 하지 않는다', () => {
-    const offering = clearWave(newRun(), true);
-    expect(clearWave(offering, true)).toBe(offering);
+    const offering = clearRoom(newRun(), true);
+    expect(clearRoom(offering, true)).toBe(offering);
   });
 });
 
 describe('pickSupport', () => {
   it('고른 보조능력이 지정한 스킬에 장착되고 다음 웨이브로 넘어간다', () => {
-    const run = pickSupport(clearWave(newRun(), true), anyPick);
+    const run = pickSupport(clearRoom(newRun(), true), anyPick);
     expect(run.phase).toBe('combat');
-    expect(run.waveIndex).toBe(1);
+    expect(run.roomIndex).toBe(1);
     expect(supportsFor(run.loadout, 'arrow-shot')).toEqual([pierce]);
     // 다른 스킬에는 붙지 않는다
     expect(supportsFor(run.loadout, 'sword-slash')).toHaveLength(0);
   });
 
   it('고르지 않고 넘기면 장착 없이 진행한다', () => {
-    const run = pickSupport(clearWave(newRun(), true), undefined);
+    const run = pickSupport(clearRoom(newRun(), true), undefined);
     expect(run.phase).toBe('combat');
-    expect(run.waveIndex).toBe(1);
+    expect(run.roomIndex).toBe(1);
     expect(totalSupports(run.loadout)).toBe(0);
   });
 
@@ -95,11 +95,11 @@ describe('pickSupport', () => {
       { support: SUPPORTS.find((s) => s.id === 'added-stacks')!, skillId: 'sword-slash' },
     ];
     for (const pick of picks) {
-      run = clearWave(run, true);
+      run = clearRoom(run, true);
       run = pickSupport(run, pick);
     }
     expect(totalSupports(run.loadout)).toBe(3);
-    expect(run.waveIndex).toBe(3);
+    expect(run.roomIndex).toBe(3);
   });
 });
 
@@ -119,7 +119,7 @@ describe('damagePlayer', () => {
   });
 
   it('보조능력 선택 중에는 피해를 받지 않는다', () => {
-    const offering = clearWave(newRun(), true);
+    const offering = clearRoom(newRun(), true);
     expect(damagePlayer(offering, 50)).toBe(offering);
   });
 
@@ -132,7 +132,7 @@ describe('damagePlayer', () => {
 describe('advanceTime', () => {
   it('전투 중에만 시간이 흐른다', () => {
     expect(advanceTime(newRun(), 1.5).elapsed).toBe(1.5);
-    const offering = clearWave(newRun(), true);
+    const offering = clearRoom(newRun(), true);
     expect(advanceTime(offering, 1.5)).toBe(offering);
   });
 });
@@ -144,9 +144,9 @@ describe('addKill / isOver', () => {
 
   it('승리와 패배만 종료 상태다', () => {
     expect(isOver(newRun())).toBe(false);
-    expect(isOver(clearWave(newRun(), true))).toBe(false);
+    expect(isOver(clearRoom(newRun(), true))).toBe(false);
     expect(isOver(damagePlayer(newRun(), PLAYER_MAX_HP))).toBe(true);
-    expect(isOver(clearWave(advanceWaves(TOTAL_WAVES - 1), false))).toBe(true);
+    expect(isOver(clearRoom(advanceWaves(TOTAL_ROOMS - 1), false))).toBe(true);
   });
 });
 

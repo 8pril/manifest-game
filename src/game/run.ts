@@ -1,5 +1,5 @@
 import type { Support } from '@/engine/support';
-import { TOTAL_WAVES } from '@/game/waves';
+import { TOTAL_ROOMS } from '@/game/rooms';
 import { attachSupport, createLoadout, type Loadout } from '@/game/loadout';
 import type { WeaponId } from '@/data/weapons';
 
@@ -12,9 +12,9 @@ import type { WeaponId } from '@/data/weapons';
  */
 
 export type RunPhase =
-  /** 웨이브 진행 중. */
+  /** 방 안에서 전투 중. */
   | 'combat'
-  /** 웨이브를 정리하고 보조능력을 고르는 중. */
+  /** 방을 정리하고 보조능력을 고르는 중. */
   | 'offer'
   /** 보스까지 정리함. */
   | 'won'
@@ -34,8 +34,8 @@ export const INVULNERABLE_SECONDS = 0.6;
 
 export interface RunState {
   phase: RunPhase;
-  /** 현재 웨이브 인덱스. 0부터 시작한다. */
-  waveIndex: number;
+  /** 현재 방 인덱스. 0부터 시작한다. */
+  roomIndex: number;
   hp: number;
   maxHp: number;
   /** 무기 2종과 스킬별 보조능력. */
@@ -51,7 +51,7 @@ export interface RunState {
 export function createRun(left: WeaponId, right: WeaponId): RunState {
   return {
     phase: 'combat',
-    waveIndex: 0,
+    roomIndex: 0,
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
     loadout: createLoadout(left, right),
@@ -62,19 +62,19 @@ export function createRun(left: WeaponId, right: WeaponId): RunState {
 }
 
 /**
- * 현재 웨이브의 적을 모두 정리했을 때.
- * 마지막 웨이브였다면 승리, 아니면 보조능력 선택으로 넘어간다.
+ * 현재 방의 적을 모두 정리했을 때.
+ * 마지막 방이었다면 승리, 아니면 보조능력 선택으로 넘어간다.
  */
-export function clearWave(run: RunState, offersSupport: boolean): RunState {
+export function clearRoom(run: RunState, offersSupport: boolean): RunState {
   if (run.phase !== 'combat') return run;
 
-  const isLastWave = run.waveIndex >= TOTAL_WAVES - 1;
-  if (isLastWave) {
+  const isLastRoom = run.roomIndex >= TOTAL_ROOMS - 1;
+  if (isLastRoom) {
     return { ...run, phase: 'won' };
   }
-  // 고를 보조능력이 없으면 선택 단계를 건너뛰고 바로 다음 웨이브로 간다.
+  // 고를 보조능력이 없으면 선택 단계를 건너뛰고 바로 다음 방으로 간다.
   if (!offersSupport) {
-    return { ...run, waveIndex: run.waveIndex + 1 };
+    return { ...run, roomIndex: run.roomIndex + 1 };
   }
   return { ...run, phase: 'offer' };
 }
@@ -93,7 +93,7 @@ export function pickSupport(
   return {
     ...run,
     phase: 'combat',
-    waveIndex: run.waveIndex + 1,
+    roomIndex: run.roomIndex + 1,
     loadout: pick ? attachSupport(run.loadout, pick.skillId, pick.support) : run.loadout,
   };
 }

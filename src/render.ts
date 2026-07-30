@@ -30,3 +30,53 @@ export function applyRenderScale(scene: Phaser.Scene): void {
     },
   );
 }
+
+/**
+ * 카메라가 플레이어를 따라가게 한다. 방이 화면보다 클 때 쓴다.
+ *
+ * 확대 배율은 그대로 두고 경계만 방 크기로 잡는다. 카메라가 보여주는
+ * 월드 영역은 여전히 1280×720이므로, 방이 그보다 크면 스크롤된다.
+ * 방이 화면보다 작으면 Phaser가 알아서 가운데로 맞춘다.
+ */
+export function followInRoom(
+  scene: Phaser.Scene,
+  target: Phaser.GameObjects.GameObject,
+  roomWidth: number,
+  roomHeight: number,
+): void {
+  const camera = scene.cameras.main;
+  camera.setBounds(0, 0, roomWidth, roomHeight);
+  // 부드럽게 따라가되 너무 늘어지지 않게 한다. 조준이 흔들리면 손맛이 나빠진다.
+  camera.startFollow(target, true, 0.12, 0.12);
+}
+
+/** 화면 좌표에 고정한다. 카메라가 움직여도 따라가지 않는다. */
+export function pinToScreen(...objects: Phaser.GameObjects.Components.ScrollFactor[]): void {
+  for (const object of objects) object.setScrollFactor(0);
+}
+
+/** 뷰포트가 보여주는 월드 크기. */
+export const VIEW_WIDTH = CANVAS_WIDTH / RENDER_SCALE;
+export const VIEW_HEIGHT = CANVAS_HEIGHT / RENDER_SCALE;
+
+/**
+ * 화면 고정 요소의 좌표 보정값.
+ *
+ * `scrollFactor(0)`은 스크롤만 무시할 뿐 확대는 그대로 받는다.
+ * 확대는 캔버스 중심을 기준으로 일어나므로, 화면 좌상단에 해당하는
+ * 좌표가 (0, 0)이 아니라 이만큼 안쪽으로 밀린다.
+ *
+ * 계산: (캔버스크기 / 2) × (1 − 1 / 확대배율)
+ */
+const PIN_OFFSET_X = (CANVAS_WIDTH / 2) * (1 - 1 / RENDER_SCALE);
+const PIN_OFFSET_Y = (CANVAS_HEIGHT / 2) * (1 - 1 / RENDER_SCALE);
+
+/** 화면 왼쪽에서 x픽셀 떨어진 위치. 고정 요소에만 쓴다. */
+export function screenX(x: number): number {
+  return PIN_OFFSET_X + x;
+}
+
+/** 화면 위에서 y픽셀 떨어진 위치. 고정 요소에만 쓴다. */
+export function screenY(y: number): number {
+  return PIN_OFFSET_Y + y;
+}

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { applyRenderScale } from '@/render';
+import { applyRenderScale, followInRoom, pinToScreen, screenX, screenY, VIEW_WIDTH, VIEW_HEIGHT } from '@/render';
 import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
@@ -49,30 +49,21 @@ import {
   markFired,
   type Enemy,
 } from '@/game/enemy';
-import { WAVES, TOTAL_WAVES } from '@/game/waves';
+import { ROOMS, TOTAL_ROOMS } from '@/game/rooms';
 import { rollOffer, type OfferItem } from '@/game/offer';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
-import { createRun, clearWave, pickSupport, damagePlayer, addKill, advanceTime, type RunState } from '@/game/run';
+import { createRun, clearRoom, pickSupport, damagePlayer, addKill, advanceTime, type RunState } from '@/game/run';
 
 const MOVE_SPEED = 300;
 const DASH_SPEED = 900;
 const DASH_DURATION_MS = 130;
 const DASH_COOLDOWN_MS = 900;
 const PLAYER_RADIUS = 20;
-/**
- * 실제 전투가 벌어지는 영역.
- *
- * HUD가 위쪽(체력·웨이브·조작 안내)과 아래쪽(콤보 게이지)을 쓰므로,
- * 적과 플레이어가 그 위로 올라오면 글자와 겹쳐 둘 다 읽기 어려워진다.
- * 개체가 커질수록 눈에 띄어서 영역을 분리했다.
- */
-const PLAYFIELD = {
-  minX: 24,
-  minY: 100,
-  maxX: GAME_WIDTH - 24,
-  maxY: GAME_HEIGHT - 60,
-};
+/** 방 벽 두께. 이 안쪽이 실제로 움직일 수 있는 영역이다. */
+const WALL = 24;
+/** 출구 폭. 방을 정리하면 여기가 열린다. */
+const EXIT_SIZE = 140;
 const STATUS_ORDER: StatusKind[] = ['wound', 'exposed', 'brand', 'fracture'];
 /** 벽까지 밀린 적이 받는 추가 피해. */
 const WALL_SLAM_DAMAGE = 40;
@@ -147,7 +138,16 @@ export class PlayScene extends Phaser.Scene {
   /** 이 시각 이후에야 보조능력을 고를 수 있다. */
   private offerReadyAt = 0;
   private weapons: { left: WeaponId; right: WeaponId } = { left: 'sword', right: 'bow' };
-  private startWaveIndex = 0;
+  /** 현재 방의 이동 가능 영역. 방마다 크기가 다르다. */
+  private bounds = { minX: WALL, minY: WALL, maxX: GAME_WIDTH - WALL, maxY: GAME_HEIGHT - WALL };
+  private exit!: Phaser.GameObjects.Rectangle;
+  private exitLabel!: Phaser.GameObjects.Text;
+  private roomFloor: Phaser.GameObjects.GameObject[] = [];
+  /** 방을 정리해 출구가 열렸는지. */
+  private exitOpen = false;
+  /** 화면 밖 대상을 가리키는 화살표. 적용 하나, 출구용 하나. */
+  private offscreenMarks: Phaser.GameObjects.Triangle[] = [];
+  private startRoomIndex = 0;
 
   constructor() {
     super('Play');
@@ -160,8 +160,8 @@ export class PlayScene extends Phaser.Scene {
     // 개발용: ?wave=2 로 특정 웨이브부터 시작한다.
     // 후반 웨이브를 확인할 때마다 앞 웨이브를 다시 클리어하지 않아도 되게 한다.
     const requested = Number(new URLSearchParams(location.search).get('wave'));
-    this.startWaveIndex =
-      Number.isFinite(requested) && requested >= 1 && requested <= TOTAL_WAVES ? requested - 1 : 0;
+    this.startRoomIndex =
+      Number.isFinite(requested) && requested >= 1 && requested <= TOTAL_ROOMS ? requested - 1 : 0;
   }
 
   create(): void {
@@ -176,25 +176,12 @@ export class PlayScene extends Phaser.Scene {
     this.overlay = null;
     this.arcaneFlowUntil = 0;
 
-    this.run = { ...createRun(this.weapons.left, this.weapons.right), waveIndex: this.startWaveIndex };
+    this.run = { ...createRun(this.weapons.left, this.weapons.right), roomIndex: this.startRoomIndex };
     this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
     this.right = { weapon: rightWeapon(this.run.loadout), combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
 
-    this.add.grid(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 64, 64, COLORS.background, 1, 0x1b1e2b, 1);
-    // 전장 경계. 어디까지 움직일 수 있는지 보이게 한다.
-    this.add
-      .rectangle(
-        (PLAYFIELD.minX + PLAYFIELD.maxX) / 2,
-        (PLAYFIELD.minY + PLAYFIELD.maxY) / 2,
-        PLAYFIELD.maxX - PLAYFIELD.minX,
-        PLAYFIELD.maxY - PLAYFIELD.minY,
-      )
-      .setStrokeStyle(1, 0x2a2f42)
-      .setDepth(0);
 
-    this.player = this.add
-      .circle(GAME_WIDTH / 2, (PLAYFIELD.minY + PLAYFIELD.maxY) / 2, PLAYER_RADIUS, COLORS.player)
-      .setDepth(10);
+    this.player = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.player).setDepth(10);
     this.aimLine = this.add.line(0, 0, 0, 0, 0, 0, COLORS.accent).setOrigin(0, 0).setLineWidth(2).setDepth(9);
 
     // 콤보가 차면 숫자를 읽지 않아도 알 수 있게 플레이어에 링을 띄운다.
@@ -210,7 +197,7 @@ export class PlayScene extends Phaser.Scene {
 
     this.buildHud();
     this.bindInput();
-    this.startWave();
+    this.enterRoom();
   }
 
   // ───────────────────────── 입력
@@ -400,10 +387,10 @@ export class PlayScene extends Phaser.Scene {
       entity.state,
       distance,
       {
-        minX: PLAYFIELD.minX + radius,
-        minY: PLAYFIELD.minY + radius,
-        maxX: PLAYFIELD.maxX - radius,
-        maxY: PLAYFIELD.maxY - radius,
+        minX: this.bounds.minX + radius,
+        minY: this.bounds.minY + radius,
+        maxX: this.bounds.maxX - radius,
+        maxY: this.bounds.maxY - radius,
       },
     );
 
@@ -510,13 +497,42 @@ export class PlayScene extends Phaser.Scene {
     this.damageEnemy(entity, damage);
   }
 
-  // ───────────────────────── 웨이브
+  // ───────────────────────── 방
 
-  private startWave(): void {
-    const wave = WAVES[this.run.waveIndex];
-    if (!wave) return;
+  /** 방에 들어설 때. 크기를 잡고 바닥과 벽을 그린 뒤 적을 채운다. */
+  private enterRoom(): void {
+    const room = ROOMS[this.run.roomIndex];
+    if (!room) return;
 
-    for (const spawn of wave.spawns) {
+    for (const object of this.roomFloor) object.destroy();
+    this.roomFloor = [];
+
+    this.exitOpen = false;
+    this.bounds = { minX: WALL, minY: WALL, maxX: room.width - WALL, maxY: room.height - WALL };
+
+    const cx = room.width / 2;
+    const cy = room.height / 2;
+    this.roomFloor.push(
+      this.add.grid(cx, cy, room.width, room.height, 64, 64, COLORS.background, 1, 0x1b1e2b, 1).setDepth(0),
+      this.add
+        .rectangle(cx, cy, room.width - WALL * 2, room.height - WALL * 2)
+        .setStrokeStyle(3, 0x2a2f42)
+        .setDepth(0),
+    );
+
+    // 출구는 오른쪽 벽 가운데. 방을 정리하기 전에는 닫혀 있다.
+    this.exit = this.add.rectangle(room.width - WALL / 2, cy, WALL, EXIT_SIZE, 0x2a2f42).setDepth(1);
+    this.exitLabel = this.add
+      .text(room.width - WALL - 110, cy, '', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(2);
+    this.roomFloor.push(this.exit, this.exitLabel);
+
+    // 플레이어는 왼쪽에서 들어온다.
+    this.player.setPosition(WALL + 90, cy);
+    followInRoom(this, this.player, room.width, room.height);
+
+    for (const spawn of room.spawns) {
       for (let i = 0; i < spawn.count; i++) {
         const at = this.edgeSpawnPoint();
         const enemy = createEnemy(spawn.kind, at.x, at.y);
@@ -542,27 +558,51 @@ export class PlayScene extends Phaser.Scene {
       const onVertical = Math.random() < 0.5;
       const point = onVertical
         ? {
-            x: Math.random() < 0.5 ? PLAYFIELD.minX + 30 : PLAYFIELD.maxX - 30,
-            y: Phaser.Math.Between(PLAYFIELD.minY + 30, PLAYFIELD.maxY - 30),
+            x: Math.random() < 0.5 ? this.bounds.minX + 30 : this.bounds.maxX - 30,
+            y: Phaser.Math.Between(this.bounds.minY + 30, this.bounds.maxY - 30),
           }
         : {
-            x: Phaser.Math.Between(PLAYFIELD.minX + 30, PLAYFIELD.maxX - 30),
-            y: Math.random() < 0.5 ? PLAYFIELD.minY + 30 : PLAYFIELD.maxY - 30,
+            x: Phaser.Math.Between(this.bounds.minX + 30, this.bounds.maxX - 30),
+            y: Math.random() < 0.5 ? this.bounds.minY + 30 : this.bounds.maxY - 30,
           };
       if (Math.hypot(point.x - this.player.x, point.y - this.player.y) > 220) return point;
     }
-    return { x: PLAYFIELD.minX + 30, y: PLAYFIELD.minY + 30 };
+    return { x: this.bounds.minX + 30, y: this.bounds.minY + 30 };
   }
 
-  private checkWaveCleared(): void {
-    if (this.run.phase !== 'combat' || this.enemies.some((e) => isAlive(e.state))) return;
+  /**
+   * 방을 정리하면 출구가 열린다. 바로 넘어가지 않고 걸어 나가야 한다.
+   * 마지막 방(보스)만 정리 즉시 승리로 간다.
+   */
+  private checkRoomCleared(): void {
+    if (this.run.phase !== 'combat' || this.exitOpen) return;
+    if (this.enemies.some((e) => isAlive(e.state))) return;
 
-    const wave = WAVES[this.run.waveIndex];
-    this.run = clearWave(this.run, wave?.offersSupport ?? false);
+    if (this.run.roomIndex >= TOTAL_ROOMS - 1) {
+      this.run = clearRoom(this.run, false);
+      this.showResult(true);
+      if (DEBUG_ENABLED) this.publishDebug();
+      return;
+    }
+
+    this.exitOpen = true;
+    this.exit.setFillStyle(COLORS.accent);
+    this.exitLabel.setText('출구 →');
+    this.tweens.add({ targets: this.exit, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
+  }
+
+  /** 열린 출구에 닿으면 다음 방으로 넘어간다. */
+  private checkExitReached(): void {
+    if (!this.exitOpen) return;
+    if (Math.abs(this.player.x - this.exit.x) > WALL + PLAYER_RADIUS) return;
+    if (Math.abs(this.player.y - this.exit.y) > EXIT_SIZE / 2 + PLAYER_RADIUS) return;
+
+    this.exitOpen = false;
+    const room = ROOMS[this.run.roomIndex];
+    this.run = clearRoom(this.run, room?.offersSupport ?? false);
 
     if (this.run.phase === 'offer') this.showOffer();
-    else if (this.run.phase === 'won') this.showResult(true);
-    else this.startWave();
+    else this.enterRoom();
 
     if (DEBUG_ENABLED) this.publishDebug();
   }
@@ -581,20 +621,22 @@ export class PlayScene extends Phaser.Scene {
     this.updateAim();
     this.updateComboRings();
     this.updateArcaneAura();
+    this.updateOffscreenMarks();
     if (DEBUG_ENABLED) this.publishDebug();
     this.updateAreas(dt);
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
     this.updateEnemyShots(dt);
-    this.checkWaveCleared();
+    this.checkRoomCleared();
+    this.checkExitReached();
   }
 
   /** 개발 빌드에서만 상태를 노출한다. 헤드리스 검증 드라이버가 읽는다. */
   private publishDebug(): void {
     publishDebugState({
       phase: this.run.phase,
-      waveIndex: this.run.waveIndex,
-      totalWaves: TOTAL_WAVES,
+      roomIndex: this.run.roomIndex,
+      totalRooms: TOTAL_ROOMS,
       hp: this.run.hp,
       maxHp: this.run.maxHp,
       kills: this.run.kills,
@@ -616,6 +658,7 @@ export class PlayScene extends Phaser.Scene {
         required: COMBO_REQUIRED,
       },
       offerCount: this.currentOffer.length,
+      exit: this.exitOpen ? { x: this.exit.x, y: this.exit.y } : null,
       events: { ...this.ruleEvents },
     });
   }
@@ -629,13 +672,13 @@ export class PlayScene extends Phaser.Scene {
     const step = (dashing ? DASH_SPEED : MOVE_SPEED) * dt;
     this.player.x = Phaser.Math.Clamp(
       this.player.x + direction.x * step,
-      PLAYFIELD.minX + PLAYER_RADIUS,
-      PLAYFIELD.maxX - PLAYER_RADIUS,
+      this.bounds.minX + PLAYER_RADIUS,
+      this.bounds.maxX - PLAYER_RADIUS,
     );
     this.player.y = Phaser.Math.Clamp(
       this.player.y + direction.y * step,
-      PLAYFIELD.minY + PLAYER_RADIUS,
-      PLAYFIELD.maxY - PLAYER_RADIUS,
+      this.bounds.minY + PLAYER_RADIUS,
+      this.bounds.maxY - PLAYER_RADIUS,
     );
   }
 
@@ -650,6 +693,46 @@ export class PlayScene extends Phaser.Scene {
     const ratio = remaining / (ARCANE_FLOW_DURATION * 1000);
     this.arcaneAura.setAlpha(0.1 + 0.2 * ratio);
     this.arcaneAura.setScale(1 + Math.sin(this.time.now / 140) * 0.06);
+  }
+
+  /**
+   * 화면 밖에 있는 적과 출구를 화면 가장자리 화살표로 가리킨다.
+   * 가까운 순으로 최대 8개까지만 표시해 화면이 지저분해지지 않게 한다.
+   */
+  private updateOffscreenMarks(): void {
+    const camera = this.cameras.main;
+    const view = camera.worldView;
+    const margin = 34;
+
+    const targets: { x: number; y: number; color: number }[] = this.enemies
+      .filter((e) => isAlive(e.state) && !view.contains(e.state.x, e.state.y))
+      .map((e) => ({ x: e.state.x, y: e.state.y, color: ENEMY_STATS[e.state.kind].color }))
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - this.player.x, a.y - this.player.y) -
+          Math.hypot(b.x - this.player.x, b.y - this.player.y),
+      );
+
+    if (this.exitOpen && !view.contains(this.exit.x, this.exit.y)) {
+      targets.unshift({ x: this.exit.x, y: this.exit.y, color: COLORS.accent });
+    }
+
+    for (const [index, mark] of this.offscreenMarks.entries()) {
+      const target = targets[index];
+      mark.setVisible(target !== undefined);
+      if (!target) continue;
+
+      const angle = Math.atan2(target.y - view.centerY, target.x - view.centerX);
+      // 화면 안쪽 여백을 따라 타원으로 배치한다.
+      const px = VIEW_WIDTH / 2 - margin;
+      const py = VIEW_HEIGHT / 2 - margin;
+      mark.setPosition(
+        screenX(VIEW_WIDTH / 2 + Math.cos(angle) * px),
+        screenY(VIEW_HEIGHT / 2 + Math.sin(angle) * py),
+      );
+      mark.setRotation(angle + Math.PI / 2);
+      mark.setFillStyle(target.color, 0.85);
+    }
   }
 
   private updateComboRings(): void {
@@ -687,8 +770,8 @@ export class PlayScene extends Phaser.Scene {
         if (direction) {
           const step = enemySpeed(enemy) * dt;
           const radius = ENEMY_STATS[enemy.kind].radius;
-          enemy.x = Phaser.Math.Clamp(enemy.x + direction.x * step, PLAYFIELD.minX + radius, PLAYFIELD.maxX - radius);
-          enemy.y = Phaser.Math.Clamp(enemy.y + direction.y * step, PLAYFIELD.minY + radius, PLAYFIELD.maxY - radius);
+          enemy.x = Phaser.Math.Clamp(enemy.x + direction.x * step, this.bounds.minX + radius, this.bounds.maxX - radius);
+          enemy.y = Phaser.Math.Clamp(enemy.y + direction.y * step, this.bounds.minY + radius, this.bounds.maxY - radius);
         }
         if (readyToFire(enemy)) this.enemyFire(enemy);
       }
@@ -893,25 +976,36 @@ export class PlayScene extends Phaser.Scene {
   // ───────────────────────── HUD와 오버레이
 
   private buildHud(): void {
-    this.add.rectangle(24, 26, 240, 14, 0x2a2f42).setOrigin(0, 0.5).setDepth(19);
-    this.hpBarFill = this.add.rectangle(24, 26, 240, 14, 0x6ee7a8).setOrigin(0, 0.5).setDepth(20);
-    this.hud = this.add.text(24, 44, '', { fontSize: '14px', color: COLORS.text, lineSpacing: 3 }).setDepth(20);
+    const barBack = this.add.rectangle(screenX(24), screenY(26), 240, 14, 0x2a2f42).setOrigin(0, 0.5).setDepth(19);
+    this.hpBarFill = this.add.rectangle(screenX(24), screenY(26), 240, 14, 0x6ee7a8).setOrigin(0, 0.5).setDepth(20);
+    this.hud = this.add
+      .text(screenX(24), screenY(44), '', { fontSize: '14px', color: COLORS.text, lineSpacing: 3 })
+      .setDepth(20);
     this.comboText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 40, '', { fontSize: '16px', color: COLORS.textDim })
+      .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 40), '', { fontSize: '16px', color: COLORS.textDim })
       .setOrigin(0.5)
       .setDepth(20);
 
-    this.add
-      .text(GAME_WIDTH - 24, 20, 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 재시작', {
+    const hint = this.add
+      .text(screenX(VIEW_WIDTH - 24), screenY(20), 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 재시작', {
         fontSize: '13px',
         color: COLORS.textDim,
       })
       .setOrigin(1, 0)
       .setDepth(20);
+
+    // 카메라가 방을 따라 움직여도 HUD는 화면에 붙어 있어야 한다.
+    pinToScreen(barBack, this.hpBarFill, this.hud, this.comboText, hint);
+
+    // 방이 화면보다 크므로 밖에 있는 대상을 가리키는 표시가 필요하다.
+    // 없으면 남은 적을 찾아 헤매게 된다.
+    this.offscreenMarks = Array.from({ length: 8 }, () =>
+      this.add.triangle(0, 0, 0, -10, 8, 8, -8, 8, COLORS.accent, 0.8).setDepth(21).setScrollFactor(0).setVisible(false),
+    );
   }
 
   private refreshHud(): void {
-    const wave = WAVES[this.run.waveIndex];
+    const wave = ROOMS[this.run.roomIndex];
     const remaining = this.enemies.filter((e) => isAlive(e.state)).length;
     this.hpBarFill.width = (240 * this.run.hp) / this.run.maxHp;
 
@@ -919,10 +1013,11 @@ export class PlayScene extends Phaser.Scene {
     this.hud.setText(
       [
         `체력 ${Math.ceil(this.run.hp)} / ${this.run.maxHp}`,
-        `${wave?.label ?? '-'} (${this.run.waveIndex + 1}/${TOTAL_WAVES})   남은 적 ${remaining}   처치 ${this.run.kills}`,
+        `${wave?.label ?? '-'} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   남은 적 ${remaining}   처치 ${this.run.kills}`,
         ...hands.map(
           (h) => `${h.hand} ${h.weapon}` + (h.lines.length ? `   ${h.lines.join('  ·  ')}` : ''),
         ),
+        ...(this.exitOpen ? ['방을 정리했다. 출구로 이동 →'] : []),
       ].join('\n'),
     );
     this.updateComboText();
@@ -941,43 +1036,44 @@ export class PlayScene extends Phaser.Scene {
 
     if (this.currentOffer.length === 0) {
       this.run = pickSupport(this.run, undefined);
-      this.startWave();
+      this.enterRoom();
       return;
     }
 
     this.offerReadyAt = this.time.now + OFFER_INPUT_DELAY;
 
     const container = this.add.container(0, 0).setDepth(30);
-    container.add(this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x0a0b0f, 0.82));
+    container.add(this.add.rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.82));
+    container.setScrollFactor(0);
     container.add(
       this.add
-        .text(GAME_WIDTH / 2, 140, '보조능력을 하나 고르세요', { fontSize: '30px', color: COLORS.text, fontStyle: 'bold' })
+        .text(screenX(VIEW_WIDTH / 2), screenY(140), '보조능력을 하나 고르세요', { fontSize: '30px', color: COLORS.text, fontStyle: 'bold' })
         .setOrigin(0.5),
     );
 
     const cardWidth = 300;
     const gap = 32;
     const total = this.currentOffer.length * cardWidth + (this.currentOffer.length - 1) * gap;
-    const startX = (GAME_WIDTH - total) / 2 + cardWidth / 2;
+    const startX = screenX((VIEW_WIDTH - total) / 2 + cardWidth / 2);
 
     for (const [index, item] of this.currentOffer.entries()) {
       const x = startX + index * (cardWidth + gap);
       const card = this.add
-        .rectangle(x, GAME_HEIGHT / 2, cardWidth, 250, 0x171a26)
+        .rectangle(x, screenY(VIEW_HEIGHT / 2), cardWidth, 250, 0x171a26)
         .setStrokeStyle(2, COLORS.accent)
         .setInteractive({ useHandCursor: true });
       card.on('pointerdown', () => this.choose(index));
       container.add(card);
 
-      container.add(this.add.text(x, GAME_HEIGHT / 2 - 88, `${index + 1}`, { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5));
+      container.add(this.add.text(x, screenY(VIEW_HEIGHT / 2) - 88, `${index + 1}`, { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5));
       container.add(
-        this.add.text(x, GAME_HEIGHT / 2 - 50, item.support.name, { fontSize: '24px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0.5),
+        this.add.text(x, screenY(VIEW_HEIGHT / 2) - 50, item.support.name, { fontSize: '24px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0.5),
       );
       // 어느 스킬에 붙는지 함께 보여준다. 태그 때문에 붙을 곳이 정해진다.
       const hand = handOf(this.run.loadout, item.skill.id);
       container.add(
         this.add
-          .text(x, GAME_HEIGHT / 2 - 18, `→ ${hand ? `${hand} ` : ''}${item.skill.name}`, {
+          .text(x, screenY(VIEW_HEIGHT / 2) - 18, `→ ${hand ? `${hand} ` : ''}${item.skill.name}`, {
             fontSize: '15px',
             color: COLORS.accentText,
           })
@@ -985,7 +1081,7 @@ export class PlayScene extends Phaser.Scene {
       );
       container.add(
         this.add
-          .text(x, GAME_HEIGHT / 2 + 42, item.support.description, {
+          .text(x, screenY(VIEW_HEIGHT / 2) + 42, item.support.description, {
             fontSize: '13px',
             color: COLORS.textDim,
             align: 'center',
@@ -997,7 +1093,7 @@ export class PlayScene extends Phaser.Scene {
     }
 
     const hint = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 120, '', { fontSize: '15px', color: COLORS.textDim })
+      .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 120), '', { fontSize: '15px', color: COLORS.textDim })
       .setOrigin(0.5);
     container.add(hint);
 
@@ -1021,15 +1117,16 @@ export class PlayScene extends Phaser.Scene {
     this.overlay?.destroy(true);
     this.overlay = null;
     this.run = pickSupport(this.run, { support: item.support, skillId: item.skill.id });
-    this.startWave();
+    this.enterRoom();
   }
 
   private showResult(won: boolean): void {
     const container = this.add.container(0, 0).setDepth(30);
-    container.add(this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x0a0b0f, 0.88));
+    container.add(this.add.rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
+    container.setScrollFactor(0);
     container.add(
       this.add
-        .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 90, won ? '승리' : '패배', {
+        .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2) - 90, won ? '승리' : '패배', {
           fontSize: '56px',
           color: won ? '#6ee7a8' : '#ff6b6b',
           fontStyle: 'bold',
@@ -1053,7 +1150,7 @@ export class PlayScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
     container.add(
-      this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 90, 'R 키로 무기를 다시 골라 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
+      this.add.text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2) + 90, 'R 키로 무기를 다시 골라 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
     );
     this.overlay = container;
   }
