@@ -74,14 +74,8 @@ const WALL_SLAM_DAMAGE = 40;
 /** 상태 연출 색. 상태 표시 점과 같은 색을 써서 무엇이 터졌는지 연결되게 한다. */
 const BURST_COLOR = 0xff6b6b;
 const BRAND_COLOR = 0xb08bff;
-/**
- * 보조능력 선택 화면이 뜬 뒤 입력을 받기까지의 지연(ms).
- *
- * 전투 중 연타하던 클릭이 화면이 뜨자마자 그대로 카드에 꽂혀서,
- * 선택지를 읽기도 전에 골라지는 문제가 있었다.
- * 이 시간 동안 카드는 흐리게 떠 있고 입력을 받지 않는다.
- */
-const OFFER_INPUT_DELAY = 800;
+/** 선택 창이 뜰 때의 페이드인(ms). 입력은 처음부터 받는다. */
+const OFFER_FADE_MS = 140;
 
 interface EnemyEntity {
   state: Enemy;
@@ -139,8 +133,11 @@ export class PlayScene extends Phaser.Scene {
   private currentOffer: OfferItem[] = [];
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
   private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0 };
-  /** 이 시각 이후에야 보조능력을 고를 수 있다. */
-  private offerReadyAt = 0;
+  /** 지금 고른 보조능력. 같은 카드를 한 번 더 눌러야 확정된다. */
+  private selectedOffer: number | null = null;
+  private offerCards: Phaser.GameObjects.Rectangle[] = [];
+  /** 카드마다 '다시 눌러 결정' 안내. 고른 카드에만 뜬다. */
+  private offerConfirmLabels: Phaser.GameObjects.Text[] = [];
   private weapons: { left: WeaponId; right: WeaponId } = { left: 'sword', right: 'bow' };
   /** 현재 방의 이동 가능 영역. 방마다 크기가 다르다. */
   private bounds = { minX: WALL, minY: WALL, maxX: GAME_WIDTH - WALL, maxY: GAME_HEIGHT - WALL };
@@ -237,8 +234,9 @@ export class PlayScene extends Phaser.Scene {
     keyboard.on('keydown-SPACE', () => this.tryDash());
     keyboard.on('keydown-R', () => this.scene.start('Select'));
     for (const [index, name] of ['ONE', 'TWO', 'THREE'].entries()) {
-      keyboard.on(`keydown-${name}`, () => this.choose(index));
+      keyboard.on(`keydown-${name}`, () => this.selectOffer(index));
     }
+    keyboard.on('keydown-ENTER', () => this.confirmOffer());
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -740,6 +738,7 @@ export class PlayScene extends Phaser.Scene {
       events: { ...this.ruleEvents },
       projectiles: this.projectiles.length,
       room: { width: this.bounds.maxX + WALL, height: this.bounds.maxY + WALL },
+      pointer: { x: this.input.activePointer.worldX, y: this.input.activePointer.worldY },
       scroll: { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY },
     });
   }
@@ -1190,11 +1189,12 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
-    this.offerReadyAt = this.time.now + OFFER_INPUT_DELAY;
+    this.selectedOffer = null;
+    this.offerCards = [];
+    this.offerConfirmLabels = [];
 
     const container = this.add.container(0, 0).setDepth(30);
     container.add(this.add.rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.82));
-    container.setScrollFactor(0);
     container.add(
       this.add
         .text(screenX(VIEW_WIDTH / 2), screenY(140), '보조능력을 하나 고르세요', { fontSize: '30px', color: COLORS.text, fontStyle: 'bold' })
@@ -1210,10 +1210,18 @@ export class PlayScene extends Phaser.Scene {
       const x = startX + index * (cardWidth + gap);
       const card = this.add
         .rectangle(x, screenY(VIEW_HEIGHT / 2), cardWidth, 250, 0x171a26)
-        .setStrokeStyle(2, COLORS.accent)
+        .setStrokeStyle(2, 0x2a2f42)
         .setInteractive({ useHandCursor: true });
-      card.on('pointerdown', () => this.choose(index));
+      // 처음 누르면 고르기만 하고, 고른 것을 다시 누르면 확정한다.
+      card.on('pointerdown', () => this.selectOffer(index));
       container.add(card);
+      this.offerCards.push(card);
+
+      const confirmLabel = this.add
+        .text(x, screenY(VIEW_HEIGHT / 2) + 100, '', { fontSize: '14px', color: COLORS.accentText, fontStyle: 'bold' })
+        .setOrigin(0.5);
+      container.add(confirmLabel);
+      this.offerConfirmLabels.push(confirmLabel);
 
       container.add(this.add.text(x, screenY(VIEW_HEIGHT / 2) - 88, `${index + 1}`, { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5));
       container.add(
@@ -1242,30 +1250,75 @@ export class PlayScene extends Phaser.Scene {
       );
     }
 
-    const hint = this.add
-      .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 120), '', { fontSize: '15px', color: COLORS.textDim })
-      .setOrigin(0.5);
-    container.add(hint);
+    container.add(
+      this.add
+        .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 120), '숫자키 1-3으로 고르고, 고른 카드를 다시 누르거나 Enter로 결정', {
+          fontSize: '15px',
+          color: COLORS.textDim,
+        })
+        .setOrigin(0.5),
+    );
 
-    // 입력을 받기 전까지는 흐리게 떠 있어서, 아직 고를 수 없다는 게 눈에 보인다.
-    container.setAlpha(0.35);
-    hint.setText('...');
-    this.tweens.add({ targets: container, alpha: 1, duration: OFFER_INPUT_DELAY, ease: 'Quad.easeOut' });
-    this.time.delayedCall(OFFER_INPUT_DELAY, () => hint.setText('숫자키 1-3 또는 클릭'));
+    // 자식을 전부 넣은 뒤에 걸어야 한다. 컨테이너에만 걸면 그리기는 고정되지만
+    // 클릭 판정은 자식 자신의 scrollFactor를 보기 때문에 서로 어긋난다.
+    container.setScrollFactor(0, 0, true);
+
+    // 페이드인만 짧게 한다. 입력은 처음부터 받는다.
+    container.setAlpha(0.4);
+    this.tweens.add({ targets: container, alpha: 1, duration: OFFER_FADE_MS, ease: 'Quad.easeOut' });
+    this.refreshOfferSelection();
 
     this.overlay = container;
   }
 
-  private choose(index: number): void {
+  /**
+   * 카드를 고른다. 이미 고른 것을 또 누르면 확정한다.
+   *
+   * 고르기와 확정을 나눈 이유가 있다. 전투 중 연타하던 클릭이 창이 뜨자마자
+   * 카드에 꽂혀 선택지를 읽기도 전에 골라지는 문제가 있었는데, 처음에는
+   * 창이 뜬 뒤 800ms 동안 입력을 막아 해결했다. 그런데 그 800ms 동안 누른 것이
+   * **조용히 사라졌다.** 첫 창은 선택지를 읽느라 800ms를 넘겨서 멀쩡했고,
+   * 두 번째부터는 뭘 고를지 알고 바로 누르기 때문에 클릭이 통째로 먹히지 않았다.
+   *
+   * 시간으로 막는 대신 단계를 하나 두었다. 흘러든 클릭은 기껏해야 카드를 바꿀 뿐
+   * 판을 진행시키지 못하고, 지연이 없으니 아무리 빨리 눌러도 받는다.
+   */
+  private selectOffer(index: number): void {
     if (this.run.phase !== 'offer') return;
-    // 전투 중 연타가 그대로 선택으로 이어지지 않도록 잠깐 입력을 막는다.
-    if (this.time.now < this.offerReadyAt) return;
+    if (!this.currentOffer[index]) return;
 
-    const item = this.currentOffer[index];
+    if (this.selectedOffer === index) {
+      this.confirmOffer();
+      return;
+    }
+    this.selectedOffer = index;
+    this.refreshOfferSelection();
+  }
+
+  /** 무엇을 골랐는지 눈에 보이게 한다. */
+  private refreshOfferSelection(): void {
+    for (const [index, card] of this.offerCards.entries()) {
+      const chosen = index === this.selectedOffer;
+      card.setStrokeStyle(chosen ? 4 : 2, chosen ? COLORS.accent : 0x2a2f42);
+      card.setFillStyle(chosen ? 0x232838 : 0x171a26);
+    }
+    for (const [index, label] of this.offerConfirmLabels.entries()) {
+      label.setText(index === this.selectedOffer ? '다시 눌러 결정' : '');
+    }
+  }
+
+  /** 고른 것을 확정하고 다음 방으로 넘어간다. */
+  private confirmOffer(): void {
+    if (this.run.phase !== 'offer' || this.selectedOffer === null) return;
+
+    const item = this.currentOffer[this.selectedOffer];
     if (!item) return;
 
     this.overlay?.destroy(true);
     this.overlay = null;
+    this.offerCards = [];
+    this.offerConfirmLabels = [];
+    this.selectedOffer = null;
     this.run = pickSupport(this.run, { support: item.support, skillId: item.skill.id });
     this.enterRoom();
   }
@@ -1273,7 +1326,6 @@ export class PlayScene extends Phaser.Scene {
   private showResult(won: boolean): void {
     const container = this.add.container(0, 0).setDepth(30);
     container.add(this.add.rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
-    container.setScrollFactor(0);
     container.add(
       this.add
         .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2) - 90, won ? '승리' : '패배', {
@@ -1302,6 +1354,8 @@ export class PlayScene extends Phaser.Scene {
     container.add(
       this.add.text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2) + 90, 'R 키로 무기를 다시 골라 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
     );
+    // 자식을 전부 넣은 뒤에 건다. 자세한 이유는 showOffer 참고.
+    container.setScrollFactor(0, 0, true);
     this.overlay = container;
   }
 }

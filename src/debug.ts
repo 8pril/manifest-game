@@ -41,6 +41,14 @@ export interface DebugState {
   projectiles: number;
   /** 현재 방의 크기. */
   room: { width: number; height: number };
+  /**
+   * 게임이 인식하는 포인터의 월드 좌표.
+   *
+   * 드라이버가 월드 좌표를 캔버스 픽셀로 바꿔 클릭할 때, 확대와 스크롤을
+   * 직접 계산하면 틀리기 쉽다. 실제로 조준이 320px 어긋나 원거리 공격이
+   * 전부 빗나간 적이 있다. 게임이 쓰는 값을 그대로 노출해 계산을 검증한다.
+   */
+  pointer: { x: number; y: number };
   /** 월드 좌표를 화면 좌표로 바꾸는 데 필요한 값. */
   view: {
     zoom: number;
