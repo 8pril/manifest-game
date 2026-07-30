@@ -6,15 +6,13 @@
 지금 게임은 전부 도형(원·사각형)으로 그려져 있다. 이걸 스프라이트로 교체한다.
 생성한 이미지를 아래 규칙대로 파일명만 맞춰서 넘기면 개발 쪽에서 붙인다.
 
-> **생성 전에 `docs/concept-brief.md`를 먼저 채워야 한다.**
+> **2026-07-30 갱신: 생성을 시작해도 된다.**
 >
-> 아래 프롬프트의 세계관 관련 단어(`swordfighter`, `creature`, `armored brute`,
-> `dark carapace` 등)는 **개발 쪽에서 임시로 채워 넣은 값이다.** 원안에 세계관이
-> 없어 근거 없이 지어낸 것이므로, 이대로 생성하면 그 임시 단어가 게임의 비주얼
-> 정체성으로 굳는다.
+> 기획 담당이 `docs/concept-brief.md`를 채웠고, 아래 프롬프트를 그 내용으로
+> 다시 썼다. 이전에 개발 쪽에서 임시로 지어냈던 단어(`a lone swordfighter`,
+> `armored brute`, `dark carapace` 등)는 전부 버렸다.
 >
-> 크기·색·파일명·구도 규칙은 확정이니 그대로 쓰면 된다. **바꿔야 하는 것은
-> 프롬프트의 명사와 형용사뿐이다.**
+> 제목만 아직 미정인데, 아트 생성을 막지 않는다.
 
 ## 전제
 
@@ -112,48 +110,80 @@
 
 무기 색도 이미 정해져 있다. 검 `#c9d1e8` / 활 `#9ae6a0` / 비전 `#b08bff` / 방패 `#ffc55c`.
 
-## 프롬프트 초안
+## 프롬프트
 
-**세계관 단어는 임시값이다.** `docs/concept-brief.md`가 채워지면 이 절을 다시 쓴다.
-지금은 구조만 참고할 것. `top-down view`, `facing right`, `transparent background`,
-`no shadow`, 캔버스 크기는 세계관과 무관하게 유지해야 하는 부분이다.
+기획 담당의 세계관 답변(`docs/concept-brief.md`)을 반영한 것이다.
 
-**플레이어**
-```
-top-down view of a lone swordfighter game sprite, seen directly from above,
-facing right, compact silhouette, glowing cyan-blue accents (#6ea8ff),
-dark armor, clean readable shape, transparent background, no shadow,
-centered, game asset, 128x128
-```
+`top-down view`, `facing right`, `transparent background`, `no shadow`, 캔버스 크기는
+게임 코드가 요구하는 조건이므로 **세계관과 무관하게 그대로 둬야 한다.**
 
-**추적자**
-```
-top-down view of a small aggressive creature game sprite, seen directly from
-above, facing right, hunched forward, dull red tone (#d4574e), simple bold
-silhouette readable at small size, transparent background, no shadow, 128x128
-```
+> **참고작을 프롬프트에 이름으로 넣지 말 것.**
+>
+> 톤 참고가 '아이작'이지만 `in the style of The Binding of Isaac`처럼 쓰면
+> 특정 상용 작품의 화풍을 그대로 모사하게 된다. 대회 제출물에는 위험하다.
+> 아래처럼 **그 작품이 주는 성질을 단어로 풀어서** 넣었다 —
+> `hand-drawn`, `grimy`, `muted`, `unsettling`, `dungeon`.
 
-**중장갑**
+**플레이어** — 현대인 + 양팔의 실체화 장비
+
 ```
-top-down view of a heavy armored brute game sprite, seen directly from above,
-facing right, broad and bulky, dark red plating (#b0453d), thick shoulders,
-simple readable silhouette, transparent background, no shadow, 192x192
+top-down view of a game sprite: a person in modern everyday clothing
+(hoodie and pants), seen directly from above, facing right, wearing bulky
+glove-like gauntlets on both forearms, faint cyan-blue energy at the hands
+(#6ea8ff), compact readable silhouette, hand-drawn grimy texture, muted
+palette, transparent background, no shadow, centered, 128x128
 ```
 
-**사수**
+**현대 복장과 이세계의 대비가 이 게임의 가장 강한 훅이다.** 판타지 갑옷이나
+로브가 섞여 들어오면 다시 뽑는다. 후드티·재킷·운동화 같은 것이 보여야 한다.
+
+**추적자** — 개 형태
+
 ```
-top-down view of a ranged archer creature game sprite, seen directly from
-above, facing right, slender, holding a bow forward, ochre yellow (#e0b055),
-simple readable silhouette, transparent background, no shadow, 128x128
+top-down view of a game sprite: a gaunt dog-like beast seen directly from
+above, facing right, four legs, lean and hunched, dull red tone (#d4574e),
+hand-drawn grimy texture, unsettling but simple bold silhouette readable at
+small size, transparent background, no shadow, 128x128
 ```
 
-**보스**
+**중장갑** — 속이 빈 갑옷
+
 ```
-top-down view of a large menacing boss creature game sprite, seen directly
-from above, facing right, imposing mass, burning orange core (#ff6b3d),
-dark carapace, dramatic but readable silhouette, transparent background,
+top-down view of a game sprite: a suit of heavy plate armor standing upright
+and holding a spear, seen directly from above, facing right, broad and bulky,
+HOLLOW AND EMPTY INSIDE with nothing but darkness where a body would be,
+dark red plating (#b0453d), hand-drawn grimy texture, transparent background,
+no shadow, 192x192
+```
+
+**"갑옷 안에 아무것도 없다"가 이 적의 정체다.** 사람이 입고 있는 것처럼 보이면
+다시 뽑는다. 목 부분이나 투구 틈으로 빈 어둠이 보여야 한다.
+
+**사수** — 가죽 장비, 마후라로 가린 하관
+
+```
+top-down view of a game sprite: a lean humanoid archer seen directly from
+above, facing right, wearing layered leather gear, lower face wrapped in a
+cloth muffler, holding a bow forward with throwing knives at the belt,
+ochre yellow (#e0b055), hand-drawn grimy texture, transparent background,
+no shadow, 128x128
+```
+
+**보스** — 잡몹보다 훨씬 거대
+
+```
+top-down view of a game sprite: a massive looming boss creature seen directly
+from above, facing right, several times larger than a human, heavy imposing
+mass, burning orange core glowing through its body (#ff6b3d), hand-drawn
+grimy texture, dramatic but readable silhouette, transparent background,
 no shadow, 256x256
 ```
+
+표시 크기가 잡몹의 2배 이상(96px vs 42~56px)이므로 **캔버스 안에서도 확실히
+꽉 차게** 그려야 한다. 잡몹과 비슷한 덩치로 나오면 다시 뽑는다.
+
+> 기획 답변에 **"보스는 한 종류로 하면 절대 안될듯"**이 있다. 예선 빌드는 아직
+> 보스 1종이므로 이미지도 1장이다. 보스가 늘어나면 늘어난 수만큼 추가로 필요하다.
 
 **투사체 (색만 바꿔 반복)**
 ```
@@ -170,11 +200,18 @@ transparent background, centered, 256x256
 ```
 
 **바닥 타일**
+
+장소는 "현대인이 끌려온 이세계"이고 인상은 던전 쪽이다.
+금속 패널 같은 현대적·SF적 재질은 쓰지 않는다.
+
 ```
-seamless tileable dark floor texture, top-down view, very dark blue-grey
-(#0a0b0f base), subtle worn metal panel pattern, low contrast, no strong
-features, seamless on all four edges, 128x128
+seamless tileable dark dungeon floor texture, top-down view, very dark
+blue-grey base (#0a0b0f), worn cracked stone slabs with grime in the seams,
+hand-drawn texture, low contrast, no strong focal features, seamless on all
+four edges, 128x128
 ```
+
+바닥은 **캐릭터를 받쳐주는 배경이지 주인공이 아니다.** 무늬가 눈에 띄면 다시 뽑는다.
 
 ## 검수 기준
 
@@ -187,6 +224,15 @@ features, seamless on all four edges, 128x128
 - [ ] 어두운 배경 위에서 묻히지 않는가
 - [ ] 바닥 타일은 네 방향으로 이음매 없이 반복되는가
 - [ ] 캐릭터 크기 비율이 표의 표시 크기와 대략 맞는가
+
+세계관에서 어긋나기 쉬운 것들. **이미지 생성기가 가장 자주 무시하는 항목이다.**
+
+- [ ] 플레이어가 **현대 복장**인가 (판타지 갑옷·로브로 바뀌지 않았는가)
+- [ ] 플레이어의 **양팔에 실체화 장비**가 보이는가
+- [ ] 중장갑의 **속이 비어 있는가** (사람이 입은 것처럼 보이지 않는가)
+- [ ] 사수의 **하관이 가려져** 있는가
+- [ ] 추적자가 **네 발 짐승 형태**인가 (사람 형태로 바뀌지 않았는가)
+- [ ] 보스가 잡몹보다 **확연히 거대**한가
 
 ## 넘기는 방법
 
