@@ -5,6 +5,8 @@ import {
   onHitTerrain,
   advance,
   resetProjectileIds,
+  isOutOfBounds,
+  DESPAWN_MARGIN,
   type Target,
 } from '@/engine/projectile';
 import type { Behavior } from '@/engine/support';
@@ -196,5 +198,34 @@ describe('onHitTerrain - 튕겨쏘기', () => {
     p.angle = 0.5;
     onHitTerrain(p, 'horizontal');
     expect(p.angle).toBeCloseTo(-0.5, 10);
+  });
+});
+
+describe('isOutOfBounds', () => {
+  // 실제 방 크기. 화면(1280×720)보다 크다는 점이 이 테스트의 전부다.
+  const room = { minX: 24, minY: 24, maxX: 1900 - 24, maxY: 1150 - 24 };
+
+  it('방 안의 투사체는 살아 있다', () => {
+    expect(isOutOfBounds({ x: 100, y: 100 }, room)).toBe(false);
+    expect(isOutOfBounds({ x: 950, y: 575 }, room)).toBe(false);
+  });
+
+  it('화면보다 바깥이어도 방 안이면 살아 있다', () => {
+    // 회귀 방지. 화면 크기(1280×720)로 판정하던 때는 여기서 전부 지워졌고,
+    // 그 결과 방 오른쪽·아래쪽에서 활과 비전이 안 나가는 것처럼 보였다.
+    expect(isOutOfBounds({ x: 1500, y: 575 }, room)).toBe(false);
+    expect(isOutOfBounds({ x: 950, y: 1000 }, room)).toBe(false);
+    expect(isOutOfBounds({ x: 1850, y: 1100 }, room)).toBe(false);
+  });
+
+  it('방 밖으로 여유 거리를 넘어가면 사라진다', () => {
+    expect(isOutOfBounds({ x: 1960, y: 575 }, room)).toBe(true);
+    expect(isOutOfBounds({ x: 950, y: 1200 }, room)).toBe(true);
+    expect(isOutOfBounds({ x: -50, y: 575 }, room)).toBe(true);
+    expect(isOutOfBounds({ x: 950, y: -50 }, room)).toBe(true);
+  });
+
+  it('벽 바로 바깥은 여유 거리 안이라 아직 살아 있다', () => {
+    expect(isOutOfBounds({ x: room.maxX + DESPAWN_MARGIN - 1, y: 575 }, room)).toBe(false);
   });
 });

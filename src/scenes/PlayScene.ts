@@ -11,6 +11,7 @@ import {
   advance,
   onHitTarget,
   resetProjectileIds,
+  isOutOfBounds,
   type Projectile,
 } from '@/engine/projectile';
 import { targetsInArc } from '@/engine/melee';
@@ -64,6 +65,8 @@ const PLAYER_RADIUS = 20;
 const WALL = 24;
 /** 출구 폭. 방을 정리하면 여기가 열린다. */
 const EXIT_SIZE = 140;
+/** 미니맵이 차지하는 정사각 영역의 한 변(px). 방은 이 안에 비율을 지켜 들어간다. */
+const MINIMAP_MAX = 132;
 const STATUS_ORDER: StatusKind[] = ['wound', 'exposed', 'brand', 'fracture'];
 /** 벽까지 밀린 적이 받는 추가 피해. */
 const WALL_SLAM_DAMAGE = 40;
@@ -147,6 +150,14 @@ export class PlayScene extends Phaser.Scene {
   private exitOpen = false;
   /** 화면 밖 대상을 가리키는 화살표. 적용 하나, 출구용 하나. */
   private offscreenMarks: Phaser.GameObjects.Triangle[] = [];
+  private minimap!: {
+    frame: Phaser.GameObjects.Rectangle;
+    player: Phaser.GameObjects.Arc;
+    exit: Phaser.GameObjects.Rectangle;
+    enemies: Phaser.GameObjects.Arc[];
+  };
+  /** 현재 방을 미니맵 크기에 맞추는 배율. 방마다 다시 계산한다. */
+  private minimapRoom = { width: GAME_WIDTH, height: GAME_HEIGHT, scale: 1 };
   private startRoomIndex = 0;
 
   constructor() {
@@ -509,6 +520,12 @@ export class PlayScene extends Phaser.Scene {
 
     this.exitOpen = false;
     this.bounds = { minX: WALL, minY: WALL, maxX: room.width - WALL, maxY: room.height - WALL };
+    // 방마다 크기가 다르므로 긴 변을 기준으로 맞춰 비율을 유지한다.
+    this.minimapRoom = {
+      width: room.width,
+      height: room.height,
+      scale: MINIMAP_MAX / Math.max(room.width, room.height),
+    };
 
     const cx = room.width / 2;
     const cy = room.height / 2;
@@ -622,6 +639,7 @@ export class PlayScene extends Phaser.Scene {
     this.updateComboRings();
     this.updateArcaneAura();
     this.updateOffscreenMarks();
+    this.updateMinimap();
     if (DEBUG_ENABLED) this.publishDebug();
     this.updateAreas(dt);
     this.updateEnemies(dt);
@@ -660,6 +678,9 @@ export class PlayScene extends Phaser.Scene {
       offerCount: this.currentOffer.length,
       exit: this.exitOpen ? { x: this.exit.x, y: this.exit.y } : null,
       events: { ...this.ruleEvents },
+      projectiles: this.projectiles.length,
+      room: { width: this.bounds.maxX + WALL, height: this.bounds.maxY + WALL },
+      scroll: { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY },
     });
   }
 
@@ -830,8 +851,7 @@ export class PlayScene extends Phaser.Scene {
       const shot = this.enemyShots[i];
       advance(shot.state, dt);
 
-      const outOfBounds =
-        shot.state.x < -40 || shot.state.x > GAME_WIDTH + 40 || shot.state.y < -40 || shot.state.y > GAME_HEIGHT + 40;
+      const outOfBounds = isOutOfBounds(shot.state, this.bounds);
       const hitPlayer =
         !dashing && Math.hypot(shot.state.x - this.player.x, shot.state.y - this.player.y) <= PLAYER_RADIUS + 8;
 
@@ -914,8 +934,7 @@ export class PlayScene extends Phaser.Scene {
       const projectile = entity.state;
       advance(projectile, dt);
 
-      let consumed =
-        projectile.x < -40 || projectile.x > GAME_WIDTH + 40 || projectile.y < -40 || projectile.y > GAME_HEIGHT + 40;
+      let consumed = isOutOfBounds(projectile, this.bounds);
 
       if (!consumed) {
         const hit = this.enemies.find(
@@ -1002,6 +1021,77 @@ export class PlayScene extends Phaser.Scene {
     this.offscreenMarks = Array.from({ length: 8 }, () =>
       this.add.triangle(0, 0, 0, -10, 8, 8, -8, 8, COLORS.accent, 0.8).setDepth(21).setScrollFactor(0).setVisible(false),
     );
+
+    this.buildMinimap();
+  }
+
+  /**
+   * 미니맵.
+   *
+   * 가장자리 화살표는 방향만 알려줄 뿐 거리를 알려주지 않는다.
+   * 방이 화면의 두 배가 넘으므로, 남은 적이 몇 걸음 거리인지 보이지 않으면
+   * 넓은 곳을 가로지르는 판단을 할 수 없다.
+   */
+  private buildMinimap(): void {
+    // 테두리는 방의 벽이다. 방 비율에 맞춰야 지금 어느 쪽 벽에 붙어 있는지 읽힌다.
+    const frame = this.add
+      .rectangle(0, 0, MINIMAP_MAX, MINIMAP_MAX, 0x0a0b0f, 0.55)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, 0x2a2f42)
+      .setDepth(19)
+      .setScrollFactor(0);
+
+    this.minimap = {
+      frame,
+      player: this.add.circle(0, 0, 3, COLORS.player).setDepth(21).setScrollFactor(0),
+      exit: this.add.rectangle(0, 0, 6, 6, COLORS.accent).setDepth(21).setScrollFactor(0).setVisible(false),
+      // 방마다 최대 적 수보다 넉넉하게 잡아둔다. 매 프레임 만들고 지우지 않는다.
+      enemies: Array.from({ length: 24 }, () =>
+        this.add.circle(0, 0, 2.5, 0xff6b6b).setDepth(20).setScrollFactor(0).setVisible(false),
+      ),
+    };
+  }
+
+  /** 미니맵이 그려지는 사각형. 방 비율을 유지한 채 우상단에 붙인다. */
+  private minimapRect(): { left: number; top: number; width: number; height: number } {
+    const room = this.minimapRoom;
+    const width = room.width * room.scale;
+    const height = room.height * room.scale;
+    return { left: screenX(VIEW_WIDTH - 24) - width, top: screenY(46), width, height };
+  }
+
+  /** 방 좌표를 미니맵 안의 화면 좌표로 옮긴다. */
+  private minimapPoint(x: number, y: number): { x: number; y: number } {
+    const rect = this.minimapRect();
+    return { x: rect.left + x * this.minimapRoom.scale, y: rect.top + y * this.minimapRoom.scale };
+  }
+
+  private updateMinimap(): void {
+    const rect = this.minimapRect();
+    this.minimap.frame.setPosition(rect.left, rect.top).setSize(rect.width, rect.height);
+
+    const player = this.minimapPoint(this.player.x, this.player.y);
+    this.minimap.player.setPosition(player.x, player.y);
+
+    const alive = this.enemies.filter((e) => isAlive(e.state));
+    for (const [index, dot] of this.minimap.enemies.entries()) {
+      const enemy = alive[index];
+      if (!enemy) {
+        dot.setVisible(false);
+        continue;
+      }
+      const point = this.minimapPoint(enemy.state.x, enemy.state.y);
+      dot.setPosition(point.x, point.y).setVisible(true);
+      // 보스는 크게 찍어 구분한다.
+      dot.setRadius(enemy.state.kind === 'boss' ? 5 : 2.5);
+    }
+
+    if (this.exitOpen) {
+      const point = this.minimapPoint(this.exit.x, this.exit.y);
+      this.minimap.exit.setPosition(point.x, point.y).setVisible(true);
+    } else {
+      this.minimap.exit.setVisible(false);
+    }
   }
 
   private refreshHud(): void {
@@ -1138,8 +1228,8 @@ export class PlayScene extends Phaser.Scene {
     container.add(
       this.add
         .text(
-          GAME_WIDTH / 2,
-          GAME_HEIGHT / 2 - 10,
+          screenX(VIEW_WIDTH / 2),
+          screenY(VIEW_HEIGHT / 2) - 10,
           [
             `${this.left.weapon.name} + ${this.right.weapon.name}`,
             `처치 ${this.run.kills}   시간 ${this.run.elapsed.toFixed(1)}초`,

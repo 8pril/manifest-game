@@ -1,4 +1,4 @@
-import { GAME_WIDTH, GAME_HEIGHT, CANVAS_WIDTH, CANVAS_HEIGHT, RENDER_SCALE } from '@/config';
+import { CANVAS_WIDTH, CANVAS_HEIGHT, RENDER_SCALE } from '@/config';
 
 /**
  * 개발 빌드 전용 상태 노출.
@@ -37,6 +37,10 @@ export interface DebugState {
   exit: { x: number; y: number } | null;
   /** 규칙 발동 횟수. 검증 드라이버가 변화를 감지해 그 순간을 찍는다. */
   events: { burst: number; wallSlam: number; brand: number; woundConsume: number };
+  /** 살아 있는 투사체 수. 발사가 실제로 나갔는지 확인하는 데 쓴다. */
+  projectiles: number;
+  /** 현재 방의 크기. */
+  room: { width: number; height: number };
   /** 월드 좌표를 화면 좌표로 바꾸는 데 필요한 값. */
   view: {
     zoom: number;
@@ -44,26 +48,30 @@ export interface DebugState {
     scrollY: number;
     canvasWidth: number;
     canvasHeight: number;
-    worldWidth: number;
-    worldHeight: number;
   };
 }
 
 export const DEBUG_ENABLED = import.meta.env.DEV;
 
-export function publishDebugState(state: Omit<DebugState, 'view'>): void {
+/**
+ * 카메라 스크롤은 방마다, 프레임마다 달라진다.
+ * 고정값을 넣어 두면 드라이버가 계산한 클릭 좌표가 조용히 어긋나므로
+ * 씬이 실제 카메라 값을 넘겨준다.
+ */
+export function publishDebugState(
+  state: Omit<DebugState, 'view'> & { scroll: { x: number; y: number } },
+): void {
   if (!DEBUG_ENABLED) return;
 
+  const { scroll, ...rest } = state;
   (globalThis as unknown as { __debug?: DebugState }).__debug = {
-    ...state,
+    ...rest,
     view: {
       zoom: RENDER_SCALE,
-      scrollX: GAME_WIDTH / 2 - CANVAS_WIDTH / 2,
-      scrollY: GAME_HEIGHT / 2 - CANVAS_HEIGHT / 2,
+      scrollX: scroll.x,
+      scrollY: scroll.y,
       canvasWidth: CANVAS_WIDTH,
       canvasHeight: CANVAS_HEIGHT,
-      worldWidth: GAME_WIDTH,
-      worldHeight: GAME_HEIGHT,
     },
   };
 }

@@ -92,6 +92,33 @@ export function advance(projectile: Projectile, deltaSeconds: number): void {
   projectile.y += Math.sin(projectile.angle) * projectile.speed * deltaSeconds;
 }
 
+/** 투사체가 사라지는 여유 거리. 벽에 닿자마자 끊기면 눈에 거슬린다. */
+export const DESPAWN_MARGIN = 40;
+
+export interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/**
+ * 투사체가 활동 영역을 벗어났는지.
+ *
+ * 판정 기준은 **화면이 아니라 방**이다.
+ * 방이 화면(1280×720)보다 커진 뒤 화면 크기로 판정하면,
+ * 방 오른쪽이나 아래쪽에서 쏜 투사체가 생기자마자 지워져
+ * 활과 비전이 아무 반응 없이 안 나가는 것처럼 보인다.
+ */
+export function isOutOfBounds(point: Vec2, bounds: Bounds): boolean {
+  return (
+    point.x < bounds.minX - DESPAWN_MARGIN ||
+    point.x > bounds.maxX + DESPAWN_MARGIN ||
+    point.y < bounds.minY - DESPAWN_MARGIN ||
+    point.y > bounds.maxY + DESPAWN_MARGIN
+  );
+}
+
 export interface HitOutcome {
   /** 이 명중으로 대상이 받는 피해. */
   damage: number;
