@@ -701,7 +701,7 @@ export class PlayScene extends Phaser.Scene {
 
   /**
    * 방을 정리하면 출구가 열린다. 바로 넘어가지 않고 걸어 나가야 한다.
-   * 마지막 방(보스)만 정리 즉시 승리로 간다.
+   * 마지막 검증 전투만 정리 즉시 승리로 간다.
    */
   private checkRoomCleared(): void {
     if (this.run.phase !== 'combat' || this.exitOpen) return;

@@ -29,7 +29,7 @@ export interface Weapon {
   cooldown: number;
   /** 근접 휘두르기 연출 길이(ms). 무기 성격을 동작으로 드러낸다. */
   swingDuration: number;
-  /** 콤보가 유지되는 동안 발동 스킬이 함께 나가는 간격(ms). */
+  /** 지대형 콤보스킬처럼 기본 쿨다운으로 반복하면 중첩 피해가 튀는 스킬의 별도 간격(ms). */
   comboInterval: number;
 }
 
@@ -38,6 +38,17 @@ export function deliveryOf(skill: Skill): Delivery {
   if (skill.tags.includes('지대')) return 'area';
   if (skill.tags.includes('투사체')) return 'projectile';
   return 'melee';
+}
+
+/**
+ * 각성 상태에서 콤보스킬이 기본 공격을 대체할 때의 공격 간격.
+ *
+ * 투사체형 콤보스킬은 남아서 틱 피해를 중첩시키지 않으므로 무기 기본 쿨다운을 쓴다.
+ * 지대형 콤보스킬은 지속시간 동안 여러 장이 겹치면 피해가 발동 주기에 반비례해 뛰므로
+ * 별도 comboInterval을 유지한다.
+ */
+export function awakenedAttackInterval(weapon: Weapon): number {
+  return deliveryOf(weapon.combo) === 'area' ? weapon.comboInterval : weapon.cooldown;
 }
 
 const COMBO_STATS = { comboDuration: COMBO_BASE_DURATION };

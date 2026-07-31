@@ -4,8 +4,8 @@ import type { WeaponId } from '@/data/weapons';
 /**
  * 방 구성.
  *
- * 한 판은 방 3개와 보스 방으로 이루어지며, 각 방을 정리할 때마다
- * 보조능력을 하나 고른다. 전체 3-5분을 목표로 한다.
+ * 예선 빌드는 첫 보스가 성장 루프를 열고, 이후 방에서는 해금된 무기를 시험한다.
+ * 웨이브 사이 보조능력 선택은 새 기획에서 폐기되어 모두 꺼져 있다.
  *
  * 적 수를 정하는 기준은 **방 전체 체력이 아니라 처치 횟수**다.
  * 방마다 총 체력은 예전과 비슷하게 두고 마리당 체력을 낮춰 수를 두 배 이상
@@ -64,16 +64,16 @@ export const ROOMS: readonly RoomDef[] = [
     height: ROOM_HEIGHT,
   },
   {
-    // 보스 방은 넓지만 도망칠 곳이 적도록 중간 크기로 둔다.
-    label: '보스 방',
+    // 첫 보스 뒤 얻은 무기와 R키 교체를 써보는 마지막 검증 전투.
+    label: '파편 회랑',
     spawns: [
-      { kind: 'boss', count: 1 },
-      { kind: 'chaser', count: 10 },
-      { kind: 'archer', count: 3 },
+      { kind: 'chaser', count: 18 },
+      { kind: 'archer', count: 5 },
+      { kind: 'brute', count: 3 },
     ],
     offersSupport: false,
-    width: 2000,
-    height: 1250,
+    width: ROOM_WIDTH,
+    height: ROOM_HEIGHT,
   },
 ];
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SUPPORTS } from '@/data/supports';
 import { SKILLS, findSkill } from '@/data/skills';
-import { WEAPON_LIST, deliveryOf } from '@/data/weapons';
+import { WEAPON_LIST, awakenedAttackInterval, deliveryOf } from '@/data/weapons';
 import { canAttach, resolveSkill } from '@/engine/support';
 import { TAGS } from '@/engine/tags';
 
@@ -181,5 +181,27 @@ describe('무기 데이터 무결성', () => {
     for (const skill of SKILLS) {
       expect(skill.supportSlots, skill.name).toBe(2);
     }
+  });
+
+  it('각성 대체 발동에서 지대형은 별도 간격을 유지한다', () => {
+    const sword = WEAPON_LIST.find((weapon) => weapon.id === 'sword')!;
+    const shield = WEAPON_LIST.find((weapon) => weapon.id === 'shield')!;
+
+    expect(deliveryOf(sword.combo)).toBe('area');
+    expect(deliveryOf(shield.combo)).toBe('area');
+    expect(awakenedAttackInterval(sword)).toBe(sword.comboInterval);
+    expect(awakenedAttackInterval(shield)).toBe(shield.comboInterval);
+    expect(awakenedAttackInterval(sword)).toBeGreaterThan(sword.cooldown);
+    expect(awakenedAttackInterval(shield)).toBeGreaterThan(shield.cooldown);
+  });
+
+  it('각성 대체 발동에서 투사체형은 기본 무기 쿨다운을 쓴다', () => {
+    const bow = WEAPON_LIST.find((weapon) => weapon.id === 'bow')!;
+    const arcane = WEAPON_LIST.find((weapon) => weapon.id === 'arcane')!;
+
+    expect(deliveryOf(bow.combo)).toBe('projectile');
+    expect(deliveryOf(arcane.combo)).toBe('projectile');
+    expect(awakenedAttackInterval(bow)).toBe(bow.cooldown);
+    expect(awakenedAttackInterval(arcane)).toBe(arcane.cooldown);
   });
 });
