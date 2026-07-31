@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { applyRenderScale, followInRoom, pinToScreen, screenX, screenY, VIEW_WIDTH, VIEW_HEIGHT } from '@/render';
+import { applyRenderScale, followInRoom, pinToScreen, pinContainer, screenX, screenY, VIEW_WIDTH, VIEW_HEIGHT } from '@/render';
 import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
@@ -374,7 +374,9 @@ export class PlayScene extends Phaser.Scene {
 
     const targets = targetsInArc(
       { origin: { x: this.player.x, y: this.player.y }, angle, range, arc },
-      this.enemies.filter((e) => isAlive(e.state)).map((e) => e.state),
+      this.enemies
+        .filter((e) => isAlive(e.state))
+        .map((e) => ({ ...e.state, radius: ENEMY_STATS[e.state.kind].radius })),
     );
 
     for (const target of targets) {
@@ -678,6 +680,11 @@ export class PlayScene extends Phaser.Scene {
   // ───────────────────────── 갱신 루프
 
   update(_time: number, delta: number): void {
+    // 오버레이는 전투가 멈춘 동안에도 화면에 붙어 있어야 한다.
+    //
+    // `active`를 반드시 확인한다. 이 줄은 update의 맨 앞이라, 여기서 예외가 나면
+    // 이동을 포함한 아래 전부가 멈춘다. 파괴된 컨테이너를 만지면 그렇게 된다.
+    if (this.overlay?.active) pinContainer(this, this.overlay);
     if (this.run.phase !== 'combat') return;
     const dt = delta / 1000;
 
@@ -1185,40 +1192,39 @@ export class PlayScene extends Phaser.Scene {
 
 
     const container = this.add.container(0, 0).setDepth(30);
-    container.add(this.add.rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.82));
-    // 컨테이너에만 건다. 자식까지 0으로 내리면(allChildren) 클릭 판정이 카메라
-    // 스크롤만큼 가로로 밀려서 카드가 한 칸씩 어긋나 골라진다. 한 번 그렇게
-    // 바꿨다가 되돌렸다.
-    container.setScrollFactor(0);
+    // scrollFactor 대신 컨테이너 자체를 화면 좌상단에 맞춘다.
+    // 자식 좌표는 화면 좌표(0~1280, 0~720)를 그대로 쓴다.
+    pinContainer(this, container);
+    container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.82));
     container.add(
       this.add
-        .text(screenX(VIEW_WIDTH / 2), screenY(140), '보조능력을 하나 고르세요', { fontSize: '30px', color: COLORS.text, fontStyle: 'bold' })
+        .text((VIEW_WIDTH / 2), (140), '보조능력을 하나 고르세요', { fontSize: '30px', color: COLORS.text, fontStyle: 'bold' })
         .setOrigin(0.5),
     );
 
     const cardWidth = 300;
     const gap = 32;
     const total = this.currentOffer.length * cardWidth + (this.currentOffer.length - 1) * gap;
-    const startX = screenX((VIEW_WIDTH - total) / 2 + cardWidth / 2);
+    const startX = ((VIEW_WIDTH - total) / 2 + cardWidth / 2);
 
     for (const [index, item] of this.currentOffer.entries()) {
       const x = startX + index * (cardWidth + gap);
       const card = this.add
-        .rectangle(x, screenY(VIEW_HEIGHT / 2), cardWidth, 250, 0x171a26)
+        .rectangle(x, (VIEW_HEIGHT / 2), cardWidth, 250, 0x171a26)
         .setStrokeStyle(2, COLORS.accent)
         .setInteractive({ useHandCursor: true });
       card.on('pointerdown', () => this.choose(index));
       container.add(card);
 
-      container.add(this.add.text(x, screenY(VIEW_HEIGHT / 2) - 88, `${index + 1}`, { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5));
+      container.add(this.add.text(x, (VIEW_HEIGHT / 2) - 88, `${index + 1}`, { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5));
       container.add(
-        this.add.text(x, screenY(VIEW_HEIGHT / 2) - 50, item.support.name, { fontSize: '24px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0.5),
+        this.add.text(x, (VIEW_HEIGHT / 2) - 50, item.support.name, { fontSize: '24px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0.5),
       );
       // 어느 스킬에 붙는지 함께 보여준다. 태그 때문에 붙을 곳이 정해진다.
       const hand = handOf(this.run.loadout, item.skill.id);
       container.add(
         this.add
-          .text(x, screenY(VIEW_HEIGHT / 2) - 18, `→ ${hand ? `${hand} ` : ''}${item.skill.name}`, {
+          .text(x, (VIEW_HEIGHT / 2) - 18, `→ ${hand ? `${hand} ` : ''}${item.skill.name}`, {
             fontSize: '15px',
             color: COLORS.accentText,
           })
@@ -1226,7 +1232,7 @@ export class PlayScene extends Phaser.Scene {
       );
       container.add(
         this.add
-          .text(x, screenY(VIEW_HEIGHT / 2) + 42, item.support.description, {
+          .text(x, (VIEW_HEIGHT / 2) + 42, item.support.description, {
             fontSize: '13px',
             color: COLORS.textDim,
             align: 'center',
@@ -1239,7 +1245,7 @@ export class PlayScene extends Phaser.Scene {
 
     container.add(
       this.add
-        .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 120), '숫자키 1-3 또는 클릭', {
+        .text((VIEW_WIDTH / 2), (VIEW_HEIGHT - 120), '숫자키 1-3 또는 클릭', {
           fontSize: '15px',
           color: COLORS.textDim,
         })
@@ -1268,19 +1274,39 @@ export class PlayScene extends Phaser.Scene {
     const item = this.currentOffer[index];
     if (!item) return;
 
-    this.overlay?.destroy(true);
-    this.overlay = null;
+    this.closeOverlay();
     this.run = pickSupport(this.run, { support: item.support, skillId: item.skill.id });
     this.enterRoom();
   }
 
+  /**
+   * 오버레이를 치운다.
+   *
+   * **카드의 클릭 핸들러 안에서 그 카드를 바로 파괴하면 안 된다.** Phaser가 아직
+   * 그 포인터 이벤트를 처리하는 중이라 입력 플러그인이 죽은 오브젝트를 붙들게 되고,
+   * 그 뒤로 클릭이 먹지 않는다. 화면에서 즉시 감추고 파괴는 다음 틱으로 미룬다.
+   */
+  private closeOverlay(): void {
+    const overlay = this.overlay;
+    this.overlay = null;
+    if (!overlay) return;
+
+    overlay.setVisible(false);
+    for (const child of overlay.list) {
+      if ('disableInteractive' in child) (child as Phaser.GameObjects.GameObject).disableInteractive();
+    }
+    this.time.delayedCall(0, () => overlay.destroy(true));
+  }
+
   private showResult(won: boolean): void {
     const container = this.add.container(0, 0).setDepth(30);
-    container.add(this.add.rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
-    container.setScrollFactor(0);
+    // scrollFactor 대신 컨테이너 자체를 화면 좌상단에 맞춘다.
+    // 자식 좌표는 화면 좌표(0~1280, 0~720)를 그대로 쓴다.
+    pinContainer(this, container);
+    container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
     container.add(
       this.add
-        .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2) - 90, won ? '승리' : '패배', {
+        .text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) - 90, won ? '승리' : '패배', {
           fontSize: '56px',
           color: won ? '#6ee7a8' : '#ff6b6b',
           fontStyle: 'bold',
@@ -1292,8 +1318,8 @@ export class PlayScene extends Phaser.Scene {
     container.add(
       this.add
         .text(
-          screenX(VIEW_WIDTH / 2),
-          screenY(VIEW_HEIGHT / 2) - 10,
+          (VIEW_WIDTH / 2),
+          (VIEW_HEIGHT / 2) - 10,
           [
             `${this.left.weapon.name} + ${this.right.weapon.name}`,
             `처치 ${this.run.kills}   시간 ${this.run.elapsed.toFixed(1)}초`,
@@ -1304,7 +1330,7 @@ export class PlayScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
     container.add(
-      this.add.text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2) + 90, 'R 키로 무기를 다시 골라 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
+      this.add.text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 무기를 다시 골라 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
     );
     this.overlay = container;
   }

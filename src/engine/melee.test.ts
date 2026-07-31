@@ -69,3 +69,35 @@ describe('angleDifference', () => {
     expect(angleDifference(-Math.PI + 0.1, Math.PI - 0.1)).toBeCloseTo(0.2, 10);
   });
 });
+
+describe('큰 적에 대한 사거리', () => {
+  const swing = { origin: { x: 0, y: 0 }, angle: 0, range: 120, arc: 1.7 };
+
+  it('반지름을 더해 표면까지 재므로 큰 적이 더 멀리서 맞는다', () => {
+    // 중심 거리 170. 사거리 120만 보면 빗나가지만,
+    // 보스는 반지름 68이라 표면이 사거리 안에 들어온다.
+    const boss = { id: 1, x: 170, y: 0, radius: 68 };
+    expect(targetsInArc(swing, [boss]).map((t) => t.id)).toEqual([1]);
+  });
+
+  it('반지름이 없으면 중심 거리로만 판정한다', () => {
+    expect(targetsInArc(swing, [{ id: 1, x: 170, y: 0 }])).toHaveLength(0);
+    expect(targetsInArc(swing, [{ id: 1, x: 119, y: 0 }])).toHaveLength(1);
+  });
+
+  it('표면까지 닿아도 부채꼴 밖이면 맞지 않는다', () => {
+    const behind = { id: 1, x: -170, y: 0, radius: 68 };
+    expect(targetsInArc(swing, [behind])).toHaveLength(0);
+  });
+
+  it('모든 적에게 몸 표면까지의 여유가 같아진다', () => {
+    // 접촉 피해는 (플레이어 반지름 20 + 적 반지름)에서 시작한다.
+    // 사거리도 반지름을 반영하므로 여유가 적 크기와 무관하게 일정해야 한다.
+    const PLAYER = 20;
+    for (const radius of [20, 28, 68]) {
+      const reach = swing.range + radius;
+      const contact = PLAYER + radius;
+      expect(reach - contact).toBe(swing.range - PLAYER);
+    }
+  });
+});

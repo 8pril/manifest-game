@@ -20,6 +20,8 @@ export interface Vec2 {
 
 export interface Target extends Vec2 {
   id: number;
+  /** 몸 반지름. 근접 판정이 표면 기준으로 닿는지 보는 데 쓴다. */
+  radius?: number;
 }
 
 export interface Projectile {

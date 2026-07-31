@@ -71,6 +71,26 @@ export const VIEW_HEIGHT = CANVAS_HEIGHT / RENDER_SCALE;
 const PIN_OFFSET_X = (CANVAS_WIDTH / 2) * (1 - 1 / RENDER_SCALE);
 const PIN_OFFSET_Y = (CANVAS_HEIGHT / 2) * (1 - 1 / RENDER_SCALE);
 
+/**
+ * 오버레이 컨테이너를 화면에 고정한다.
+ *
+ * `scrollFactor(0)`으로 고정하면 **그리기와 클릭 판정이 서로 다른 기준을 본다.**
+ * 그리기는 컨테이너의 변환을 따르는데 클릭 판정은 자식 자신의 scrollFactor를 보기
+ * 때문에, 둘이 카메라 스크롤(S)만큼 어긋난다. 화면상 어긋나는 거리는 `S × 확대배율`이라
+ * 방이 클수록 커진다. 1번 방(S≈300)에서는 카드가 한 칸씩 밀려 골라졌고,
+ * 2번 방(S≈800)에서는 판정이 카드 밖으로 완전히 나가 아무것도 눌리지 않았다.
+ *
+ * 그래서 고정에 scrollFactor를 쓰지 않는다. 컨테이너를 카메라가 보는 영역의
+ * 좌상단으로 옮겨 두면 자식은 평범한 월드 오브젝트가 되어, 그리기와 판정이
+ * **같은 변환을 탄다.** 자식 좌표는 화면 좌표(0~1280, 0~720)를 그대로 쓰면 된다.
+ *
+ * 카메라가 움직이면 어긋나므로 매 프레임 다시 부른다.
+ */
+export function pinContainer(scene: Phaser.Scene, container: Phaser.GameObjects.Container): void {
+  const camera = scene.cameras.main;
+  container.setPosition(camera.scrollX + PIN_OFFSET_X, camera.scrollY + PIN_OFFSET_Y);
+}
+
 /** 화면 왼쪽에서 x픽셀 떨어진 위치. 고정 요소에만 쓴다. */
 export function screenX(x: number): number {
   return PIN_OFFSET_X + x;

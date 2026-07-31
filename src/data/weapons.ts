@@ -57,7 +57,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       id: 'sword-slash',
       name: '베기',
       tags: ['공격', '근접', '물리', '중첩'],
-      base: { damage: 46, meleeRange: 108, meleeArc: 1.7, knockback: 18, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 46, meleeRange: 120, meleeArc: 1.7, knockback: 18, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
     // 원안의 '멸검': n타마다 주변 적들에게 광역 장판
@@ -135,7 +135,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       id: 'shield-bash',
       name: '밀치기',
       tags: ['공격', '근접', '물리'],
-      base: { damage: 38, meleeRange: 92, meleeArc: 2.4, knockback: 115, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 38, meleeRange: 104, meleeArc: 2.4, knockback: 115, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
     combo: {
