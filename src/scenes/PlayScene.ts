@@ -13,8 +13,7 @@ import {
 import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
-import { SUPPORTS } from '@/data/supports';
-import { deliveryOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
+import { awakenedAttackInterval, deliveryOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
 import type { Skill } from '@/engine/support';
 import {
   spawnProjectiles,
@@ -62,11 +61,11 @@ import {
 } from '@/game/enemy';
 import { ROOMS, TOTAL_ROOMS } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
-import { rollOffer, type OfferItem } from '@/game/offer';
-import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf, loadoutFromProgress } from '@/game/loadout';
+import { leftWeapon, rightWeapon, resolveFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
-import { createRun, clearRoom, leaveTown, pickSupport, damagePlayer, addKill, advanceTime, isOver, type RunState } from '@/game/run';
+import { createRun, clearRoom, leaveTown, damagePlayer, addKill, advanceTime, isOver, type RunState } from '@/game/run';
 import { createInitialProgress, equipFromWheel, type Hand, type PlayerProgress } from '@/game/progression';
+import { parseDebugStart } from '@/game/debug-start';
 
 const MOVE_SPEED = 300;
 const DASH_SPEED = 900;
@@ -85,8 +84,7 @@ const WALL_SLAM_DAMAGE = 40;
 /** 상태 연출 색. 상태 표시 점과 같은 색을 써서 무엇이 터졌는지 연결되게 한다. */
 const BURST_COLOR = 0xff6b6b;
 const BRAND_COLOR = 0xb08bff;
-/** 선택 창이 뜰 때의 페이드인(ms). 입력은 처음부터 받는다. */
-const OFFER_FADE_MS = 140;
+/** R키 링 메뉴가 완전히 펼쳐져 선택 가능해지는 시간(ms). */
 const WHEEL_OPEN_MS = 150;
 const WHEEL_RADIUS = 122;
 const WHEEL_INNER_RADIUS = 24;
@@ -111,8 +109,6 @@ interface WeaponRuntime {
   weapon: Weapon;
   combo: ComboState;
   readyAt: number;
-  /** 발동 스킬이 다시 나갈 수 있는 시각. */
-  comboReadyAt: number;
 }
 
 interface WheelSegment {
@@ -161,7 +157,6 @@ export class PlayScene extends Phaser.Scene {
   private dashReadyAt = 0;
   private dashAngle = 0;
   private arcaneFlowUntil = 0;
-  private currentOffer: OfferItem[] = [];
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
   private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0 };
   private weapons: { left: WeaponId; right: WeaponId | null } = { left: 'sword', right: null };
@@ -199,16 +194,14 @@ export class PlayScene extends Phaser.Scene {
   init(data: { left?: WeaponId; right?: WeaponId | null; progress?: PlayerProgress }): void {
     // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
     const progress = data?.progress ?? createInitialProgress();
+    const debugStart = parseDebugStart(location.search, TOTAL_ROOMS);
     this.weapons = {
-      left: data?.left ?? progress.active.left,
-      right: data?.right ?? progress.active.right,
+      left: debugStart.left ?? data?.left ?? progress.active.left,
+      right: debugStart.right ?? data?.right ?? progress.active.right,
     };
 
-    // 개발용: ?wave=2 로 특정 웨이브부터 시작한다.
-    // 후반 웨이브를 확인할 때마다 앞 웨이브를 다시 클리어하지 않아도 되게 한다.
-    const requested = Number(new URLSearchParams(location.search).get('wave'));
-    this.startRoomIndex =
-      Number.isFinite(requested) && requested >= 1 && requested <= TOTAL_ROOMS ? requested - 1 : 0;
+    // 개발용: ?left=bow&right=arcane&wave=4 로 특정 무기/방에서 시작한다.
+    this.startRoomIndex = debugStart.roomIndex ?? 0;
   }
 
   create(): void {
@@ -224,9 +217,9 @@ export class PlayScene extends Phaser.Scene {
     this.arcaneFlowUntil = 0;
 
     this.run = { ...createRun(this.weapons.left, this.weapons.right), roomIndex: this.startRoomIndex };
-    this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
+    this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
     const right = rightWeapon(this.run.loadout);
-    this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0, comboReadyAt: 0 } : null;
+    this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0 } : null;
 
 
     this.player = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.player).setDepth(10);
@@ -286,9 +279,6 @@ export class PlayScene extends Phaser.Scene {
     keyboard.on('keyup-R', () => {
       if (this.weaponWheel) this.closeWeaponWheel(true);
     });
-    for (const [index, name] of ['ONE', 'TWO', 'THREE'].entries()) {
-      keyboard.on(`keydown-${name}`, () => this.choose(index));
-    }
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -348,18 +338,13 @@ export class PlayScene extends Phaser.Scene {
 
   private useWeapon(runtime: WeaponRuntime, angle = this.aimAngle()): void {
     if (this.time.now < runtime.readyAt) return;
-    runtime.readyAt = this.time.now + runtime.weapon.cooldown;
 
-    // 기본 공격은 언제나 나간다. 발동 스킬이 이를 대체하면 콤보 달성이
-    // 보상이 아니라 손해가 된다. 멸검(지대 26/0.4초)이 베기(46/0.3초)를
-    // 대체했을 때 웨이브 1도 넘기지 못하는 것을 측정으로 확인했다.
-    this.useSkill(runtime, runtime.weapon.basic, angle, true);
-
-    // 콤보가 유지되는 동안에는 발동 스킬이 자기 간격으로 함께 나간다.
-    // 원안의 "n콤보 이상 시 전환"과 기획의 "추가효과가 계속 유지"를 합친 형태다.
-    if (isComboReady(runtime.combo) && this.time.now >= runtime.comboReadyAt) {
-      runtime.comboReadyAt = this.time.now + runtime.weapon.comboInterval;
+    if (isComboReady(runtime.combo)) {
+      runtime.readyAt = this.time.now + awakenedAttackInterval(runtime.weapon);
       this.useSkill(runtime, runtime.weapon.combo, angle, false);
+    } else {
+      runtime.readyAt = this.time.now + runtime.weapon.cooldown;
+      this.useSkill(runtime, runtime.weapon.basic, angle, true);
     }
     this.refreshHud();
   }
@@ -504,6 +489,13 @@ export class PlayScene extends Phaser.Scene {
       view: this.add.circle(area.x, area.y, area.radius, AREA_COLORS[area.kind], 0.3).setDepth(1),
       owner,
     });
+
+    if (owner) {
+      for (const entity of this.enemies) {
+        if (!isAlive(entity.state) || !containsPoint(area, entity.state)) continue;
+        this.resolveHit(entity, 0, owner.weapon, false, owner);
+      }
+    }
   }
 
   /** 명중 처리. 상태이상 부여, 약점 노출 증폭, 낙인 소비를 모두 여기서 한다. */
@@ -542,27 +534,28 @@ export class PlayScene extends Phaser.Scene {
       }
     }
 
+    // 각성 중에도 무기의 상태 정체성은 유지한다.
+    // 기본 공격만 콤보 게이지를 올리고, 콤보스킬 명중은 지속시간만 갱신한다.
+    if (weapon.id === 'arcane' && consumeBrand(enemy)) {
+      this.arcaneFlowUntil = this.time.now + ARCANE_FLOW_DURATION * 1000;
+      this.ruleEvents.brand++;
+      ring(this, enemy.x, enemy.y, BRAND_COLOR, { to: 110, duration: 420 });
+      floatingText(this, this.player.x, this.player.y - 24, '비전 흐름', '#c9a8ff');
+    }
+
+    const result = applyStatus(enemy, weapon.status);
+    if (result.burst) {
+      damage += WOUND_BURST_DAMAGE;
+      this.ruleEvents.burst++;
+      // 규칙상으로만 터지고 화면에는 아무것도 안 나오던 지점.
+      const radius = ENEMY_STATS[enemy.kind].radius;
+      ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 3.2 });
+      flash(this, enemy.x, enemy.y, radius * 2.2, BURST_COLOR);
+      // 플래시와 겹치지 않도록 적 위쪽에서 띄운다. 가장 읽혀야 할 순간이다.
+      floatingText(this, enemy.x, enemy.y - radius - 12, `상처 폭발 ${WOUND_BURST_DAMAGE}`, '#ff9b9b');
+    }
+
     if (basic) {
-      // 낙인이 걸린 적을 비전으로 때리면 낙인을 소비하고 비전 흐름을 얻는다.
-      if (weapon.id === 'arcane' && consumeBrand(enemy)) {
-        this.arcaneFlowUntil = this.time.now + ARCANE_FLOW_DURATION * 1000;
-        this.ruleEvents.brand++;
-        ring(this, enemy.x, enemy.y, BRAND_COLOR, { to: 110, duration: 420 });
-        floatingText(this, this.player.x, this.player.y - 24, '비전 흐름', '#c9a8ff');
-      }
-
-      const result = applyStatus(enemy, weapon.status);
-      if (result.burst) {
-        damage += WOUND_BURST_DAMAGE;
-        this.ruleEvents.burst++;
-        // 규칙상으로만 터지고 화면에는 아무것도 안 나오던 지점.
-        const radius = ENEMY_STATS[enemy.kind].radius;
-        ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 3.2 });
-        flash(this, enemy.x, enemy.y, radius * 2.2, BURST_COLOR);
-        // 플래시와 겹치지 않도록 적 위쪽에서 띄운다. 가장 읽혀야 할 순간이다.
-        floatingText(this, enemy.x, enemy.y - radius - 12, `상처 폭발 ${WOUND_BURST_DAMAGE}`, '#ff9b9b');
-      }
-
       if (runtime) {
         const stats = resolveFor(this.run.loadout, weapon.basic).stats;
         runtime.combo = gainCombo(runtime.combo, stats);
@@ -715,14 +708,14 @@ export class PlayScene extends Phaser.Scene {
 
     const room = ROOMS[this.run.roomIndex];
     if (room?.entersTown) {
-      this.run = clearRoom(this.run, false);
+      this.run = clearRoom(this.run);
       this.showTown();
       if (DEBUG_ENABLED) this.publishDebug();
       return;
     }
 
     if (this.run.roomIndex >= TOTAL_ROOMS - 1) {
-      this.run = clearRoom(this.run, false);
+      this.run = clearRoom(this.run);
       this.showResult(true);
       if (DEBUG_ENABLED) this.publishDebug();
       return;
@@ -741,11 +734,9 @@ export class PlayScene extends Phaser.Scene {
     if (Math.abs(this.player.y - this.exit.y) > EXIT_SIZE / 2 + PLAYER_RADIUS) return;
 
     this.exitOpen = false;
-    const room = ROOMS[this.run.roomIndex];
-    this.run = clearRoom(this.run, room?.offersSupport ?? false);
+    this.run = clearRoom(this.run);
 
-    if (this.run.phase === 'offer') this.showOffer();
-    else if (this.run.phase === 'town') this.showTown();
+    if (this.run.phase === 'town') this.showTown();
     else this.enterRoom();
 
     if (DEBUG_ENABLED) this.publishDebug();
@@ -813,7 +804,6 @@ export class PlayScene extends Phaser.Scene {
         right: this.right?.combo.value ?? 0,
         required: COMBO_REQUIRED,
       },
-      offerCount: this.currentOffer.length,
       exit: this.exitOpen ? { x: this.exit.x, y: this.exit.y } : null,
       events: { ...this.ruleEvents },
       projectiles: this.projectiles.length,
@@ -1406,92 +1396,14 @@ export class PlayScene extends Phaser.Scene {
     const right = rightWeapon(this.run.loadout);
 
     if (this.left.weapon.id !== left.id) {
-      this.left = { weapon: left, combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
+      this.left = { weapon: left, combo: createCombo(), readyAt: 0 };
     }
     if (this.right?.weapon.id !== right?.id) {
-      this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0, comboReadyAt: 0 } : null;
+      this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0 } : null;
     }
 
     this.comboRings.left.setStrokeStyle(3, left.color);
     this.comboRings.right.setStrokeStyle(3, right?.color ?? 0x2a2f42);
-  }
-
-  private showOffer(): void {
-    this.currentOffer = rollOffer(this.run.loadout, SUPPORTS);
-
-    if (this.currentOffer.length === 0) {
-      this.run = pickSupport(this.run, undefined);
-      this.enterRoom();
-      return;
-    }
-
-
-    const container = this.add.container(0, 0).setDepth(30);
-    // scrollFactor 대신 컨테이너 자체를 화면 좌상단에 맞춘다.
-    // 자식 좌표는 화면 좌표(0~1280, 0~720)를 그대로 쓴다.
-    pinContainer(this, container);
-    container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.82));
-    container.add(
-      this.add
-        .text((VIEW_WIDTH / 2), (140), '보조능력을 하나 고르세요', { fontSize: '30px', color: COLORS.text, fontStyle: 'bold' })
-        .setOrigin(0.5),
-    );
-
-    const cardWidth = 300;
-    const gap = 32;
-    const total = this.currentOffer.length * cardWidth + (this.currentOffer.length - 1) * gap;
-    const startX = ((VIEW_WIDTH - total) / 2 + cardWidth / 2);
-
-    for (const [index, item] of this.currentOffer.entries()) {
-      const x = startX + index * (cardWidth + gap);
-      const card = this.add
-        .rectangle(x, (VIEW_HEIGHT / 2), cardWidth, 250, 0x171a26)
-        .setStrokeStyle(2, COLORS.accent)
-        .setInteractive({ useHandCursor: true });
-      card.on('pointerdown', () => this.choose(index));
-      container.add(card);
-
-      container.add(this.add.text(x, (VIEW_HEIGHT / 2) - 88, `${index + 1}`, { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5));
-      container.add(
-        this.add.text(x, (VIEW_HEIGHT / 2) - 50, item.support.name, { fontSize: '24px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0.5),
-      );
-      // 어느 스킬에 붙는지 함께 보여준다. 태그 때문에 붙을 곳이 정해진다.
-      const hand = handOf(this.run.loadout, item.skill.id);
-      container.add(
-        this.add
-          .text(x, (VIEW_HEIGHT / 2) - 18, `→ ${hand ? `${hand} ` : ''}${item.skill.name}`, {
-            fontSize: '15px',
-            color: COLORS.accentText,
-          })
-          .setOrigin(0.5),
-      );
-      container.add(
-        this.add
-          .text(x, (VIEW_HEIGHT / 2) + 42, item.support.description, {
-            fontSize: '13px',
-            color: COLORS.textDim,
-            align: 'center',
-            wordWrap: { width: cardWidth - 40 },
-            lineSpacing: 5,
-          })
-          .setOrigin(0.5),
-      );
-    }
-
-    container.add(
-      this.add
-        .text((VIEW_WIDTH / 2), (VIEW_HEIGHT - 120), '숫자키 1-3 또는 클릭', {
-          fontSize: '15px',
-          color: COLORS.textDim,
-        })
-        .setOrigin(0.5),
-    );
-
-    // 페이드인만 짧게 한다. 입력은 처음부터 받는다.
-    container.setAlpha(0.4);
-    this.tweens.add({ targets: container, alpha: 1, duration: OFFER_FADE_MS, ease: 'Quad.easeOut' });
-
-    this.overlay = container;
   }
 
   private showTown(): void {
@@ -1550,26 +1462,6 @@ export class PlayScene extends Phaser.Scene {
 
     this.overlay = container;
     this.refreshHud();
-  }
-
-  /**
-   * 카드를 눌러 보조능력을 고르고 다음 방으로 넘어간다.
-   *
-   * 예전에는 창이 뜬 뒤 800ms 동안 입력을 막았다. 전투 중 연타하던 클릭이
-   * 그대로 카드에 꽂히는 것을 막으려는 것이었는데, 그 800ms 동안 누른 것이
-   * **조용히 사라졌다.** 첫 창은 선택지를 읽느라 800ms를 넘겨서 멀쩡했고,
-   * 두 번째부터는 뭘 고를지 알고 바로 누르기 때문에 클릭이 통째로 먹히지 않았다.
-   * 지연은 없앴다.
-   */
-  private choose(index: number): void {
-    if (this.run.phase !== 'offer') return;
-
-    const item = this.currentOffer[index];
-    if (!item) return;
-
-    this.closeOverlay();
-    this.run = pickSupport(this.run, { support: item.support, skillId: item.skill.id });
-    this.enterRoom();
   }
 
   /**

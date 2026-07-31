@@ -1,6 +1,5 @@
-import type { Support } from '@/engine/support';
 import { roomAt, TOTAL_ROOMS } from '@/game/rooms';
-import { attachSupport, loadoutFromProgress, type Loadout } from '@/game/loadout';
+import { loadoutFromProgress, type Loadout } from '@/game/loadout';
 import type { WeaponId } from '@/data/weapons';
 import {
   configureManifestation,
@@ -22,8 +21,6 @@ import {
 export type RunPhase =
   /** 방 안에서 전투 중. */
   | 'combat'
-  /** 방을 정리하고 보조능력을 고르는 중. */
-  | 'offer'
   /** 비전투 거점에서 장비를 설정하는 중. */
   | 'town'
   /** 보스까지 정리함. */
@@ -81,9 +78,9 @@ export function createRun(left: WeaponId, right: WeaponId | null): RunState {
 
 /**
  * 현재 방의 적을 모두 정리했을 때.
- * 마지막 방이었다면 승리, 아니면 보조능력 선택으로 넘어간다.
+ * 마지막 방이었다면 승리, 아니면 다음 방이나 마을로 넘어간다.
  */
-export function clearRoom(run: RunState, offersSupport: boolean): RunState {
+export function clearRoom(run: RunState): RunState {
   if (run.phase !== 'combat') return run;
 
   const room = roomAt(run.roomIndex);
@@ -99,11 +96,7 @@ export function clearRoom(run: RunState, offersSupport: boolean): RunState {
     progress = setWheelSlot(progress, 'right', 0, progress.unlockedWeapons.includes('bow') ? 'bow' : null);
     return { ...run, phase: 'town', progress, loadout: loadoutFromProgress(progress, run.loadout) };
   }
-  // 고를 보조능력이 없으면 선택 단계를 건너뛰고 바로 다음 방으로 간다.
-  if (!offersSupport) {
-    return { ...run, roomIndex: run.roomIndex + 1 };
-  }
-  return { ...run, phase: 'offer' };
+  return { ...run, roomIndex: run.roomIndex + 1 };
 }
 
 function configureDefaultTownLoadout(progress: PlayerProgress): PlayerProgress {
@@ -127,25 +120,6 @@ export function leaveTown(run: RunState): RunState {
     ...run,
     phase: 'combat',
     roomIndex: run.roomIndex + 1,
-  };
-}
-
-/**
- * 보조능력을 골랐을 때.
- * 보조능력은 스킬 단위로 붙으므로 어느 스킬에 붙일지도 함께 받는다.
- * 고르지 않고 넘기려면 pick에 undefined를 준다.
- */
-export function pickSupport(
-  run: RunState,
-  pick: { support: Support; skillId: string } | undefined,
-): RunState {
-  if (run.phase !== 'offer') return run;
-
-  return {
-    ...run,
-    phase: 'combat',
-    roomIndex: run.roomIndex + 1,
-    loadout: pick ? attachSupport(run.loadout, pick.skillId, pick.support) : run.loadout,
   };
 }
 

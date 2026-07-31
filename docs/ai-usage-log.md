@@ -1467,6 +1467,32 @@ AI가 제안하고 사람이 방향(영문)을 정했다.
 - 검증: `npm test` 통과(15 files, 226 passed, 1 skipped). `npm run build` 통과. Vite chunk size warning은 기존 번들 크기 경고.
 - 남은 이슈: 첫 문지기 자체의 패턴/드랍은 아직 미구현. 다음 코드 작업은 구형 3택1/시작 선택 경로 제거.
 
+### 2026-07-31 - 구형 3택1/시작 선택 경로 제거
+
+- 단계: M6 핵심 구조 재정렬 / 구형 루프 제거
+- AI 도구: Codex
+- 입력 프롬프트 / 지시: "이제 니가 개발할 다음 단계 정리해줘", "응 진행해"
+- AI 출력 요약: 웨이브 사이 보조능력 3택1과 시작 무기 2종 선택 화면을 제거해, 전투 중/방 사이 장착 경로를 없애고 마을 설정 기반 장착 경로만 남겼다.
+- 사람이 검토/수정한 내용: 콤보스킬 대체 발동 전에 구형 `attachSupport`/`offer`/`pickSupport` 경로가 공존하면 디버깅 비용이 커진다는 판단을 기준으로 먼저 제거했다. `SelectScene`은 플레이어 진입 경로에서 완전히 제거했다.
+- 반영한 내용: `RunPhase`에서 `offer`를 제거하고 `clearRoom()`을 선택 없이 다음 방/마을/승리로 전이하게 단순화했다. `offer.ts`, `offer.test.ts`, `SelectScene.ts`, `PlayScene.showOffer()`, 카드 선택 숫자키, debug `offerCount`, production `attachSupport()`를 제거했다. 관련 테스트와 문서 문구를 새 흐름에 맞췄다.
+- 게임/문서 반영 여부: 코드와 문서에 반영.
+- 관련 파일: `src/game/run.ts`, `src/game/run.test.ts`, `src/game/loadout.ts`, `src/game/loadout.test.ts`, `src/game/rooms.ts`, `src/scenes/PlayScene.ts`, `src/scenes/BootScene.ts`, `src/main.ts`, `src/debug.ts`, `docs/action-tracker.md`, `docs/playtest-brief.md`, `docs/ai-usage-log.md`
+- 검증: `npm test` 통과(14 files, 201 passed, 1 skipped). `npm run build` 통과. Vite chunk size warning은 기존 번들 크기 경고.
+- 남은 이슈: 다음 코드 작업은 콤보스킬 대체 발동과 4종 수치 재조정. `src/game/dps.bench.test.ts` 기준을 통과시켜야 한다.
+
+### 2026-07-31 - 콤보스킬 대체 발동과 수치 재조정
+
+- 단계: M6 핵심 구조 재정렬 / 콤보스킬 대체 발동
+- AI 도구: Codex
+- 입력 프롬프트 / 지시: "그 다음 단계 진행해"
+- AI 출력 요약: 콤보가 준비된 동안 기본 공격과 콤보스킬이 함께 나가던 병행 발동을 제거하고, 각성 중에는 콤보스킬이 기본 공격을 대체하게 바꿨다. 콤보 지속시간은 5초로 맞췄고, `awakenedAttackInterval()`을 사용해 지대형 콤보스킬의 발동 간격 폭증을 막았다.
+- 사람이 검토/수정한 내용: 단일 대상 각성 배율 1.5-2.5배, 지대형은 지속시간/발동간격 겹침 통제, 투사체형은 다중 대상 이득을 보조형스킬에서 만든다는 기준을 적용했다.
+- 반영한 내용: `PlayScene.useWeapon()`을 대체 발동 구조로 변경했다. 멸검/균열 파동은 피해와 틱을 올리되 지속시간을 줄였고, 연사/비전단검은 투사체당 피해를 낮춰 단일 대상 배율을 맞췄다. `src/game/dps.bench.test.ts`의 skip을 풀고 단일 대상 1.5-2.5배 테스트를 추가했다.
+- 게임/문서 반영 여부: 코드와 문서에 반영.
+- 관련 파일: `src/scenes/PlayScene.ts`, `src/data/weapons.ts`, `src/game/combo.ts`, `src/game/dps.bench.test.ts`, `docs/full-concept-implementation-plan.md`, `docs/action-tracker.md`, `docs/playtest-brief.md`, `docs/ai-usage-log.md`
+- 검증: `npm test` 통과(14 files, 203 passed). `npm run build` 통과. Vite chunk size warning은 기존 번들 크기 경고.
+- 남은 이슈: 다음 코드 작업은 `PlayerProgress`의 id 배열 기반 보유 상태 추가.
+
 ### 2026-07-31 - 대체 발동 준비 검증, DPS 계측기 도입
 
 - 단계: 기획 원형 구현 플랜 #1 준비
@@ -1630,4 +1656,121 @@ Pages 빌드에는 검 1종·마을·링 메뉴가 없다.
 - 게임/문서 반영 여부: 코드와 문서 모두에 반영
 - 관련 파일: `src/scenes/PlayScene.ts`, `docs/playtest-brief.md`
 - 남은 이슈: 배포 링크 갱신은 다음 푸시 때
+
+### 2026-07-31 - 개발용 시작 무기 URL 파라미터 복구
+
+- 단계: M6 핵심 구조 재정렬 / 검증 편의 보강
+- AI 도구: Codex
+- 입력 프롬프트 / 지시: Claude 의견 공유. `SelectScene` 제거 후 특정 무기 조합으로 바로 시작할 방법이 없어져, `?left=bow&right=arcane&wave=4` 같은 URL 파라미터가 필요하다는 지적.
+- AI 출력 요약: 플레이어용 시작 선택 화면은 제거 상태로 유지하되, 개발 검증용으로 URL 파라미터에서 시작 왼손/오른손 무기와 시작 방을 읽는 경로를 추가했다.
+- 사람이 검토/수정한 내용: 무효한 무기 id는 무시하고, `right=none`은 오른손 비우기로 처리해 실수에 강하게 했다. 파싱은 Phaser 씬에서 분리해 순수 함수 테스트가 가능하게 했다.
+- 반영한 내용: `parseDebugStart()`를 추가하고 `PlayScene.init()`에서 `location.search`를 해석해 `left`, `right`, `wave`를 적용한다. 플레이 테스트 문서에 개발 검증 URL 예시를 추가했다.
+- 게임/문서 반영 여부: 코드와 문서에 반영.
+- 관련 파일: `src/game/debug-start.ts`, `src/game/debug-start.test.ts`, `src/scenes/PlayScene.ts`, `docs/playtest-brief.md`, `docs/ai-usage-log.md`
+- 검증: `npm test` 통과(15 files, 206 passed). `npm run build` 통과. Vite chunk size warning은 기존 번들 크기 경고.
+- 남은 이슈: 다음 코드 작업은 `PlayerProgress`의 id 배열 기반 보유 상태 추가.
+
+### 2026-07-31 - 각성 중 상태이상 부여 누락 수정
+
+- 단계: M6 핵심 구조 재정렬 / 대체 발동 회귀 수정
+- AI 도구: Codex
+- 입력 프롬프트 / 지시: Claude 의견 공유. 대체 발동 후 `applyStatus`가 `basic` 분기 안에 남아 각성 중 검/활/비전/방패의 상태이상, 상처 폭발, 양손 상호작용이 멈춘다는 지적.
+- AI 출력 요약: 지적을 타당한 회귀로 판단하고, 각성 중에도 콤보스킬 명중이 무기별 상태이상과 상태 반응을 유지하도록 수정했다.
+- 사람이 검토/수정한 내용: "각성하면 피해는 오르지만 상태이상은 포기"라는 트레이드오프는 문서화된 의도가 아니며, 방패 제어 정체성과 상처 소모 상호작용을 보존해야 한다는 기준을 적용했다.
+- 반영한 내용: `PlayScene.resolveHit()`에서 낙인 소비, 비전 흐름, `applyStatus`, 상처 폭발 처리를 `basic` 분기 밖으로 이동했다. 기본 공격은 콤보 게이지를 올리고, 콤보스킬 명중은 각성 지속시간만 갱신하는 분기는 유지했다. 관련 문서에 각성 중 상태 반응 유지 기준을 추가했다.
+- 게임/문서 반영 여부: 코드와 문서에 반영.
+- 관련 파일: `src/scenes/PlayScene.ts`, `docs/playtest-brief.md`, `docs/action-tracker.md`, `docs/full-concept-implementation-plan.md`, `docs/ai-usage-log.md`
+- 검증: `npm test` 통과(15 files, 206 passed). `npm run build` 통과. Vite chunk size warning은 기존 번들 크기 경고.
+- 남은 이슈: 다음 코드 작업은 `PlayerProgress`의 id 배열 기반 보유 상태 추가.
+
+### 2026-07-31 - 지대형 콤보스킬 상태 판정 보완
+
+- 단계: M6 핵심 구조 재정렬 / 대체 발동 회귀 재수정
+- AI 도구: Codex
+- 입력 프롬프트 / 지시: Claude 의견 공유. 직전 수정은 `resolveHit()`을 타는 투사체형만 고쳐졌고, `updateAreas()`에서 `damageEnemy()`를 직접 호출하는 지대형 콤보스킬은 여전히 상태이상을 부여하지 않는다는 지적.
+- AI 출력 요약: 지적을 수용하고, 지대 틱마다 상태를 굴리는 대신 지대 생성 순간 범위 안의 적에게만 상태/상태 반응 판정을 1회 적용하도록 수정했다.
+- 사람이 검토/수정한 내용: 지대 틱마다 방패 균열 10%를 굴리면 여러 틱과 지대 겹침 때문에 사실상 확정 기절이 될 수 있으므로, 발동 주기당 1회 판정으로 제한하는 기준을 적용했다.
+- 반영한 내용: `dropArea()`에서 지대 생성 직후 범위 안의 살아있는 적을 찾아 `resolveHit(entity, 0, owner.weapon, false, owner)`를 1회 호출한다. 이후 `updateAreas()`의 틱은 기존처럼 피해만 준다. 문서에는 지대형 상태 판정이 생성 시 1회라는 규칙을 명시했다.
+- 게임/문서 반영 여부: 코드와 문서에 반영.
+- 관련 파일: `src/scenes/PlayScene.ts`, `docs/playtest-brief.md`, `docs/full-concept-implementation-plan.md`, `docs/ai-usage-log.md`
+- 검증: `npm test` 통과(15 files, 206 passed). `npm run build` 통과. Vite chunk size warning은 기존 번들 크기 경고.
+- 남은 이슈: 다음 코드 작업은 `PlayerProgress`의 id 배열 기반 보유 상태 추가.
+
+### 2026-07-31 - 콤보스킬 대체 발동 리뷰 (각성 중 상태이상 결함 2회 지적)
+
+- 단계: 기획 원형 구현 플랜 #1~#3
+- 사용 AI 도구: Codex(구현), Claude Code Opus 5(리뷰·검증)
+
+#### 검증한 것
+
+코덱스의 보고를 계측기로 직접 확인했다. **보고 내용은 전부 사실이었다.**
+
+- `useWeapon`이 `isComboReady`면 콤보스킬만, 아니면 기본 공격만 낸다. 진짜 대체 발동이다
+- 지대형은 `awakenedAttackInterval()`을 쓴다
+- 콤보 지속시간 3초 → 5초
+- 콤보 유지 규칙도 맞다. 기본 공격 명중만 게이지를 올리고(`gainCombo`),
+  콤보스킬 명중은 지속시간만 갱신한다(`sustainCombo`). 콤보스킬이 게이지를 올리면
+  각성이 스스로를 무한 유지하게 되는데 그렇게 되어 있지 않다
+
+계측 결과가 목표 범위(1.5~2.5배)에 전부 들어왔고 무기 사이 편차가 3.5배 → 1.5배로 좁혀졌다.
+
+| 무기 | 기본 | 각성 | 단일 | 무리 |
+| --- | --- | --- | --- | --- |
+| 검 | 153 | 253 | 1.65배 | 4.12배 |
+| 활 | 231 | 563 | 2.43배 | 2.43배 |
+| 비전 | 232 | 505 | 2.18배 | 2.18배 |
+| 방패 | 90 | 170 | 1.88배 | 7.20배 |
+
+#### 리뷰가 잡은 결함 — 각성 중 상태이상이 꺼졌다
+
+대체 발동으로 바꾸면서 **각성 중에는 상태이상이 하나도 걸리지 않게 됐다.**
+`applyStatus`가 `if (basic)` 블록 안에 있는데, 각성 중에는 `basic: false`인
+콤보스킬만 나가기 때문이다. 병행 발동일 때는 기본 공격이 항상 나가서 문제가 없었다.
+
+특히 두 가지가 아팠다.
+
+1. **방패의 정체성이 각성 중에 사라진다.** 균열=기절이 존재 이유인데 각성하면 기절을
+   못 건다. 제어 무기가 각성할수록 제어를 못 하게 된다
+2. **양손 상호작용이 각성 중에 죽는다.** 교차 반응(상처 소모)은 살아 있지만 상처를
+   **쌓는** 쪽이 멈춘다. 검으로 각성하면 다른 손으로 소모할 상처가 없어진다
+
+**같은 결함을 두 번 지적해야 했다.** 1차 수정은 `applyStatus`를 `if (basic)` 밖으로
+꺼냈는데, **지대는 그 경로를 타지 않는다.** 지대 틱은 `updateAreas`에서 `damageEnemy()`를
+직접 부르고 `resolveHit()`을 거치지 않기 때문이다. 결과적으로 투사체형(활·비전)만 고쳐지고
+**정작 문제로 지목했던 지대형(검·방패)은 그대로였다.**
+
+1차 인계 노트에 "지대 틱마다 상태 판정을 굴리면 확률이 폭증하니 부여하지 않거나 확률을
+낮추는 쪽을 검토하라"고 쓴 것이 "지대는 건드리지 마라"로 읽혔을 수 있다.
+**경고와 요구사항을 한 문장에 섞어 쓰면 안 된다는 교훈으로 남긴다.**
+
+#### 최종 해결
+
+지대는 **틱마다가 아니라 깔릴 때 1회** 상태 판정을 한다.
+`dropArea()`가 생성 순간 범위 안의 적에게 `resolveHit(entity, 0, weapon, false, owner)`를
+한 번 호출한다.
+
+- 부여 빈도가 발동 주기(0.9~1.2초)와 같아 기본 공격 주기(0.3~0.42초)보다 오히려 낮다.
+  방패 균열 10%를 지대 틱마다 굴렸다면 3초 지대에서 15회 판정이라 확정 기절이 됐을 것이다
+- 피해 0으로 부르므로 연출이 헛나가지 않는다. 데미지 숫자는 상처 폭발·상처 소모에만 뜬다
+- **뜻밖의 이득**: 지대 생성이 `resolveHit`을 타면서 교차 반응도 함께 발동한다.
+  검으로 상처를 쌓고 방패로 균열 파동을 깔면 그 자리에서 상처가 소모된다.
+  양손 상호작용이 지대형으로도 성립하게 됐다
+
+남은 자잘한 점: 지대가 깔린 뒤 걸어 들어온 적은 상태 판정을 받지 않는다.
+지대가 0.9~1.2초마다 다시 깔리므로 실질적으로는 다음 장에서 잡힌다.
+
+#### 함께 들어온 것
+
+- **구형 성장 경로 완전 제거** (#2·#3). `offer.ts`, `offer.test.ts`, `SelectScene.ts`
+  파일째 삭제. `RunPhase`에서 `'offer'` 제거, `clearRoom`의 `offersSupport` 파라미터 제거,
+  `RoomDef.offersSupport` 필드 제거. 게임 코드에 잔재 0건. 775줄 삭제
+- **개발용 시작 파라미터** `?left=bow&right=arcane&wave=4` (`debug-start.ts`).
+  `SelectScene`이 사라지면서 특정 무기 조합으로 시작할 방법이 없어졌고, 바로 다음
+  작업이 수치 재조정이라 매번 첫 보스를 검으로 잡아야 하는 문제가 생겼다. 리뷰에서
+  지적해 추가됐다
+
+- 게임/문서 반영 여부: 코드와 문서 모두에 반영
+- 관련 파일: `src/scenes/PlayScene.ts`, `src/data/weapons.ts`, `src/game/combo.ts`, `src/game/debug-start.ts`
+- 남은 이슈: 각성 중 상태이상은 실제 플레이로 체감 확인이 필요하다. 특히 방패로 각성했을 때
+  기절이 걸리는지가 이번 수정의 핵심이다
 

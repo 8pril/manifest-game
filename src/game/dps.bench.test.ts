@@ -63,14 +63,18 @@ describe('콤보스킬 대체 발동 — 초당 피해', () => {
     expect(losers, '각성했는데 약해지면 콤보 달성이 벌칙이 된다').toEqual([]);
   });
 
-  // 이것은 대체 발동 수치 재조정(#1)의 완료 기준이다.
-  // 지금은 3.5배 차이로 실패하므로 skip해 둔다. 재조정을 시작할 때 skip을 풀고
-  // 통과시킨다. 실패한 채로 두면 코덱스가 자기 회귀와 구분할 수 없다.
-  it.skip('각성 이득이 무기 사이에 크게 벌어지지 않아야 한다', () => {
+  it('각성 이득이 무기 사이에 크게 벌어지지 않아야 한다', () => {
     const ratios = table.map((r) => r.ratio);
     const spread = Math.max(...ratios) / Math.min(...ratios);
     console.log(`  각성 배율 최대/최소 = ${spread.toFixed(1)}배 차이`);
     expect(spread, '무기마다 각성 가치가 너무 다르면 픽이 한쪽으로 쏠린다').toBeLessThan(2.5);
+  });
+
+  it('단일 대상 각성 배율은 기본 공격 대비 1.5-2.5배 사이다', () => {
+    const outliers = table
+      .filter((r) => r.ratio < 1.5 || r.ratio > 2.5)
+      .map((r) => `${r.name} ${r.ratio.toFixed(2)}배`);
+    expect(outliers, '대체 발동은 콤보 보상이되 무기 간 가치가 과하게 벌어지면 안 된다').toEqual([]);
   });
 });
 

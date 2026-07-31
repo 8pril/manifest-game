@@ -32,7 +32,6 @@ export interface DebugState {
   player: { x: number; y: number };
   enemies: DebugEnemy[];
   combo: { left: number; right: number; required: number };
-  offerCount: number;
   /** 출구가 열렸으면 그 위치. 닫혀 있으면 null. */
   exit: { x: number; y: number } | null;
   /** 규칙 발동 횟수. 검증 드라이버가 변화를 감지해 그 순간을 찍는다. */

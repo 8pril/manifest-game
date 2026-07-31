@@ -15,8 +15,6 @@ import type { WeaponId } from '@/data/weapons';
 export interface RoomDef {
   label: string;
   spawns: { kind: EnemyKind; count: number }[];
-  /** 이 방을 정리한 뒤 보조능력을 고를 수 있는지. */
-  offersSupport: boolean;
   /** 이 방을 정리하면 마을로 들어가는지. 첫 보스 뒤 해금 연출에 쓴다. */
   entersTown?: boolean;
   /** 이 방을 정리할 때 확정 해금되는 무기. */
@@ -35,7 +33,6 @@ export const ROOMS: readonly RoomDef[] = [
     // 첫 방은 조금 작게 잡아 조작을 익히게 한다.
     label: '흐린 입구',
     spawns: [{ kind: 'chaser', count: 12 }],
-    offersSupport: false,
     width: 1900,
     height: 1150,
   },
@@ -46,7 +43,6 @@ export const ROOMS: readonly RoomDef[] = [
       { kind: 'boss', count: 1 },
       { kind: 'chaser', count: 16 },
     ],
-    offersSupport: false,
     entersTown: true,
     unlocksWeapons: ['bow', 'shield'],
     width: 2000,
@@ -59,7 +55,6 @@ export const ROOMS: readonly RoomDef[] = [
       { kind: 'archer', count: 4 },
       { kind: 'brute', count: 2 },
     ],
-    offersSupport: false,
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
   },
@@ -71,7 +66,6 @@ export const ROOMS: readonly RoomDef[] = [
       { kind: 'archer', count: 5 },
       { kind: 'brute', count: 3 },
     ],
-    offersSupport: false,
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
   },
@@ -91,7 +85,6 @@ export const ROOMS: readonly RoomDef[] = [
       { kind: 'archer', count: 4 },
       { kind: 'brute', count: 2 },
     ],
-    offersSupport: false,
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
   },

@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   createLoadout,
-  attachSupport,
   supportsFor,
   allSkills,
   totalSupports,
@@ -19,6 +18,13 @@ import { createRun, clearRoom } from '@/game/run';
 
 const pierce = SUPPORTS.find((s) => s.id === 'pierce')!;
 const opulence = SUPPORTS.find((s) => s.id === 'opulence')!;
+
+function withSupports(skillId: string, supports: typeof SUPPORTS): ReturnType<typeof createLoadout> {
+  return {
+    ...createLoadout('sword', 'bow'),
+    supports: { [skillId]: supports },
+  };
+}
 
 describe('createLoadout', () => {
   it('무기 2종과 스킬 4개를 갖는다', () => {
@@ -46,31 +52,9 @@ describe('createLoadout', () => {
   });
 });
 
-describe('attachSupport', () => {
-  it('지정한 스킬에만 붙는다', () => {
-    const loadout = attachSupport(createLoadout('sword', 'bow'), 'arrow-shot', pierce);
-    expect(supportsFor(loadout, 'arrow-shot')).toEqual([pierce]);
-    expect(supportsFor(loadout, 'volley')).toHaveLength(0);
-  });
-
-  it('원본을 바꾸지 않는다', () => {
-    const before = createLoadout('sword', 'bow');
-    attachSupport(before, 'arrow-shot', pierce);
-    expect(totalSupports(before)).toBe(0);
-  });
-
-  it('같은 보조능력을 다른 스킬에 각각 붙일 수 있다', () => {
-    let loadout = createLoadout('sword', 'bow');
-    loadout = attachSupport(loadout, 'arrow-shot', opulence);
-    loadout = attachSupport(loadout, 'sword-slash', opulence);
-    expect(totalSupports(loadout)).toBe(2);
-  });
-});
-
 describe('resolveFor', () => {
   it('해당 스킬에 붙은 보조능력만 반영한다', () => {
-    let loadout = createLoadout('sword', 'bow');
-    loadout = attachSupport(loadout, 'arrow-shot', opulence);
+    const loadout = withSupports('arrow-shot', [opulence]);
 
     const bow = rightWeapon(loadout);
     if (!bow) throw new Error('오른손 무기가 필요합니다.');
@@ -101,8 +85,7 @@ describe('loadoutFromProgress', () => {
 describe('describeByHand', () => {
   it('손별로 무기와 보조능력을 묶는다', () => {
     // 스킬 이름만 나열하면 어느 손을 강화한 것인지 알 수 없다.
-    let loadout = createLoadout('sword', 'bow');
-    loadout = attachSupport(loadout, 'arrow-shot', pierce);
+    const loadout = withSupports('arrow-shot', [pierce]);
 
     const hands = describeByHand(loadout);
     expect(hands[0]).toEqual({ hand: '왼손', weapon: '검', lines: [] });
@@ -110,9 +93,7 @@ describe('describeByHand', () => {
   });
 
   it('한 스킬에 여러 개가 붙으면 함께 적는다', () => {
-    let loadout = createLoadout('sword', 'bow');
-    loadout = attachSupport(loadout, 'arrow-shot', pierce);
-    loadout = attachSupport(loadout, 'arrow-shot', opulence);
+    const loadout = withSupports('arrow-shot', [pierce, opulence]);
     expect(describeByHand(loadout)[1].lines).toEqual(['화살 사격: 관통, 부귀']);
   });
 });
@@ -133,8 +114,8 @@ describe('supportsFromProgress', () => {
     // 마을 진입 시 자동 장착되는 기본 세팅이 태그 규칙을 어기면
     // 조용히 버려져 성장이 사라진다. 붙은 개수로 그것을 고정한다.
     let run = createRun('sword', null);
-    run = clearRoom(run, false); // 흐린 입구
-    run = clearRoom(run, false); // 첫 문지기 → 마을
+    run = clearRoom(run); // 흐린 입구
+    run = clearRoom(run); // 첫 문지기 → 마을
 
     expect(run.phase).toBe('town');
     const bySkill = run.loadout.supports;

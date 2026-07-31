@@ -17,7 +17,7 @@ import type { StatBlock } from '@/engine/modifiers';
 /** 발동에 필요한 콤보 수. */
 export const COMBO_REQUIRED = 5;
 /** 마지막 명중 이후 콤보가 유지되는 기본 시간(초). */
-export const COMBO_BASE_DURATION = 3;
+export const COMBO_BASE_DURATION = 5;
 
 export interface ComboState {
   value: number;

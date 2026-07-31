@@ -8,8 +8,7 @@ import { configuredSupports, type PlayerProgress } from '@/game/progression';
  *
  * 플레이어는 무기 2종을 들고, 각 무기는 기본 공격과 발동 스킬을 갖는다.
  * 보조능력은 스킬 단위로 붙으므로 어떤 보조능력이 어느 스킬에 붙었는지를
- * 같이 들고 다녀야 한다. 원안의 "스킬당 보조젬 2개"를 그대로 유지하면서
- * 웨이브마다 선택을 받으려면 이 구조가 필요하다.
+ * 같이 들고 다녀야 한다. 새 기획에서는 마을의 실체화 장비 설정이 이 구조를 만든다.
  *
  * 무기 2종 × (기본 + 발동) × 슬롯 2 = 최대 8개까지 장착 가능하다.
  */
@@ -80,17 +79,6 @@ export function supportsFor(loadout: Loadout, skillId: string): readonly Support
   return loadout.supports[skillId] ?? [];
 }
 
-/** 보조능력을 특정 스킬에 붙인 새 로드아웃을 만든다. */
-export function attachSupport(loadout: Loadout, skillId: string, support: Support): Loadout {
-  return {
-    ...loadout,
-    supports: {
-      ...loadout.supports,
-      [skillId]: [...supportsFor(loadout, skillId), support],
-    },
-  };
-}
-
 export function resolveFor(loadout: Loadout, skill: Skill): ResolvedSkill {
   return resolveSkill(skill, supportsFor(loadout, skill.id));
 }
@@ -122,7 +110,7 @@ export function describeByHand(loadout: Loadout): { hand: string; weapon: string
   }));
 }
 
-/** 어떤 스킬이 어느 손에 속하는지. 선택 화면에서 쓴다. */
+/** 어떤 스킬이 어느 손에 속하는지. HUD나 장비 설정 UI에서 쓴다. */
 export function handOf(loadout: Loadout, skillId: string): '왼손' | '오른손' | null {
   const left = leftWeapon(loadout);
   if (left.basic.id === skillId || left.combo.id === skillId) return '왼손';

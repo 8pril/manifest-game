@@ -3,7 +3,6 @@ import {
   createRun,
   clearRoom,
   leaveTown,
-  pickSupport,
   damagePlayer,
   addKill,
   advanceTime,
@@ -13,20 +12,15 @@ import {
   INVULNERABLE_SECONDS,
 } from '@/game/run';
 import { TOTAL_ROOMS } from '@/game/rooms';
-import { SUPPORTS } from '@/data/supports';
 import { totalSupports, supportsFor } from '@/game/loadout';
-
-const pierce = SUPPORTS.find((s) => s.id === 'pierce')!;
-const anyPick = { support: pierce, skillId: 'arrow-shot' };
 
 const newRun = () => createRun('sword', 'bow');
 
-/** 웨이브를 n번 정리하고 매번 보조능력을 골라 진행시킨다. */
+/** 방을 n번 정리한다. 마을은 다음 전투로 나간다. */
 function advanceWaves(count: number) {
   let run = newRun();
   for (let i = 0; i < count; i++) {
-    run = clearRoom(run, true);
-    if (run.phase === 'offer') run = pickSupport(run, undefined);
+    run = clearRoom(run);
     if (run.phase === 'town') run = leaveTown(run);
   }
   return run;
@@ -48,22 +42,15 @@ describe('createRun', () => {
 });
 
 describe('clearRoom', () => {
-  it('웨이브를 정리하면 보조능력 선택으로 넘어간다', () => {
-    const run = clearRoom(newRun(), true);
-    expect(run.phase).toBe('offer');
-    // 선택하기 전에는 웨이브가 넘어가지 않는다
-    expect(run.roomIndex).toBe(0);
-  });
-
-  it('보조능력을 주지 않는 웨이브는 선택 없이 다음으로 간다', () => {
-    const run = clearRoom(newRun(), false);
+  it('방을 정리하면 선택 없이 다음 전투로 간다', () => {
+    const run = clearRoom(newRun());
     expect(run.phase).toBe('combat');
     expect(run.roomIndex).toBe(1);
   });
 
   it('첫 보스를 정리하면 활/방패와 무기 교체를 해금하고 마을로 들어간다', () => {
-    const atFirstBoss = clearRoom(newRun(), false);
-    const town = clearRoom(atFirstBoss, false);
+    const atFirstBoss = clearRoom(newRun());
+    const town = clearRoom(atFirstBoss);
 
     expect(town.phase).toBe('town');
     expect(town.roomIndex).toBe(1);
@@ -76,19 +63,19 @@ describe('clearRoom', () => {
   });
 
   it('마지막 웨이브를 정리하면 승리한다', () => {
-    const run = clearRoom(advanceWaves(TOTAL_ROOMS - 1), false);
+    const run = clearRoom(advanceWaves(TOTAL_ROOMS - 1));
     expect(run.phase).toBe('won');
   });
 
   it('전투 중이 아니면 아무 일도 하지 않는다', () => {
-    const offering = clearRoom(newRun(), true);
-    expect(clearRoom(offering, true)).toBe(offering);
+    const town = clearRoom(clearRoom(newRun()));
+    expect(clearRoom(town)).toBe(town);
   });
 });
 
 describe('leaveTown', () => {
   it('마을을 나와 다음 전투 방으로 간다', () => {
-    const town = clearRoom(clearRoom(newRun(), false), false);
+    const town = clearRoom(clearRoom(newRun()));
     const next = leaveTown(town);
 
     expect(next.phase).toBe('combat');
@@ -98,42 +85,6 @@ describe('leaveTown', () => {
   it('마을이 아니면 아무 일도 하지 않는다', () => {
     const run = newRun();
     expect(leaveTown(run)).toBe(run);
-  });
-});
-
-describe('pickSupport', () => {
-  it('고른 보조능력이 지정한 스킬에 장착되고 다음 웨이브로 넘어간다', () => {
-    const run = pickSupport(clearRoom(newRun(), true), anyPick);
-    expect(run.phase).toBe('combat');
-    expect(run.roomIndex).toBe(1);
-    expect(supportsFor(run.loadout, 'arrow-shot')).toEqual([pierce]);
-    // 다른 스킬에는 붙지 않는다
-    expect(supportsFor(run.loadout, 'sword-slash')).toHaveLength(0);
-  });
-
-  it('고르지 않고 넘기면 장착 없이 진행한다', () => {
-    const run = pickSupport(clearRoom(newRun(), true), undefined);
-    expect(run.phase).toBe('combat');
-    expect(run.roomIndex).toBe(1);
-    expect(totalSupports(run.loadout)).toBe(0);
-  });
-
-  it('선택 단계가 아니면 아무 일도 하지 않는다', () => {
-    const run = newRun();
-    expect(pickSupport(run, anyPick)).toBe(run);
-  });
-
-  it('보조능력 선택 단계가 남아 있는 동안에는 보조능력이 누적된다', () => {
-    let run = newRun();
-    const picks = [
-      { support: pierce, skillId: 'arrow-shot' },
-    ];
-    for (const pick of picks) {
-      run = clearRoom(run, true);
-      run = pickSupport(run, pick);
-    }
-    expect(totalSupports(run.loadout)).toBe(1);
-    expect(run.roomIndex).toBe(1);
   });
 });
 
@@ -152,11 +103,6 @@ describe('damagePlayer', () => {
     expect(damagePlayer(newRun(), 9999).hp).toBe(0);
   });
 
-  it('보조능력 선택 중에는 피해를 받지 않는다', () => {
-    const offering = clearRoom(newRun(), true);
-    expect(damagePlayer(offering, 50)).toBe(offering);
-  });
-
   it('이미 패배한 뒤에는 상태가 바뀌지 않는다', () => {
     const lost = damagePlayer(newRun(), PLAYER_MAX_HP);
     expect(damagePlayer(lost, 10)).toBe(lost);
@@ -166,8 +112,8 @@ describe('damagePlayer', () => {
 describe('advanceTime', () => {
   it('전투 중에만 시간이 흐른다', () => {
     expect(advanceTime(newRun(), 1.5).elapsed).toBe(1.5);
-    const offering = clearRoom(newRun(), true);
-    expect(advanceTime(offering, 1.5)).toBe(offering);
+    const town = clearRoom(clearRoom(newRun()));
+    expect(advanceTime(town, 1.5)).toBe(town);
   });
 });
 
@@ -178,9 +124,9 @@ describe('addKill / isOver', () => {
 
   it('승리와 패배만 종료 상태다', () => {
     expect(isOver(newRun())).toBe(false);
-    expect(isOver(clearRoom(newRun(), true))).toBe(false);
+    expect(isOver(clearRoom(newRun()))).toBe(false);
     expect(isOver(damagePlayer(newRun(), PLAYER_MAX_HP))).toBe(true);
-    expect(isOver(clearRoom(advanceWaves(TOTAL_ROOMS - 1), false))).toBe(true);
+    expect(isOver(clearRoom(advanceWaves(TOTAL_ROOMS - 1)))).toBe(true);
   });
 });
 
