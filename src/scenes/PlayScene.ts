@@ -1,10 +1,20 @@
 import Phaser from 'phaser';
-import { applyRenderScale, followInRoom, pinToScreen, pinContainer, screenX, screenY, VIEW_WIDTH, VIEW_HEIGHT } from '@/render';
+import {
+  applyRenderScale,
+  followInRoom,
+  pinToScreen,
+  pinContainer,
+  pointerScreenLocal,
+  screenX,
+  screenY,
+  VIEW_WIDTH,
+  VIEW_HEIGHT,
+} from '@/render';
 import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { SUPPORTS } from '@/data/supports';
-import { deliveryOf, type Weapon, type WeaponId } from '@/data/weapons';
+import { deliveryOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
 import type { Skill } from '@/engine/support';
 import {
   spawnProjectiles,
@@ -53,9 +63,10 @@ import {
 import { ROOMS, TOTAL_ROOMS } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { rollOffer, type OfferItem } from '@/game/offer';
-import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf } from '@/game/loadout';
+import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf, setLoadoutWeapons } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
-import { createRun, clearRoom, pickSupport, damagePlayer, addKill, advanceTime, type RunState } from '@/game/run';
+import { createRun, clearRoom, leaveTown, pickSupport, damagePlayer, addKill, advanceTime, type RunState } from '@/game/run';
+import { createInitialProgress, equipFromWheel, type Hand, type PlayerProgress } from '@/game/progression';
 
 const MOVE_SPEED = 300;
 const DASH_SPEED = 900;
@@ -76,6 +87,9 @@ const BURST_COLOR = 0xff6b6b;
 const BRAND_COLOR = 0xb08bff;
 /** 선택 창이 뜰 때의 페이드인(ms). 입력은 처음부터 받는다. */
 const OFFER_FADE_MS = 140;
+const WHEEL_OPEN_MS = 150;
+const WHEEL_RADIUS = 122;
+const WHEEL_INNER_RADIUS = 24;
 
 interface EnemyEntity {
   state: Enemy;
@@ -101,11 +115,27 @@ interface WeaponRuntime {
   comboReadyAt: number;
 }
 
+interface WheelSegment {
+  hand: Hand;
+  index: 0 | 1;
+  weapon: WeaponId | null;
+  wedge: Phaser.GameObjects.Arc;
+  label: Phaser.GameObjects.Text;
+}
+
+interface WeaponWheelMenu {
+  container: Phaser.GameObjects.Container;
+  center: { x: number; y: number };
+  readyAt: number;
+  selected: { hand: Hand; index: 0 | 1 } | null;
+  segments: WheelSegment[];
+}
+
 /** 한 판의 전투 화면. 진행 규칙과 승패 판정은 game/run.ts가 갖는다. */
 export class PlayScene extends Phaser.Scene {
   private run!: RunState;
   private left!: WeaponRuntime;
-  private right!: WeaponRuntime;
+  private right: WeaponRuntime | null = null;
 
   private player!: Phaser.GameObjects.Arc;
   private aimLine!: Phaser.GameObjects.Line;
@@ -124,6 +154,7 @@ export class PlayScene extends Phaser.Scene {
   /** 비전 흐름이 걸린 동안 플레이어를 감싸는 오라. 버프가 살아 있다는 유일한 표시다. */
   private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
+  private weaponWheel: WeaponWheelMenu | null = null;
 
   private keys!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
   private dashUntil = 0;
@@ -133,7 +164,7 @@ export class PlayScene extends Phaser.Scene {
   private currentOffer: OfferItem[] = [];
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
   private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0 };
-  private weapons: { left: WeaponId; right: WeaponId } = { left: 'sword', right: 'bow' };
+  private weapons: { left: WeaponId; right: WeaponId | null } = { left: 'sword', right: null };
   /** 현재 방의 이동 가능 영역. 방마다 크기가 다르다. */
   private bounds = { minX: WALL, minY: WALL, maxX: GAME_WIDTH - WALL, maxY: GAME_HEIGHT - WALL };
   private exit!: Phaser.GameObjects.Rectangle;
@@ -165,9 +196,13 @@ export class PlayScene extends Phaser.Scene {
     super('Play');
   }
 
-  init(data: { left?: WeaponId; right?: WeaponId }): void {
-    // 씬을 직접 열었을 때(개발용 ?scene=Play)를 위한 기본값.
-    this.weapons = { left: data?.left ?? 'sword', right: data?.right ?? 'bow' };
+  init(data: { left?: WeaponId; right?: WeaponId | null; progress?: PlayerProgress }): void {
+    // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
+    const progress = data?.progress ?? createInitialProgress();
+    this.weapons = {
+      left: data?.left ?? progress.active.left,
+      right: data?.right ?? progress.active.right,
+    };
 
     // 개발용: ?wave=2 로 특정 웨이브부터 시작한다.
     // 후반 웨이브를 확인할 때마다 앞 웨이브를 다시 클리어하지 않아도 되게 한다.
@@ -190,7 +225,8 @@ export class PlayScene extends Phaser.Scene {
 
     this.run = { ...createRun(this.weapons.left, this.weapons.right), roomIndex: this.startRoomIndex };
     this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
-    this.right = { weapon: rightWeapon(this.run.loadout), combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
+    const right = rightWeapon(this.run.loadout);
+    this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0, comboReadyAt: 0 } : null;
 
 
     this.player = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.player).setDepth(10);
@@ -199,7 +235,7 @@ export class PlayScene extends Phaser.Scene {
     // 콤보가 차면 숫자를 읽지 않아도 알 수 있게 플레이어에 링을 띄운다.
     this.comboRings = {
       left: this.add.circle(0, 0, 32).setStrokeStyle(3, this.left.weapon.color).setDepth(11).setVisible(false),
-      right: this.add.circle(0, 0, 40).setStrokeStyle(3, this.right.weapon.color).setDepth(11).setVisible(false),
+      right: this.add.circle(0, 0, 40).setStrokeStyle(3, right?.color ?? 0x2a2f42).setDepth(11).setVisible(false),
     };
 
     this.arcaneAura = this.add
@@ -227,30 +263,50 @@ export class PlayScene extends Phaser.Scene {
     };
 
     keyboard.on('keydown-SPACE', () => this.tryDash());
-    keyboard.on('keydown-R', () => this.scene.start('Select'));
+    keyboard.on('keydown-R', () => {
+      if (this.run.phase === 'town') {
+        this.closeOverlay();
+        this.run = leaveTown(this.run);
+        this.enterRoom();
+        return;
+      }
+      if (this.run.phase !== 'combat') return;
+      if (!this.run.progress.weaponSwitchUnlocked) {
+        floatingText(this, this.player.x, this.player.y - 28, '아직 잠겨 있다', COLORS.textDim);
+        return;
+      }
+      this.openWeaponWheel();
+    });
+    keyboard.on('keyup-R', () => {
+      if (this.weaponWheel) this.closeWeaponWheel(true);
+    });
     for (const [index, name] of ['ONE', 'TWO', 'THREE'].entries()) {
       keyboard.on(`keydown-${name}`, () => this.choose(index));
     }
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.weaponWheel) return;
       if (this.run.phase !== 'combat') return;
       // 트랙패드에서는 두 손가락 탭이 꺼져 있거나 브라우저가 다르게 넘겨줄 수 있어
       // 눌린 버튼 상태와 이벤트의 버튼 번호를 모두 본다.
       const isRight = pointer.rightButtonDown() || pointer.button === 2;
-      this.useWeapon(isRight ? this.right : this.left);
+      const runtime = isRight ? this.right : this.left;
+      if (runtime) this.useWeapon(runtime, this.pointerAimAngle(pointer));
     });
 
     // 오른손 무기를 키로도 쓸 수 있게 한다.
     // 트랙패드에서 우클릭을 반복하는 것은 사실상 불가능하고,
     // 왼손이 WASD에 있으므로 새끼손가락으로 닿는 Shift가 가장 편하다.
     keyboard.on('keydown-SHIFT', () => {
+      if (this.weaponWheel) return;
       if (this.run.phase !== 'combat') return;
-      this.useWeapon(this.right);
+      if (this.right) this.useWeapon(this.right);
     });
   }
 
   private tryDash(): void {
+    if (this.weaponWheel) return;
     if (this.run.phase !== 'combat' || this.time.now < this.dashReadyAt) return;
 
     const direction = this.moveDirection();
@@ -261,7 +317,12 @@ export class PlayScene extends Phaser.Scene {
 
   private aimAngle(): number {
     const pointer = this.input.activePointer;
-    return Phaser.Math.Angle.Between(this.player.x, this.player.y, pointer.worldX, pointer.worldY);
+    return this.pointerAimAngle(pointer);
+  }
+
+  private pointerAimAngle(pointer: Phaser.Input.Pointer): number {
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    return Phaser.Math.Angle.Between(this.player.x, this.player.y, world.x, world.y);
   }
 
   private moveDirection(): { x: number; y: number } | null {
@@ -279,11 +340,9 @@ export class PlayScene extends Phaser.Scene {
 
   // ───────────────────────── 무기 사용
 
-  private useWeapon(runtime: WeaponRuntime): void {
+  private useWeapon(runtime: WeaponRuntime, angle = this.aimAngle()): void {
     if (this.time.now < runtime.readyAt) return;
     runtime.readyAt = this.time.now + runtime.weapon.cooldown;
-
-    const angle = this.aimAngle();
 
     // 기본 공격은 언제나 나간다. 발동 스킬이 이를 대체하면 콤보 달성이
     // 보상이 아니라 손해가 된다. 멸검(지대 26/0.4초)이 베기(46/0.3초)를
@@ -648,6 +707,14 @@ export class PlayScene extends Phaser.Scene {
     if (this.run.phase !== 'combat' || this.exitOpen) return;
     if (this.enemies.some((e) => isAlive(e.state))) return;
 
+    const room = ROOMS[this.run.roomIndex];
+    if (room?.entersTown) {
+      this.run = clearRoom(this.run, false);
+      this.showTown();
+      if (DEBUG_ENABLED) this.publishDebug();
+      return;
+    }
+
     if (this.run.roomIndex >= TOTAL_ROOMS - 1) {
       this.run = clearRoom(this.run, false);
       this.showResult(true);
@@ -672,6 +739,7 @@ export class PlayScene extends Phaser.Scene {
     this.run = clearRoom(this.run, room?.offersSupport ?? false);
 
     if (this.run.phase === 'offer') this.showOffer();
+    else if (this.run.phase === 'town') this.showTown();
     else this.enterRoom();
 
     if (DEBUG_ENABLED) this.publishDebug();
@@ -685,12 +753,17 @@ export class PlayScene extends Phaser.Scene {
     // `active`를 반드시 확인한다. 이 줄은 update의 맨 앞이라, 여기서 예외가 나면
     // 이동을 포함한 아래 전부가 멈춘다. 파괴된 컨테이너를 만지면 그렇게 된다.
     if (this.overlay?.active) pinContainer(this, this.overlay);
+    if (this.weaponWheel?.container.active) {
+      pinContainer(this, this.weaponWheel.container);
+      this.updateWeaponWheel();
+      return;
+    }
     if (this.run.phase !== 'combat') return;
     const dt = delta / 1000;
 
     this.run = advanceTime(this.run, dt);
     this.left.combo = tickCombo(this.left.combo, dt);
-    this.right.combo = tickCombo(this.right.combo, dt);
+    if (this.right) this.right.combo = tickCombo(this.right.combo, dt);
 
     this.movePlayer(dt);
     this.updateAim();
@@ -728,10 +801,10 @@ export class PlayScene extends Phaser.Scene {
           y: e.state.y,
           hp: e.state.hp,
           maxHp: e.state.maxHp,
-        })),
+      })),
       combo: {
         left: this.left.combo.value,
-        right: this.right.combo.value,
+        right: this.right?.combo.value ?? 0,
         required: COMBO_REQUIRED,
       },
       offerCount: this.currentOffer.length,
@@ -819,6 +892,10 @@ export class PlayScene extends Phaser.Scene {
   private updateComboRings(): void {
     for (const [side, runtime] of [['left', this.left], ['right', this.right]] as const) {
       const ring = this.comboRings[side];
+      if (!runtime) {
+        ring.setVisible(false);
+        continue;
+      }
       const ready = isComboReady(runtime.combo);
       ring.setVisible(ready);
       if (!ready) continue;
@@ -1005,7 +1082,7 @@ export class PlayScene extends Phaser.Scene {
 
         if (hit) {
           const outcome = onHitTarget(projectile, hit.state, alive);
-          const runtime = entity.weapon.id === this.left.weapon.id ? this.left : this.right;
+          const runtime = entity.weapon.id === this.left.weapon.id ? this.left : this.right ?? undefined;
           this.resolveHit(hit, outcome.damage, entity.weapon, entity.basic, runtime);
 
           for (const spawned of outcome.spawned) {
@@ -1178,7 +1255,159 @@ export class PlayScene extends Phaser.Scene {
       isComboReady(runtime.combo)
         ? `${runtime.weapon.name} ▶ ${runtime.weapon.combo.name} 발동 준비`
         : `${runtime.weapon.name} ${runtime.combo.value}/${COMBO_REQUIRED}`;
-    this.comboText.setText(`${label(this.left)}      ${label(this.right)}`);
+    this.comboText.setText(this.right ? `${label(this.left)}      ${label(this.right)}` : `${label(this.left)}      오른손 잠김`);
+  }
+
+  private openWeaponWheel(): void {
+    if (this.weaponWheel) return;
+
+    const pointer = this.input.activePointer;
+    // 포인터 위치에 띄우되 링이 화면 밖으로 나가지 않게 당긴다.
+    // 화면 끝에서 열면 반쪽이 잘려 나가, 그쪽 손의 후보를 마우스로 고를 수 없다.
+    const raw = pointerScreenLocal(this, pointer);
+    const center = {
+      x: Phaser.Math.Clamp(raw.x, WHEEL_RADIUS + 8, VIEW_WIDTH - WHEEL_RADIUS - 8),
+      y: Phaser.Math.Clamp(raw.y, WHEEL_RADIUS + 8, VIEW_HEIGHT - WHEEL_RADIUS - 8),
+    };
+    const container = this.add.container(0, 0).setDepth(31);
+    pinContainer(this, container);
+
+    container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x1d1f28, 0.62));
+    const segments = this.createWheelSegments(container, center);
+    const core = this.add.circle(center.x, center.y, WHEEL_INNER_RADIUS, 0x0a0b0f, 0.92);
+    container.add(core);
+    container.add(
+      this.add
+        .text(center.x, center.y, 'R', { fontSize: '18px', color: COLORS.text, fontStyle: 'bold' })
+        .setOrigin(0.5),
+    );
+
+    container.setAlpha(0.4);
+    for (const segment of segments) {
+      segment.wedge.setScale(0.2);
+      segment.label.setAlpha(0);
+    }
+    core.setScale(0.2);
+    this.tweens.add({ targets: container, alpha: 1, duration: WHEEL_OPEN_MS, ease: 'Quad.easeOut' });
+    this.tweens.add({
+      targets: [...segments.map((segment) => segment.wedge), core],
+      scale: 1,
+      duration: WHEEL_OPEN_MS,
+      ease: 'Back.easeOut',
+    });
+    this.tweens.add({ targets: segments.map((segment) => segment.label), alpha: 1, duration: WHEEL_OPEN_MS });
+
+    this.weaponWheel = {
+      container,
+      center,
+      readyAt: this.time.now + WHEEL_OPEN_MS,
+      selected: null,
+      segments,
+    };
+  }
+
+  private createWheelSegments(container: Phaser.GameObjects.Container, center: { x: number; y: number }): WheelSegment[] {
+    const slots = [
+      { hand: 'left' as const, index: 0 as const, start: 180, end: 270, labelDx: -54, labelDy: -54 },
+      { hand: 'left' as const, index: 1 as const, start: 90, end: 180, labelDx: -54, labelDy: 54 },
+      { hand: 'right' as const, index: 0 as const, start: 270, end: 360, labelDx: 54, labelDy: -54 },
+      { hand: 'right' as const, index: 1 as const, start: 0, end: 90, labelDx: 54, labelDy: 54 },
+    ];
+
+    return slots.map((slot) => {
+      const weapon = this.run.progress.wheel[slot.hand][slot.index];
+      const color = weapon ? weaponOf(weapon).color : 0x2a2f42;
+      const wedge = this.add
+        .arc(center.x, center.y, WHEEL_RADIUS, slot.start, slot.end, false, color, weapon ? 0.58 : 0.28)
+        .setStrokeStyle(2, 0x0a0b0f, 0.9);
+      const label = this.add
+        .text(center.x + slot.labelDx, center.y + slot.labelDy, weapon ? weaponOf(weapon).name : '-', {
+          fontSize: '16px',
+          color: weapon ? COLORS.text : COLORS.textDim,
+          fontStyle: weapon ? 'bold' : undefined,
+        })
+        .setOrigin(0.5);
+
+      container.add(wedge);
+      container.add(label);
+      return { hand: slot.hand, index: slot.index, weapon, wedge, label };
+    });
+  }
+
+  private updateWeaponWheel(): void {
+    const wheel = this.weaponWheel;
+    if (!wheel) return;
+
+    const point = pointerScreenLocal(this, this.input.activePointer);
+    const selected = this.pickWheelSegment(point, wheel);
+    wheel.selected = selected;
+    const ready = this.time.now >= wheel.readyAt;
+
+    for (const segment of wheel.segments) {
+      const isSelected = ready && selected?.hand === segment.hand && selected.index === segment.index && segment.weapon;
+      segment.wedge.setAlpha(isSelected ? 0.9 : segment.weapon ? 0.58 : 0.24);
+      segment.label.setColor(isSelected ? COLORS.accentText : segment.weapon ? COLORS.text : COLORS.textDim);
+      segment.label.setScale(isSelected ? 1.12 : 1);
+    }
+  }
+
+  private pickWheelSegment(
+    point: { x: number; y: number },
+    wheel: WeaponWheelMenu,
+  ): { hand: Hand; index: 0 | 1 } | null {
+    const dx = point.x - wheel.center.x;
+    const dy = point.y - wheel.center.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < WHEEL_INNER_RADIUS || distance > WHEEL_RADIUS) return null;
+
+    if (dx < 0) return { hand: 'left', index: dy < 0 ? 0 : 1 };
+    return { hand: 'right', index: dy < 0 ? 0 : 1 };
+  }
+
+  private closeWeaponWheel(tryEquip: boolean): void {
+    const wheel = this.weaponWheel;
+    this.weaponWheel = null;
+    if (!wheel) return;
+
+    const selection = this.time.now >= wheel.readyAt ? wheel.selected : null;
+    if (tryEquip && selection) this.equipWheelSelection(selection.hand, selection.index);
+    wheel.container.destroy(true);
+  }
+
+  private equipWheelSelection(hand: Hand, index: 0 | 1): void {
+    const before = this.run.progress;
+    const progress = equipFromWheel(before, hand, index);
+    if (progress === before) return;
+
+    this.run = {
+      ...this.run,
+      progress,
+      loadout: setLoadoutWeapons(this.run.loadout, progress.active.left, progress.active.right),
+    };
+    this.syncWeaponRuntimes();
+    this.refreshHud();
+  }
+
+  /**
+   * 로드아웃이 바뀐 뒤 양손 런타임을 맞춘다.
+   *
+   * **무기가 실제로 바뀐 손만 새로 만든다.** 양쪽을 무조건 다시 만들면
+   * 오른손 하나를 교체했을 뿐인데 건드리지도 않은 왼손 콤보까지 초기화된다.
+   * 콤보 유지가 이 게임의 핵심 긴장인데 무기 교체가 그것을 통째로 날리게 된다.
+   */
+  private syncWeaponRuntimes(): void {
+    const left = leftWeapon(this.run.loadout);
+    const right = rightWeapon(this.run.loadout);
+
+    if (this.left.weapon.id !== left.id) {
+      this.left = { weapon: left, combo: createCombo(), readyAt: 0, comboReadyAt: 0 };
+    }
+    if (this.right?.weapon.id !== right?.id) {
+      this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0, comboReadyAt: 0 } : null;
+    }
+
+    this.comboRings.left.setStrokeStyle(3, left.color);
+    this.comboRings.right.setStrokeStyle(3, right?.color ?? 0x2a2f42);
   }
 
   private showOffer(): void {
@@ -1259,6 +1488,64 @@ export class PlayScene extends Phaser.Scene {
     this.overlay = container;
   }
 
+  private showTown(): void {
+    const container = this.add.container(0, 0).setDepth(30);
+    pinContainer(this, container);
+
+    container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
+    container.add(
+      this.add
+        .text((VIEW_WIDTH / 2), 120, '마을', {
+          fontSize: '48px',
+          color: COLORS.text,
+          fontStyle: 'bold',
+        })
+        .setOrigin(0.5),
+    );
+    container.add(
+      this.add
+        .text((VIEW_WIDTH / 2), 176, '실체화 장비가 새로운 무기 형태를 기억했다', {
+          fontSize: '18px',
+          color: COLORS.textDim,
+        })
+        .setOrigin(0.5),
+    );
+
+    const unlocked = this.run.progress.unlockedWeapons.map((id) => weaponOf(id).name).join(' / ');
+    container.add(
+      this.add
+        .text((VIEW_WIDTH / 2), 270, [`획득: 활 / 방패`, `보유 무기: ${unlocked}`, `R키 무기 교체 기능 해금`].join('\n'), {
+          fontSize: '22px',
+          color: COLORS.text,
+          align: 'center',
+          lineSpacing: 14,
+        })
+        .setOrigin(0.5),
+    );
+
+    container.add(
+      this.add
+        .text((VIEW_WIDTH / 2), 420, '다음 단계에서 이곳에 실체화 장비 설정 UI가 들어간다', {
+          fontSize: '16px',
+          color: COLORS.textDim,
+        })
+        .setOrigin(0.5),
+    );
+
+    container.add(
+      this.add
+        .text((VIEW_WIDTH / 2), VIEW_HEIGHT - 110, 'R 키를 눌러 다음 전투로 이동', {
+          fontSize: '20px',
+          color: COLORS.accentText,
+          fontStyle: 'bold',
+        })
+        .setOrigin(0.5),
+    );
+
+    this.overlay = container;
+    this.refreshHud();
+  }
+
   /**
    * 카드를 눌러 보조능력을 고르고 다음 방으로 넘어간다.
    *
@@ -1321,7 +1608,7 @@ export class PlayScene extends Phaser.Scene {
           (VIEW_WIDTH / 2),
           (VIEW_HEIGHT / 2) - 10,
           [
-            `${this.left.weapon.name} + ${this.right.weapon.name}`,
+            this.right ? `${this.left.weapon.name} + ${this.right.weapon.name}` : `${this.left.weapon.name}`,
             `처치 ${this.run.kills}   시간 ${this.run.elapsed.toFixed(1)}초`,
             hands.map((h) => `${h.hand} ${h.weapon}` + (h.lines.length ? ` — ${h.lines.join(', ')}` : '')).join('\n'),
           ].join('\n'),

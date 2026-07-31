@@ -1,7 +1,14 @@
 import type { Support } from '@/engine/support';
-import { TOTAL_ROOMS } from '@/game/rooms';
+import { roomAt, TOTAL_ROOMS } from '@/game/rooms';
 import { attachSupport, createLoadout, type Loadout } from '@/game/loadout';
 import type { WeaponId } from '@/data/weapons';
+import {
+  createInitialProgress,
+  setWheelSlot,
+  unlockWeapons,
+  unlockWeaponSwitch,
+  type PlayerProgress,
+} from '@/game/progression';
 
 /**
  * 한 판(run)의 상태 기계.
@@ -16,6 +23,8 @@ export type RunPhase =
   | 'combat'
   /** 방을 정리하고 보조능력을 고르는 중. */
   | 'offer'
+  /** 비전투 거점에서 장비를 설정하는 중. */
+  | 'town'
   /** 보스까지 정리함. */
   | 'won'
   /** 체력이 0이 됨. */
@@ -40,6 +49,8 @@ export interface RunState {
   maxHp: number;
   /** 무기 2종과 스킬별 보조능력. */
   loadout: Loadout;
+  /** 해금된 무기와 마을 장비 설정. */
+  progress: PlayerProgress;
   /** 남은 무적 시간(초). 0이면 피해를 받는다. */
   invulnerable: number;
   /** 처치한 적 수. 결과 화면에 쓴다. */
@@ -48,13 +59,19 @@ export interface RunState {
   elapsed: number;
 }
 
-export function createRun(left: WeaponId, right: WeaponId): RunState {
+export function createRun(left: WeaponId, right: WeaponId | null): RunState {
+  const progress = {
+    ...unlockWeapons(createInitialProgress(), right ? [left, right] : [left]),
+    active: { left, right },
+  };
+
   return {
     phase: 'combat',
     roomIndex: 0,
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
     loadout: createLoadout(left, right),
+    progress,
     invulnerable: 0,
     kills: 0,
     elapsed: 0,
@@ -68,15 +85,33 @@ export function createRun(left: WeaponId, right: WeaponId): RunState {
 export function clearRoom(run: RunState, offersSupport: boolean): RunState {
   if (run.phase !== 'combat') return run;
 
+  const room = roomAt(run.roomIndex);
   const isLastRoom = run.roomIndex >= TOTAL_ROOMS - 1;
   if (isLastRoom) {
     return { ...run, phase: 'won' };
+  }
+  if (room?.entersTown) {
+    let progress = unlockWeaponSwitch(unlockWeapons(run.progress, room.unlocksWeapons ?? []));
+    progress = setWheelSlot(progress, 'left', 0, progress.active.left);
+    progress = setWheelSlot(progress, 'left', 1, progress.unlockedWeapons.includes('shield') ? 'shield' : null);
+    progress = setWheelSlot(progress, 'right', 0, progress.unlockedWeapons.includes('bow') ? 'bow' : null);
+    return { ...run, phase: 'town', progress };
   }
   // 고를 보조능력이 없으면 선택 단계를 건너뛰고 바로 다음 방으로 간다.
   if (!offersSupport) {
     return { ...run, roomIndex: run.roomIndex + 1 };
   }
   return { ...run, phase: 'offer' };
+}
+
+/** 마을을 나와 다음 전투 방으로 이동한다. */
+export function leaveTown(run: RunState): RunState {
+  if (run.phase !== 'town') return run;
+  return {
+    ...run,
+    phase: 'combat',
+    roomIndex: run.roomIndex + 1,
+  };
 }
 
 /**

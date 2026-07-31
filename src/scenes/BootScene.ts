@@ -3,8 +3,10 @@ import { applyRenderScale } from '@/render';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@/config';
 
 /**
- * 타이틀 화면. 지금은 배포 경로 검증용 최소 화면이며,
- * 실제 무기 선택 UI는 M4 이후에 이 씬을 대체한다.
+ * 타이틀 화면.
+ *
+ * 새 기획의 시작점은 무기 선택이 아니라 검 1종 고정이다.
+ * 기존 SelectScene은 조합 확인용 개발 씬으로 남긴다.
  */
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -24,7 +26,7 @@ export class BootScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(cx, GAME_HEIGHT / 2 - 20, '무기와 보조능력을 조합하는 액션 로그라이트', {
+      .text(cx, GAME_HEIGHT / 2 - 20, '검 하나로 시작해 실체화 무기를 되찾는 탑다운 핵앤슬래시', {
         fontSize: '20px',
         color: COLORS.textDim,
       })
@@ -45,7 +47,7 @@ export class BootScene extends Phaser.Scene {
       repeat: -1,
     });
 
-    this.input.once('pointerdown', () => this.scene.start('Select'));
-    this.input.keyboard?.once('keydown', () => this.scene.start('Select'));
+    this.input.once('pointerdown', () => this.scene.start('Play'));
+    this.input.keyboard?.once('keydown', () => this.scene.start('Play'));
   }
 }

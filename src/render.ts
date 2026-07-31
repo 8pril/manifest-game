@@ -91,6 +91,20 @@ export function pinContainer(scene: Phaser.Scene, container: Phaser.GameObjects.
   container.setPosition(camera.scrollX + PIN_OFFSET_X, camera.scrollY + PIN_OFFSET_Y);
 }
 
+/** 월드 좌표를 `pinContainer` 안에서 쓰는 화면 로컬 좌표로 바꾼다. */
+export function worldToScreenLocal(scene: Phaser.Scene, point: { x: number; y: number }): { x: number; y: number } {
+  const camera = scene.cameras.main;
+  return {
+    x: point.x - camera.scrollX - PIN_OFFSET_X,
+    y: point.y - camera.scrollY - PIN_OFFSET_Y,
+  };
+}
+
+/** 포인터 위치를 `pinContainer` 안에서 쓰는 화면 로컬 좌표로 바꾼다. */
+export function pointerScreenLocal(scene: Phaser.Scene, pointer: Phaser.Input.Pointer): { x: number; y: number } {
+  return worldToScreenLocal(scene, scene.cameras.main.getWorldPoint(pointer.x, pointer.y));
+}
+
 /** 화면 왼쪽에서 x픽셀 떨어진 위치. 고정 요소에만 쓴다. */
 export function screenX(x: number): number {
   return PIN_OFFSET_X + x;

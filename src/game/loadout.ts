@@ -15,28 +15,32 @@ import { weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
 
 export interface Loadout {
   left: WeaponId;
-  right: WeaponId;
+  right: WeaponId | null;
   /** 스킬 id별로 장착된 보조능력. */
   supports: Readonly<Record<string, readonly Support[]>>;
 }
 
-export function createLoadout(left: WeaponId, right: WeaponId): Loadout {
+export function createLoadout(left: WeaponId, right: WeaponId | null): Loadout {
   return { left, right, supports: {} };
+}
+
+export function setLoadoutWeapons(loadout: Loadout, left: WeaponId, right: WeaponId | null): Loadout {
+  return { ...loadout, left, right };
 }
 
 export function leftWeapon(loadout: Loadout): Weapon {
   return weaponOf(loadout.left);
 }
 
-export function rightWeapon(loadout: Loadout): Weapon {
-  return weaponOf(loadout.right);
+export function rightWeapon(loadout: Loadout): Weapon | null {
+  return loadout.right ? weaponOf(loadout.right) : null;
 }
 
 /** 로드아웃에 포함된 모든 스킬. 기본 공격 2개 + 발동 스킬 2개. */
 export function allSkills(loadout: Loadout): Skill[] {
   const left = leftWeapon(loadout);
   const right = rightWeapon(loadout);
-  return [left.basic, left.combo, right.basic, right.combo];
+  return right ? [left.basic, left.combo, right.basic, right.combo] : [left.basic, left.combo];
 }
 
 export function supportsFor(loadout: Loadout, skillId: string): readonly Support[] {
@@ -73,15 +77,15 @@ export function describeByHand(loadout: Loadout): { hand: string; weapon: string
   const sides = [
     { hand: '왼손', weapon: leftWeapon(loadout) },
     { hand: '오른손', weapon: rightWeapon(loadout) },
-  ];
+  ] as const;
 
   return sides.map(({ hand, weapon }) => ({
     hand,
-    weapon: weapon.name,
-    lines: [weapon.basic, weapon.combo].flatMap((skill) => {
+    weapon: weapon?.name ?? '없음',
+    lines: weapon ? [weapon.basic, weapon.combo].flatMap((skill) => {
       const supports = supportsFor(loadout, skill.id);
       return supports.length ? [`${skill.name}: ${supports.map((s) => s.name).join(', ')}`] : [];
-    }),
+    }) : [],
   }));
 }
 
@@ -90,6 +94,7 @@ export function handOf(loadout: Loadout, skillId: string): '왼손' | '오른손
   const left = leftWeapon(loadout);
   if (left.basic.id === skillId || left.combo.id === skillId) return '왼손';
   const right = rightWeapon(loadout);
+  if (!right) return null;
   if (right.basic.id === skillId || right.combo.id === skillId) return '오른손';
   return null;
 }

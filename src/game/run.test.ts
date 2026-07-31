@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createRun,
   clearRoom,
+  leaveTown,
   pickSupport,
   damagePlayer,
   addKill,
@@ -26,6 +27,7 @@ function advanceWaves(count: number) {
   for (let i = 0; i < count; i++) {
     run = clearRoom(run, true);
     if (run.phase === 'offer') run = pickSupport(run, undefined);
+    if (run.phase === 'town') run = leaveTown(run);
   }
   return run;
 }
@@ -37,6 +39,11 @@ describe('createRun', () => {
     expect(run.roomIndex).toBe(0);
     expect(run.hp).toBe(PLAYER_MAX_HP);
     expect(totalSupports(run.loadout)).toBe(0);
+  });
+
+  it('활성 무기를 진행 상태의 보유 무기로 기록한다', () => {
+    const run = newRun();
+    expect(run.progress.unlockedWeapons).toEqual(['sword', 'bow']);
   });
 });
 
@@ -54,6 +61,18 @@ describe('clearRoom', () => {
     expect(run.roomIndex).toBe(1);
   });
 
+  it('첫 보스를 정리하면 활/방패와 무기 교체를 해금하고 마을로 들어간다', () => {
+    const atFirstBoss = clearRoom(newRun(), false);
+    const town = clearRoom(atFirstBoss, false);
+
+    expect(town.phase).toBe('town');
+    expect(town.roomIndex).toBe(1);
+    expect(town.progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
+    expect(town.progress.weaponSwitchUnlocked).toBe(true);
+    expect(town.progress.wheel.left).toEqual(['sword', 'shield']);
+    expect(town.progress.wheel.right).toEqual(['bow', null]);
+  });
+
   it('마지막 웨이브를 정리하면 승리한다', () => {
     const run = clearRoom(advanceWaves(TOTAL_ROOMS - 1), false);
     expect(run.phase).toBe('won');
@@ -62,6 +81,21 @@ describe('clearRoom', () => {
   it('전투 중이 아니면 아무 일도 하지 않는다', () => {
     const offering = clearRoom(newRun(), true);
     expect(clearRoom(offering, true)).toBe(offering);
+  });
+});
+
+describe('leaveTown', () => {
+  it('마을을 나와 다음 전투 방으로 간다', () => {
+    const town = clearRoom(clearRoom(newRun(), false), false);
+    const next = leaveTown(town);
+
+    expect(next.phase).toBe('combat');
+    expect(next.roomIndex).toBe(2);
+  });
+
+  it('마을이 아니면 아무 일도 하지 않는다', () => {
+    const run = newRun();
+    expect(leaveTown(run)).toBe(run);
   });
 });
 
@@ -87,19 +121,17 @@ describe('pickSupport', () => {
     expect(pickSupport(run, anyPick)).toBe(run);
   });
 
-  it('웨이브를 진행하는 동안 보조능력이 누적된다', () => {
+  it('보조능력 선택 단계가 남아 있는 동안에는 보조능력이 누적된다', () => {
     let run = newRun();
     const picks = [
       { support: pierce, skillId: 'arrow-shot' },
-      { support: SUPPORTS.find((s) => s.id === 'earthquake')!, skillId: 'annihilation' },
-      { support: SUPPORTS.find((s) => s.id === 'added-stacks')!, skillId: 'sword-slash' },
     ];
     for (const pick of picks) {
       run = clearRoom(run, true);
       run = pickSupport(run, pick);
     }
-    expect(totalSupports(run.loadout)).toBe(3);
-    expect(run.roomIndex).toBe(3);
+    expect(totalSupports(run.loadout)).toBe(1);
+    expect(run.roomIndex).toBe(1);
   });
 });
 

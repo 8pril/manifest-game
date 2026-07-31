@@ -20,13 +20,21 @@ describe('createLoadout', () => {
   it('무기 2종과 스킬 4개를 갖는다', () => {
     const loadout = createLoadout('sword', 'bow');
     expect(leftWeapon(loadout).name).toBe('검');
-    expect(rightWeapon(loadout).name).toBe('활');
+    expect(rightWeapon(loadout)?.name).toBe('활');
     expect(allSkills(loadout).map((s) => s.id)).toEqual([
       'sword-slash',
       'annihilation',
       'arrow-shot',
       'volley',
     ]);
+  });
+
+  it('초기 구간처럼 오른손 무기가 없을 수 있다', () => {
+    const loadout = createLoadout('sword', null);
+
+    expect(rightWeapon(loadout)).toBeNull();
+    expect(allSkills(loadout).map((s) => s.id)).toEqual(['sword-slash', 'annihilation']);
+    expect(describeByHand(loadout)[1]).toEqual({ hand: '오른손', weapon: '없음', lines: [] });
   });
 
   it('처음에는 장착된 보조능력이 없다', () => {
@@ -61,6 +69,7 @@ describe('resolveFor', () => {
     loadout = attachSupport(loadout, 'arrow-shot', opulence);
 
     const bow = rightWeapon(loadout);
+    if (!bow) throw new Error('오른손 무기가 필요합니다.');
     const withSupport = resolveFor(loadout, bow.basic);
     const without = resolveFor(loadout, bow.combo);
 

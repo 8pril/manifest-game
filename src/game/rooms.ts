@@ -1,4 +1,5 @@
 import type { EnemyKind } from '@/game/enemy';
+import type { WeaponId } from '@/data/weapons';
 
 /**
  * 방 구성.
@@ -16,6 +17,10 @@ export interface RoomDef {
   spawns: { kind: EnemyKind; count: number }[];
   /** 이 방을 정리한 뒤 보조능력을 고를 수 있는지. */
   offersSupport: boolean;
+  /** 이 방을 정리하면 마을로 들어가는지. 첫 보스 뒤 해금 연출에 쓴다. */
+  entersTown?: boolean;
+  /** 이 방을 정리할 때 확정 해금되는 무기. */
+  unlocksWeapons?: readonly WeaponId[];
   /** 방의 크기. 화면(1280×720)보다 크면 카메라가 플레이어를 따라간다. */
   width: number;
   height: number;
@@ -28,32 +33,33 @@ export const ROOM_HEIGHT = 1400;
 export const ROOMS: readonly RoomDef[] = [
   {
     // 첫 방은 조금 작게 잡아 조작을 익히게 한다.
-    label: '1번 방',
+    label: '흐린 입구',
     spawns: [{ kind: 'chaser', count: 12 }],
-    offersSupport: true,
+    offersSupport: false,
     width: 1900,
     height: 1150,
   },
   {
-    // 몰이꾼이 처음 등장한다. 여기서부터 거리를 벌리는 것만으로는 안전하지 않다.
-    label: '2번 방',
+    // 첫 보스. 클리어하면 활/방패와 무기 교체 기능이 해금되고 마을로 들어간다.
+    label: '첫 문지기',
     spawns: [
+      { kind: 'boss', count: 1 },
       { kind: 'chaser', count: 16 },
-      { kind: 'archer', count: 3 },
-      { kind: 'brute', count: 1 },
     ],
-    offersSupport: true,
-    width: ROOM_WIDTH,
-    height: ROOM_HEIGHT,
+    offersSupport: false,
+    entersTown: true,
+    unlocksWeapons: ['bow', 'shield'],
+    width: 2000,
+    height: 1250,
   },
   {
-    label: '3번 방',
+    label: '해금 시험장',
     spawns: [
       { kind: 'chaser', count: 20 },
       { kind: 'archer', count: 4 },
       { kind: 'brute', count: 2 },
     ],
-    offersSupport: true,
+    offersSupport: false,
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
   },
