@@ -133,11 +133,6 @@ export class PlayScene extends Phaser.Scene {
   private currentOffer: OfferItem[] = [];
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
   private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0 };
-  /** 지금 고른 보조능력. 같은 카드를 한 번 더 눌러야 확정된다. */
-  private selectedOffer: number | null = null;
-  private offerCards: Phaser.GameObjects.Rectangle[] = [];
-  /** 카드마다 '다시 눌러 결정' 안내. 고른 카드에만 뜬다. */
-  private offerConfirmLabels: Phaser.GameObjects.Text[] = [];
   private weapons: { left: WeaponId; right: WeaponId } = { left: 'sword', right: 'bow' };
   /** 현재 방의 이동 가능 영역. 방마다 크기가 다르다. */
   private bounds = { minX: WALL, minY: WALL, maxX: GAME_WIDTH - WALL, maxY: GAME_HEIGHT - WALL };
@@ -234,9 +229,8 @@ export class PlayScene extends Phaser.Scene {
     keyboard.on('keydown-SPACE', () => this.tryDash());
     keyboard.on('keydown-R', () => this.scene.start('Select'));
     for (const [index, name] of ['ONE', 'TWO', 'THREE'].entries()) {
-      keyboard.on(`keydown-${name}`, () => this.selectOffer(index));
+      keyboard.on(`keydown-${name}`, () => this.choose(index));
     }
-    keyboard.on('keydown-ENTER', () => this.confirmOffer());
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -1189,12 +1183,13 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
-    this.selectedOffer = null;
-    this.offerCards = [];
-    this.offerConfirmLabels = [];
 
     const container = this.add.container(0, 0).setDepth(30);
     container.add(this.add.rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.82));
+    // 컨테이너에만 건다. 자식까지 0으로 내리면(allChildren) 클릭 판정이 카메라
+    // 스크롤만큼 가로로 밀려서 카드가 한 칸씩 어긋나 골라진다. 한 번 그렇게
+    // 바꿨다가 되돌렸다.
+    container.setScrollFactor(0);
     container.add(
       this.add
         .text(screenX(VIEW_WIDTH / 2), screenY(140), '보조능력을 하나 고르세요', { fontSize: '30px', color: COLORS.text, fontStyle: 'bold' })
@@ -1210,18 +1205,10 @@ export class PlayScene extends Phaser.Scene {
       const x = startX + index * (cardWidth + gap);
       const card = this.add
         .rectangle(x, screenY(VIEW_HEIGHT / 2), cardWidth, 250, 0x171a26)
-        .setStrokeStyle(2, 0x2a2f42)
+        .setStrokeStyle(2, COLORS.accent)
         .setInteractive({ useHandCursor: true });
-      // 처음 누르면 고르기만 하고, 고른 것을 다시 누르면 확정한다.
-      card.on('pointerdown', () => this.selectOffer(index));
+      card.on('pointerdown', () => this.choose(index));
       container.add(card);
-      this.offerCards.push(card);
-
-      const confirmLabel = this.add
-        .text(x, screenY(VIEW_HEIGHT / 2) + 100, '', { fontSize: '14px', color: COLORS.accentText, fontStyle: 'bold' })
-        .setOrigin(0.5);
-      container.add(confirmLabel);
-      this.offerConfirmLabels.push(confirmLabel);
 
       container.add(this.add.text(x, screenY(VIEW_HEIGHT / 2) - 88, `${index + 1}`, { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5));
       container.add(
@@ -1252,73 +1239,37 @@ export class PlayScene extends Phaser.Scene {
 
     container.add(
       this.add
-        .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 120), '숫자키 1-3으로 고르고, 고른 카드를 다시 누르거나 Enter로 결정', {
+        .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 120), '숫자키 1-3 또는 클릭', {
           fontSize: '15px',
           color: COLORS.textDim,
         })
         .setOrigin(0.5),
     );
 
-    // 자식을 전부 넣은 뒤에 걸어야 한다. 컨테이너에만 걸면 그리기는 고정되지만
-    // 클릭 판정은 자식 자신의 scrollFactor를 보기 때문에 서로 어긋난다.
-    container.setScrollFactor(0, 0, true);
-
     // 페이드인만 짧게 한다. 입력은 처음부터 받는다.
     container.setAlpha(0.4);
     this.tweens.add({ targets: container, alpha: 1, duration: OFFER_FADE_MS, ease: 'Quad.easeOut' });
-    this.refreshOfferSelection();
 
     this.overlay = container;
   }
 
   /**
-   * 카드를 고른다. 이미 고른 것을 또 누르면 확정한다.
+   * 카드를 눌러 보조능력을 고르고 다음 방으로 넘어간다.
    *
-   * 고르기와 확정을 나눈 이유가 있다. 전투 중 연타하던 클릭이 창이 뜨자마자
-   * 카드에 꽂혀 선택지를 읽기도 전에 골라지는 문제가 있었는데, 처음에는
-   * 창이 뜬 뒤 800ms 동안 입력을 막아 해결했다. 그런데 그 800ms 동안 누른 것이
+   * 예전에는 창이 뜬 뒤 800ms 동안 입력을 막았다. 전투 중 연타하던 클릭이
+   * 그대로 카드에 꽂히는 것을 막으려는 것이었는데, 그 800ms 동안 누른 것이
    * **조용히 사라졌다.** 첫 창은 선택지를 읽느라 800ms를 넘겨서 멀쩡했고,
    * 두 번째부터는 뭘 고를지 알고 바로 누르기 때문에 클릭이 통째로 먹히지 않았다.
-   *
-   * 시간으로 막는 대신 단계를 하나 두었다. 흘러든 클릭은 기껏해야 카드를 바꿀 뿐
-   * 판을 진행시키지 못하고, 지연이 없으니 아무리 빨리 눌러도 받는다.
+   * 지연은 없앴다.
    */
-  private selectOffer(index: number): void {
+  private choose(index: number): void {
     if (this.run.phase !== 'offer') return;
-    if (!this.currentOffer[index]) return;
 
-    if (this.selectedOffer === index) {
-      this.confirmOffer();
-      return;
-    }
-    this.selectedOffer = index;
-    this.refreshOfferSelection();
-  }
-
-  /** 무엇을 골랐는지 눈에 보이게 한다. */
-  private refreshOfferSelection(): void {
-    for (const [index, card] of this.offerCards.entries()) {
-      const chosen = index === this.selectedOffer;
-      card.setStrokeStyle(chosen ? 4 : 2, chosen ? COLORS.accent : 0x2a2f42);
-      card.setFillStyle(chosen ? 0x232838 : 0x171a26);
-    }
-    for (const [index, label] of this.offerConfirmLabels.entries()) {
-      label.setText(index === this.selectedOffer ? '다시 눌러 결정' : '');
-    }
-  }
-
-  /** 고른 것을 확정하고 다음 방으로 넘어간다. */
-  private confirmOffer(): void {
-    if (this.run.phase !== 'offer' || this.selectedOffer === null) return;
-
-    const item = this.currentOffer[this.selectedOffer];
+    const item = this.currentOffer[index];
     if (!item) return;
 
     this.overlay?.destroy(true);
     this.overlay = null;
-    this.offerCards = [];
-    this.offerConfirmLabels = [];
-    this.selectedOffer = null;
     this.run = pickSupport(this.run, { support: item.support, skillId: item.skill.id });
     this.enterRoom();
   }
@@ -1326,6 +1277,7 @@ export class PlayScene extends Phaser.Scene {
   private showResult(won: boolean): void {
     const container = this.add.container(0, 0).setDepth(30);
     container.add(this.add.rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
+    container.setScrollFactor(0);
     container.add(
       this.add
         .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2) - 90, won ? '승리' : '패배', {
@@ -1354,8 +1306,6 @@ export class PlayScene extends Phaser.Scene {
     container.add(
       this.add.text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2) + 90, 'R 키로 무기를 다시 골라 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
     );
-    // 자식을 전부 넣은 뒤에 건다. 자세한 이유는 showOffer 참고.
-    container.setScrollFactor(0, 0, true);
     this.overlay = container;
   }
 }
