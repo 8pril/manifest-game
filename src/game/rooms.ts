@@ -64,12 +64,32 @@ export const ROOMS: readonly RoomDef[] = [
     height: ROOM_HEIGHT,
   },
   {
-    // 첫 보스 뒤 얻은 무기와 R키 교체를 써보는 마지막 검증 전투.
+    // 첫 보스 뒤 얻은 무기와 R키 교체를 써보는 엘리트 전투.
     label: '파편 회랑',
     spawns: [
       { kind: 'chaser', count: 18 },
       { kind: 'archer', count: 5 },
       { kind: 'brute', count: 3 },
+    ],
+    offersSupport: false,
+    width: ROOM_WIDTH,
+    height: ROOM_HEIGHT,
+  },
+  {
+    // 최종 보스.
+    //
+    // 기획 의도가 "잡몹을 썰면서 나아간 다음 **여러 보스**를 잡아 아이템을 얻는 것"이고
+    // "보스는 한 종류로 하면 절대 안 된다"였다. 한 판에 보스를 두 번 만난다.
+    //  - 첫 문지기: 해금의 순간. 활/방패를 주고 마을로 보낸다
+    //  - 여기: 마무리의 순간. 영구 성장 드랍을 준다 (드랍은 아직 미구현)
+    //
+    // 잡몹 정리로 판이 끝나면 핵앤슬래시의 마무리가 서지 않는다.
+    label: '무너진 문',
+    spawns: [
+      { kind: 'boss', count: 1 },
+      { kind: 'chaser', count: 14 },
+      { kind: 'archer', count: 4 },
+      { kind: 'brute', count: 2 },
     ],
     offersSupport: false,
     width: ROOM_WIDTH,
