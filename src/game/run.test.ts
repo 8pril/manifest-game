@@ -71,6 +71,8 @@ describe('clearRoom', () => {
     expect(town.progress.weaponSwitchUnlocked).toBe(true);
     expect(town.progress.wheel.left).toEqual(['sword', 'shield']);
     expect(town.progress.wheel.right).toEqual(['bow', null]);
+    expect(supportsFor(town.loadout, 'volley').map((support) => support.id)).toEqual(['multiple-projectiles', 'fork']);
+    expect(supportsFor(town.loadout, 'annihilation').map((support) => support.id)).toEqual(['earthquake', 'lasting-composure']);
   });
 
   it('마지막 웨이브를 정리하면 승리한다', () => {

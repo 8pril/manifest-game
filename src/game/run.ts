@@ -1,8 +1,9 @@
 import type { Support } from '@/engine/support';
 import { roomAt, TOTAL_ROOMS } from '@/game/rooms';
-import { attachSupport, createLoadout, type Loadout } from '@/game/loadout';
+import { attachSupport, loadoutFromProgress, type Loadout } from '@/game/loadout';
 import type { WeaponId } from '@/data/weapons';
 import {
+  configureManifestation,
   createInitialProgress,
   setWheelSlot,
   unlockWeapons,
@@ -70,7 +71,7 @@ export function createRun(left: WeaponId, right: WeaponId | null): RunState {
     roomIndex: 0,
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
-    loadout: createLoadout(left, right),
+    loadout: loadoutFromProgress(progress),
     progress,
     invulnerable: 0,
     kills: 0,
@@ -92,16 +93,31 @@ export function clearRoom(run: RunState, offersSupport: boolean): RunState {
   }
   if (room?.entersTown) {
     let progress = unlockWeaponSwitch(unlockWeapons(run.progress, room.unlocksWeapons ?? []));
+    progress = configureDefaultTownLoadout(progress);
     progress = setWheelSlot(progress, 'left', 0, progress.active.left);
     progress = setWheelSlot(progress, 'left', 1, progress.unlockedWeapons.includes('shield') ? 'shield' : null);
     progress = setWheelSlot(progress, 'right', 0, progress.unlockedWeapons.includes('bow') ? 'bow' : null);
-    return { ...run, phase: 'town', progress };
+    return { ...run, phase: 'town', progress, loadout: loadoutFromProgress(progress, run.loadout) };
   }
   // 고를 보조능력이 없으면 선택 단계를 건너뛰고 바로 다음 방으로 간다.
   if (!offersSupport) {
     return { ...run, roomIndex: run.roomIndex + 1 };
   }
   return { ...run, phase: 'offer' };
+}
+
+function configureDefaultTownLoadout(progress: PlayerProgress): PlayerProgress {
+  let next = progress;
+  if (next.unlockedWeapons.includes('sword')) {
+    next = configureManifestation(next, 'sword', { primarySupportId: 'earthquake', synergySupportId: 'lasting-composure' });
+  }
+  if (next.unlockedWeapons.includes('bow')) {
+    next = configureManifestation(next, 'bow', { primarySupportId: 'multiple-projectiles', synergySupportId: 'fork' });
+  }
+  if (next.unlockedWeapons.includes('shield')) {
+    next = configureManifestation(next, 'shield', { primarySupportId: 'earthquake', synergySupportId: 'dragging-ground' });
+  }
+  return next;
 }
 
 /** 마을을 나와 다음 전투 방으로 이동한다. */

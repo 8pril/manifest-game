@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   configureManifestation,
+  configuredSupports,
   createInitialProgress,
   equipFromWheel,
   hasWeapon,
@@ -90,6 +91,15 @@ describe('manifestation config', () => {
       primarySupportId: 'multi-projectile',
       synergySupportId: 'wound-seeker',
     });
+  });
+
+  it('설정 슬롯에서 실제 보조능력 데이터를 읽는다', () => {
+    const progress = configureManifestation(unlockWeapons(createInitialProgress(), ['bow']), 'bow', {
+      primarySupportId: 'multiple-projectiles',
+      synergySupportId: 'fork',
+    });
+
+    expect(configuredSupports(progress, 'bow').map((support) => support.id)).toEqual(['multiple-projectiles', 'fork']);
   });
 
   it('아직 해금되지 않은 무기 설정은 바꾸지 않는다', () => {

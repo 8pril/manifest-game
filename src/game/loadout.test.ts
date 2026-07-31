@@ -8,10 +8,14 @@ import {
   describeByHand,
   handOf,
   resolveFor,
+  loadoutFromProgress,
+  supportsFromProgress,
   leftWeapon,
   rightWeapon,
 } from '@/game/loadout';
 import { SUPPORTS } from '@/data/supports';
+import { configureManifestation, createInitialProgress, unlockWeapons } from '@/game/progression';
+import { createRun, clearRoom } from '@/game/run';
 
 const pierce = SUPPORTS.find((s) => s.id === 'pierce')!;
 const opulence = SUPPORTS.find((s) => s.id === 'opulence')!;
@@ -79,6 +83,21 @@ describe('resolveFor', () => {
   });
 });
 
+describe('loadoutFromProgress', () => {
+  it('마을 설정의 보조1/보조2를 무기 콤보스킬에 반영한다', () => {
+    let progress = unlockWeapons(createInitialProgress(), ['bow']);
+    progress = { ...progress, active: { left: 'sword', right: 'bow' } };
+    progress = configureManifestation(progress, 'bow', {
+      primarySupportId: 'multiple-projectiles',
+      synergySupportId: 'fork',
+    });
+
+    const loadout = loadoutFromProgress(progress);
+    expect(supportsFor(loadout, 'volley').map((support) => support.id)).toEqual(['multiple-projectiles', 'fork']);
+    expect(resolveFor(loadout, rightWeapon(loadout)!.combo).stats.projectileCount).toBe(7);
+  });
+});
+
 describe('describeByHand', () => {
   it('손별로 무기와 보조능력을 묶는다', () => {
     // 스킬 이름만 나열하면 어느 손을 강화한 것인지 알 수 없다.
@@ -106,5 +125,33 @@ describe('handOf', () => {
     expect(handOf(loadout, 'arrow-shot')).toBe('오른손');
     expect(handOf(loadout, 'volley')).toBe('오른손');
     expect(handOf(loadout, 'arcane-bolt')).toBeNull();
+  });
+});
+
+describe('supportsFromProgress', () => {
+  it('첫 보스 뒤 기본 세팅이 전부 유효하게 붙는다', () => {
+    // 마을 진입 시 자동 장착되는 기본 세팅이 태그 규칙을 어기면
+    // 조용히 버려져 성장이 사라진다. 붙은 개수로 그것을 고정한다.
+    let run = createRun('sword', null);
+    run = clearRoom(run, false); // 흐린 입구
+    run = clearRoom(run, false); // 첫 문지기 → 마을
+
+    expect(run.phase).toBe('town');
+    const bySkill = run.loadout.supports;
+    // 검·활·방패가 해금되고 각각 콤보스킬에 보조형 2개가 붙는다.
+    expect(Object.keys(bySkill).sort()).toEqual(['annihilation', 'fracture-wave', 'volley']);
+    for (const [skillId, list] of Object.entries(bySkill)) {
+      expect(list.length, skillId).toBe(2);
+    }
+  });
+
+  it('태그가 맞지 않는 보조능력은 붙지 않는다', () => {
+    // 다중투사체는 투사체 스킬에만 붙는다. 검의 멸검은 지대라 거부돼야 한다.
+    const progress = configureManifestation(
+      unlockWeapons(createInitialProgress(), ['sword']),
+      'sword',
+      { primarySupportId: 'multiple-projectiles', synergySupportId: null },
+    );
+    expect(supportsFromProgress(progress)).toEqual({});
   });
 });

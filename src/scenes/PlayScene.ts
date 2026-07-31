@@ -63,7 +63,7 @@ import {
 import { ROOMS, TOTAL_ROOMS } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { rollOffer, type OfferItem } from '@/game/offer';
-import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf, setLoadoutWeapons } from '@/game/loadout';
+import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf, loadoutFromProgress } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
 import { createRun, clearRoom, leaveTown, pickSupport, damagePlayer, addKill, advanceTime, type RunState } from '@/game/run';
 import { createInitialProgress, equipFromWheel, type Hand, type PlayerProgress } from '@/game/progression';
@@ -1382,7 +1382,7 @@ export class PlayScene extends Phaser.Scene {
     this.run = {
       ...this.run,
       progress,
-      loadout: setLoadoutWeapons(this.run.loadout, progress.active.left, progress.active.right),
+      loadout: loadoutFromProgress(progress, this.run.loadout),
     };
     this.syncWeaponRuntimes();
     this.refreshHud();
@@ -1525,7 +1525,7 @@ export class PlayScene extends Phaser.Scene {
 
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 420, '다음 단계에서 이곳에 실체화 장비 설정 UI가 들어간다', {
+        .text((VIEW_WIDTH / 2), 420, '기본 실체화 세팅이 장착됐다. 세부 편집 UI는 다음 단계에서 열린다', {
           fontSize: '16px',
           color: COLORS.textDim,
         })

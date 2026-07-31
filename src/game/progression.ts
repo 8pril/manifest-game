@@ -1,4 +1,6 @@
 import { WEAPON_IDS, weaponOf, type WeaponId } from '@/data/weapons';
+import { findSupport } from '@/data/supports';
+import type { Support } from '@/engine/support';
 
 /**
  * 플레이어 진행 상태.
@@ -137,4 +139,13 @@ export function configureManifestation(
       },
     },
   };
+}
+
+export function configuredSupports(progress: PlayerProgress, weapon: WeaponId): readonly Support[] {
+  const config = progress.configs[weapon];
+  return [config.primarySupportId, config.synergySupportId].flatMap((id) => {
+    if (!id) return [];
+    const support = findSupport(id);
+    return support ? [support] : [];
+  });
 }

@@ -1,6 +1,7 @@
 import type { Skill, Support } from '@/engine/support';
-import { resolveSkill, type ResolvedSkill } from '@/engine/support';
+import { resolveSkill, canAttach, type ResolvedSkill } from '@/engine/support';
 import { weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
+import { configuredSupports, type PlayerProgress } from '@/game/progression';
 
 /**
  * 로드아웃.
@@ -26,6 +27,38 @@ export function createLoadout(left: WeaponId, right: WeaponId | null): Loadout {
 
 export function setLoadoutWeapons(loadout: Loadout, left: WeaponId, right: WeaponId | null): Loadout {
   return { ...loadout, left, right };
+}
+
+export function loadoutFromProgress(progress: PlayerProgress, previous: Loadout = createLoadout(progress.active.left, progress.active.right)): Loadout {
+  return {
+    ...previous,
+    left: progress.active.left,
+    right: progress.active.right,
+    supports: supportsFromProgress(progress),
+  };
+}
+
+/**
+ * 마을에서 세팅한 보조형스킬을 전투용 로드아웃 형태로 옮긴다.
+ *
+ * **반드시 `canAttach`를 거친다.** 보조능력은 태그가 맞는 스킬에만 붙고 슬롯 수도
+ * 정해져 있는데, 세팅 경로가 그 검증을 건너뛰면 태그가 맞지 않는 조합이 조용히
+ * 붙어 수정자가 엉뚱하게 적용된다. 지금은 기본 세팅이 하드코딩이라 우연히
+ * 유효하지만, 마을 UI로 직접 고르게 되면 바로 문제가 된다.
+ */
+export function supportsFromProgress(progress: PlayerProgress): Readonly<Record<string, readonly Support[]>> {
+  const supports: Record<string, readonly Support[]> = {};
+
+  for (const weaponId of progress.unlockedWeapons) {
+    const skill = weaponOf(weaponId).combo;
+    const accepted: Support[] = [];
+
+    for (const support of configuredSupports(progress, weaponId)) {
+      if (canAttach(skill, support, accepted).ok) accepted.push(support);
+    }
+    if (accepted.length > 0) supports[skill.id] = accepted;
+  }
+  return supports;
 }
 
 export function leftWeapon(loadout: Loadout): Weapon {
