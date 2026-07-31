@@ -65,7 +65,7 @@ import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { rollOffer, type OfferItem } from '@/game/offer';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, handOf, loadoutFromProgress } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
-import { createRun, clearRoom, leaveTown, pickSupport, damagePlayer, addKill, advanceTime, type RunState } from '@/game/run';
+import { createRun, clearRoom, leaveTown, pickSupport, damagePlayer, addKill, advanceTime, isOver, type RunState } from '@/game/run';
 import { createInitialProgress, equipFromWheel, type Hand, type PlayerProgress } from '@/game/progression';
 
 const MOVE_SPEED = 300;
@@ -264,6 +264,12 @@ export class PlayScene extends Phaser.Scene {
 
     keyboard.on('keydown-SPACE', () => this.tryDash());
     keyboard.on('keydown-R', () => {
+      // 판이 끝났으면 다시 시작. 이 분기가 없으면 죽은 뒤 새로고침 말고는
+      // 빠져나갈 방법이 없다. 결과 화면이 R을 안내하는데 아무 반응이 없었다.
+      if (isOver(this.run)) {
+        this.scene.start('Play');
+        return;
+      }
       if (this.run.phase === 'town') {
         this.closeOverlay();
         this.run = leaveTown(this.run);
@@ -1143,7 +1149,7 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(20);
 
     const hint = this.add
-      .text(screenX(VIEW_WIDTH - 24), screenY(20), 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 재시작', {
+      .text(screenX(VIEW_WIDTH - 24), screenY(20), 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 무기 교체', {
         fontSize: '13px',
         color: COLORS.textDim,
       })
@@ -1617,7 +1623,7 @@ export class PlayScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
     container.add(
-      this.add.text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 무기를 다시 골라 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
+      this.add.text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 다시 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
     );
     this.overlay = container;
   }
