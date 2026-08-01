@@ -16,7 +16,7 @@ import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { awakenedAttackInterval, deliveryOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
 import { findSupport } from '@/data/supports';
 import { findSkill } from '@/data/skills';
-import type { Skill } from '@/engine/support';
+import { findBehavior, type Behavior, type Skill } from '@/engine/support';
 import {
   spawnProjectiles,
   advance,
@@ -63,6 +63,7 @@ import {
   desiredDirection,
   readyToFire,
   markFired,
+  staggerBossOnWall,
   type BossEvent,
   type Enemy,
 } from '@/game/enemy';
@@ -110,8 +111,9 @@ interface ProjectileEntity {
   view: Phaser.GameObjects.Arc;
   /** 이 투사체를 쏜 무기. 명중 시 콤보와 상태이상을 누구에게 귀속할지 결정한다. */
   weapon: Weapon;
-  /** 기본 공격인지. 상태이상은 기본 공격 명중에서만 부여된다. */
+  /** 기본 공격인지. 기본 공격만 콤보 게이지를 올린다. */
   basic: boolean;
+  behaviors: readonly Behavior[];
 }
 
 interface WeaponRuntime {
@@ -147,7 +149,7 @@ export class PlayScene extends Phaser.Scene {
   private enemies: EnemyEntity[] = [];
   private projectiles: ProjectileEntity[] = [];
   /** 지대는 어느 무기가 만들었는지 함께 들고 있는다. 지속피해로도 콤보가 유지되게 하기 위함이다. */
-  private areas: { state: Area; view: Phaser.GameObjects.Arc; owner: WeaponRuntime | null }[] = [];
+  private areas: { state: Area; view: Phaser.GameObjects.Arc; owner: WeaponRuntime | null; behaviors: readonly Behavior[] }[] = [];
   /** 적이 쏜 투사체. 플레이어 투사체와 충돌 대상이 반대라 따로 관리한다. */
   private enemyShots: { state: Projectile; view: Phaser.GameObjects.Arc; damage: number }[] = [];
 
@@ -367,7 +369,7 @@ export class PlayScene extends Phaser.Scene {
         this.fireProjectiles(runtime.weapon, skill, resolved.stats, resolved.behaviors, angle, basic);
         break;
       case 'melee':
-        this.swingMelee(runtime, skill, resolved.stats, angle, basic);
+        this.swingMelee(runtime, skill, resolved.stats, resolved.behaviors, angle, basic);
         break;
       case 'area':
         this.dropArea(resolved.stats, resolved.behaviors, angle, basic ? null : runtime);
@@ -389,6 +391,7 @@ export class PlayScene extends Phaser.Scene {
         view: this.add.circle(state.x, state.y, 7, weapon.color).setDepth(8),
         weapon,
         basic,
+        behaviors,
       });
     }
   }
@@ -397,6 +400,7 @@ export class PlayScene extends Phaser.Scene {
     runtime: WeaponRuntime,
     _skill: Skill,
     stats: ReturnType<typeof resolveFor>['stats'],
+    behaviors: ReturnType<typeof resolveFor>['behaviors'],
     angle: number,
     basic: boolean,
   ): void {
@@ -442,7 +446,7 @@ export class PlayScene extends Phaser.Scene {
       const entity = this.enemies.find((e) => e.state.id === target.id);
       if (!entity) continue;
 
-      this.resolveHit(entity, stats.damage ?? 0, runtime.weapon, basic, runtime);
+      this.resolveHit(entity, stats.damage ?? 0, runtime.weapon, basic, runtime, behaviors);
       this.pushEnemy(entity, stats.knockback ?? 0);
     }
   }
@@ -501,13 +505,14 @@ export class PlayScene extends Phaser.Scene {
       state: area,
       view: this.add.circle(area.x, area.y, area.radius, AREA_COLORS[area.kind], 0.3).setDepth(1),
       owner,
+      behaviors,
     });
 
     if (owner) {
       for (const entity of this.enemies) {
         if (!isAlive(entity.state) || !containsPoint(area, entity.state)) continue;
         // 상태이상을 먼저 굴린다. 밀어내다 벽에 닿으면 그때 확정 기절이 덮어쓴다.
-        this.resolveHit(entity, 0, owner.weapon, false, owner);
+        this.resolveHit(entity, 0, owner.weapon, false, owner, behaviors);
         // 지대 중심에서 밀어낸다. 넉백이 있는 지대만 해당된다(균열 파동).
         this.pushEnemy(entity, stats.knockback ?? 0, at);
       }
@@ -521,9 +526,10 @@ export class PlayScene extends Phaser.Scene {
     weapon: Weapon,
     basic: boolean,
     runtime?: WeaponRuntime,
+    behaviors: readonly Behavior[] = [],
   ): void {
     const enemy = entity.state;
-    let damage = rawDamage * incomingDamageMultiplier(enemy);
+    let damage = this.applyStatusDamageBonus(rawDamage, enemy, behaviors) * incomingDamageMultiplier(enemy);
 
     // 평범한 명중에도 반응이 있어야 한다. 지금까지는 체력바만 줄었다.
     hitSpark(this, enemy.x, enemy.y, weapon.color);
@@ -586,6 +592,12 @@ export class PlayScene extends Phaser.Scene {
     }
 
     this.damageEnemy(entity, damage);
+  }
+
+  private applyStatusDamageBonus(damage: number, enemy: Enemy, behaviors: readonly Behavior[]): number {
+    const bonus = findBehavior(behaviors, 'statusDamage');
+    if (!bonus || !hasStatus(enemy, bonus.status)) return damage;
+    return damage * (1 + bonus.more);
   }
 
   private showStunFeedback(entity: EnemyEntity): void {
@@ -966,8 +978,17 @@ export class PlayScene extends Phaser.Scene {
         if (direction) {
           const step = enemy.kind === 'boss' ? bossMoveSpeed(enemy) * dt : enemySpeed(enemy) * dt;
           const radius = ENEMY_STATS[enemy.kind].radius;
-          enemy.x = Phaser.Math.Clamp(enemy.x + direction.x * step, this.bounds.minX + radius, this.bounds.maxX - radius);
-          enemy.y = Phaser.Math.Clamp(enemy.y + direction.y * step, this.bounds.minY + radius, this.bounds.maxY - radius);
+          const nextX = enemy.x + direction.x * step;
+          const nextY = enemy.y + direction.y * step;
+          const clampedX = Phaser.Math.Clamp(nextX, this.bounds.minX + radius, this.bounds.maxX - radius);
+          const clampedY = Phaser.Math.Clamp(nextY, this.bounds.minY + radius, this.bounds.maxY - radius);
+          const hitWall = clampedX !== nextX || clampedY !== nextY;
+
+          enemy.x = clampedX;
+          enemy.y = clampedY;
+          if (enemy.kind === 'boss' && hitWall && staggerBossOnWall(enemy)) {
+            this.showBossWallStagger(enemy);
+          }
         }
         if (readyToFire(enemy)) this.enemyFire(enemy);
       }
@@ -1023,6 +1044,14 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(4);
     floatingText(this, enemy.x, enemy.y - ENEMY_STATS.boss.radius - 18, '돌진 예고', '#ffd166');
     this.tweens.add({ targets: line, alpha: 0, duration: 740, ease: 'Quad.easeIn', onComplete: () => line.destroy() });
+  }
+
+  private showBossWallStagger(enemy: Enemy): void {
+    const radius = ENEMY_STATS.boss.radius;
+    impact(this, enemy.x, enemy.y);
+    ring(this, enemy.x, enemy.y, STUN_COLOR, { from: radius * 0.7, to: radius * 2.6, duration: 420, width: 5 });
+    flash(this, enemy.x, enemy.y, radius * 2.4, STUN_COLOR);
+    floatingText(this, enemy.x, enemy.y - radius - 18, '벽 충돌', '#d8f3ff');
   }
 
   private summonBossAdds(enemy: Enemy, count: number): void {
@@ -1115,6 +1144,7 @@ export class PlayScene extends Phaser.Scene {
   private enemyFillColor(enemy: Enemy): number {
     if (enemy.boss?.phase === 'telegraph') return BOSS_PATTERN_COLOR;
     if (enemy.boss?.phase === 'charging') return 0xff6b3d;
+    if (enemy.boss?.phase === 'staggered') return STUN_COLOR;
     return ENEMY_STATS[enemy.kind].color;
   }
 
@@ -1123,7 +1153,7 @@ export class PlayScene extends Phaser.Scene {
     for (const entity of this.enemies) entity.state.hindered = false;
 
     for (let i = this.areas.length - 1; i >= 0; i--) {
-      const { state, view, owner } = this.areas[i];
+      const { state, view, owner, behaviors } = this.areas[i];
       const result = tickArea(state, dt);
       let damagedSomething = false;
 
@@ -1131,7 +1161,8 @@ export class PlayScene extends Phaser.Scene {
         if (!isAlive(entity.state) || !containsPoint(state, entity.state)) continue;
         if (state.hinders) entity.state.hindered = true;
         if (result.ticked) {
-          this.damageEnemy(entity, state.damagePerTick * incomingDamageMultiplier(entity.state));
+          const damage = this.applyStatusDamageBonus(state.damagePerTick, entity.state, behaviors);
+          this.damageEnemy(entity, damage * incomingDamageMultiplier(entity.state));
           damagedSomething = true;
         }
       }
@@ -1169,7 +1200,7 @@ export class PlayScene extends Phaser.Scene {
         if (hit) {
           const outcome = onHitTarget(projectile, hit.state, alive);
           const runtime = entity.weapon.id === this.left.weapon.id ? this.left : this.right ?? undefined;
-          this.resolveHit(hit, outcome.damage, entity.weapon, entity.basic, runtime);
+          this.resolveHit(hit, outcome.damage, entity.weapon, entity.basic, runtime, entity.behaviors);
 
           for (const spawned of outcome.spawned) {
             this.projectiles.push({
@@ -1177,6 +1208,7 @@ export class PlayScene extends Phaser.Scene {
               view: this.add.circle(spawned.x, spawned.y, 7, entity.weapon.color).setDepth(8),
               weapon: entity.weapon,
               basic: entity.basic,
+              behaviors: entity.behaviors,
             });
           }
           consumed = outcome.consumed;
@@ -1201,6 +1233,7 @@ export class PlayScene extends Phaser.Scene {
     entity.hpBar.width = (radius * 2 * enemy.hp) / enemy.maxHp;
 
     if (enemy.hp <= 0) {
+      if (enemy.kind === 'boss') this.showBossDrop(enemy);
       deathBurst(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, radius * 2);
       entity.view.destroy();
       entity.hpBar.destroy();
@@ -1208,6 +1241,46 @@ export class PlayScene extends Phaser.Scene {
       this.run = addKill(this.run);
       this.refreshHud();
     }
+  }
+
+  private showBossDrop(enemy: Enemy): void {
+    const reward = ROOMS[this.run.roomIndex]?.reward;
+    if (!reward) return;
+
+    const lines = this.rewardLines(reward, '보스 드랍');
+    if (lines.length === 0) return;
+
+    const x = Phaser.Math.Clamp(enemy.x, this.bounds.minX + 180, this.bounds.maxX - 180);
+    const y = Phaser.Math.Clamp(enemy.y - ENEMY_STATS.boss.radius - 78, this.bounds.minY + 80, this.bounds.maxY - 80);
+    const text = this.add
+      .text(x, y, lines.join('\n'), {
+        fontFamily: 'sans-serif',
+        fontSize: '18px',
+        color: '#fff8dc',
+        align: 'center',
+        lineSpacing: 4,
+        wordWrap: { width: 320 },
+      })
+      .setOrigin(0.5)
+      .setDepth(17);
+    const plate = this.add
+      .rectangle(x, y, Math.max(260, text.width + 32), text.height + 24, 0x171923, 0.86)
+      .setStrokeStyle(2, BOSS_PATTERN_COLOR, 0.8)
+      .setDepth(16);
+
+    ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: ENEMY_STATS.boss.radius, to: ENEMY_STATS.boss.radius * 2.8, duration: 620, width: 5 });
+    this.tweens.add({
+      targets: [text, plate],
+      y: y - 18,
+      alpha: 0,
+      delay: 1800,
+      duration: 600,
+      ease: 'Quad.easeIn',
+      onComplete: () => {
+        text.destroy();
+        plate.destroy();
+      },
+    });
   }
 
   private flashPlayer(): void {

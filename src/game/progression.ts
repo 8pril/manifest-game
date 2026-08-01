@@ -1,6 +1,6 @@
 import { WEAPON_IDS, weaponOf, type WeaponId } from '@/data/weapons';
 import { findSupport } from '@/data/supports';
-import type { Support } from '@/engine/support';
+import { supportSlotType, type Support } from '@/engine/support';
 
 /**
  * 플레이어 진행 상태.
@@ -171,11 +171,14 @@ export function configureManifestation(
 
 export function configuredSupports(progress: PlayerProgress, weapon: WeaponId): readonly Support[] {
   const config = progress.configs[weapon];
-  return [config.primarySupportId, config.synergySupportId].flatMap((id) => {
+  return [
+    { id: config.primarySupportId, slot: 'primary' },
+    { id: config.synergySupportId, slot: 'synergy' },
+  ].flatMap(({ id, slot }) => {
     if (!id) return [];
     if (!hasSupport(progress, id)) return [];
     const support = findSupport(id);
-    return support ? [support] : [];
+    return support && supportSlotType(support) === slot ? [support] : [];
   });
 }
 
@@ -191,17 +194,23 @@ function sanitizeManifestationPatch(
     accepted.comboSkillId = patch.comboSkillId;
   }
   if (patch.primarySupportId !== undefined) {
-    accepted.primarySupportId = patch.primarySupportId === null || hasSupport(progress, patch.primarySupportId)
+    accepted.primarySupportId = patch.primarySupportId === null || canUseSupportInSlot(progress, patch.primarySupportId, 'primary')
       ? patch.primarySupportId
       : current.primarySupportId;
   }
   if (patch.synergySupportId !== undefined) {
-    accepted.synergySupportId = patch.synergySupportId === null || hasSupport(progress, patch.synergySupportId)
+    accepted.synergySupportId = patch.synergySupportId === null || canUseSupportInSlot(progress, patch.synergySupportId, 'synergy')
       ? patch.synergySupportId
       : current.synergySupportId;
   }
 
   return accepted;
+}
+
+function canUseSupportInSlot(progress: PlayerProgress, supportId: string, slot: 'primary' | 'synergy'): boolean {
+  if (!hasSupport(progress, supportId)) return false;
+  const support = findSupport(supportId);
+  return support !== undefined && supportSlotType(support) === slot;
 }
 
 function orderedComboSkillIds(existing: readonly string[], added: readonly string[]): readonly string[] {

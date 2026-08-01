@@ -58,16 +58,18 @@ describe('clearRoom', () => {
     expect(town.progress.ownedComboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
     expect(town.progress.ownedSupports).toEqual([
       'earthquake',
-      'lasting-composure',
+      'wound-resonance',
       'multiple-projectiles',
-      'fork',
+      'wound-seeker',
       'dragging-ground',
+      'fracture-resonance',
     ]);
     expect(town.progress.weaponSwitchUnlocked).toBe(true);
     expect(town.progress.wheel.left).toEqual(['sword', 'shield']);
     expect(town.progress.wheel.right).toEqual(['bow', null]);
-    expect(supportsFor(town.loadout, 'volley').map((support) => support.id)).toEqual(['multiple-projectiles', 'fork']);
-    expect(supportsFor(town.loadout, 'annihilation').map((support) => support.id)).toEqual(['earthquake', 'lasting-composure']);
+    expect(supportsFor(town.loadout, 'volley').map((support) => support.id)).toEqual(['multiple-projectiles', 'wound-seeker']);
+    expect(supportsFor(town.loadout, 'annihilation').map((support) => support.id)).toEqual(['earthquake', 'wound-resonance']);
+    expect(supportsFor(town.loadout, 'fracture-wave').map((support) => support.id)).toEqual(['earthquake', 'fracture-resonance']);
   });
 
   it('마지막 웨이브를 정리하면 승리한다', () => {
@@ -83,10 +85,11 @@ describe('clearRoom', () => {
     expect(run.progress.ownedComboSkills).toContain('arcane-daggers');
     expect(run.progress.ownedSupports).toEqual([
       'earthquake',
-      'lasting-composure',
+      'wound-resonance',
       'multiple-projectiles',
-      'fork',
+      'wound-seeker',
       'dragging-ground',
+      'fracture-resonance',
       'chain',
       'crackling-ground',
     ]);

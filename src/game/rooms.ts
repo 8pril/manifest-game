@@ -52,7 +52,14 @@ export const ROOMS: readonly RoomDef[] = [
     entersTown: true,
     reward: {
       weapons: ['bow', 'shield'],
-      supports: ['earthquake', 'lasting-composure', 'multiple-projectiles', 'fork', 'dragging-ground'],
+      supports: [
+        'earthquake',
+        'wound-resonance',
+        'multiple-projectiles',
+        'wound-seeker',
+        'dragging-ground',
+        'fracture-resonance',
+      ],
     },
     width: 2000,
     height: 1250,

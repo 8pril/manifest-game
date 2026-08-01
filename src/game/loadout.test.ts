@@ -70,15 +70,15 @@ describe('resolveFor', () => {
 describe('loadoutFromProgress', () => {
   it('마을 설정의 보조1/보조2를 무기 콤보스킬에 반영한다', () => {
     let progress = unlockWeapons(createInitialProgress(), ['bow']);
-    progress = unlockSupports(progress, ['multiple-projectiles', 'fork']);
+    progress = unlockSupports(progress, ['multiple-projectiles', 'wound-seeker']);
     progress = { ...progress, active: { left: 'sword', right: 'bow' } };
     progress = configureManifestation(progress, 'bow', {
       primarySupportId: 'multiple-projectiles',
-      synergySupportId: 'fork',
+      synergySupportId: 'wound-seeker',
     });
 
     const loadout = loadoutFromProgress(progress);
-    expect(supportsFor(loadout, 'volley').map((support) => support.id)).toEqual(['multiple-projectiles', 'fork']);
+    expect(supportsFor(loadout, 'volley').map((support) => support.id)).toEqual(['multiple-projectiles', 'wound-seeker']);
     expect(resolveFor(loadout, rightWeapon(loadout)!.combo).stats.projectileCount).toBe(7);
   });
 });
@@ -145,7 +145,7 @@ describe('supportsFromProgress', () => {
         bow: {
           comboSkillId: 'volley',
           primarySupportId: 'multiple-projectiles',
-          synergySupportId: 'fork',
+          synergySupportId: 'wound-seeker',
         },
       },
     };

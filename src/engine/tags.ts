@@ -32,6 +32,9 @@ export const TAGS = [
   // 동작 특성
   '지속시간',
   '중첩',
+  '시너지',
+  '상처',
+  '균열',
 ] as const;
 
 export type Tag = (typeof TAGS)[number];

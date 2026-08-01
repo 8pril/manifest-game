@@ -21,6 +21,7 @@ const PROJECTILE_SUPPORTS: Support[] = [
   {
     id: 'multiple-projectiles',
     name: '다중투사체',
+    slotType: 'primary',
     tags: ['투사체'],
     requires: ['투사체'],
     modifiers: [
@@ -32,6 +33,7 @@ const PROJECTILE_SUPPORTS: Support[] = [
   {
     id: 'fork',
     name: '갈래',
+    slotType: 'primary',
     tags: ['투사체'],
     requires: ['투사체'],
     modifiers: [{ stat: 'damage', mode: 'reduce', value: 0.4 }],
@@ -41,6 +43,7 @@ const PROJECTILE_SUPPORTS: Support[] = [
   {
     id: 'pierce',
     name: '관통',
+    slotType: 'primary',
     tags: ['투사체'],
     requires: ['투사체'],
     modifiers: [],
@@ -50,6 +53,7 @@ const PROJECTILE_SUPPORTS: Support[] = [
   {
     id: 'greater-pierce',
     name: '상위 관통',
+    slotType: 'primary',
     tags: ['투사체'],
     requires: ['투사체'],
     modifiers: [],
@@ -59,6 +63,7 @@ const PROJECTILE_SUPPORTS: Support[] = [
   {
     id: 'chain',
     name: '연쇄',
+    slotType: 'primary',
     tags: ['투사체'],
     requires: ['투사체'],
     modifiers: [],
@@ -68,6 +73,7 @@ const PROJECTILE_SUPPORTS: Support[] = [
   {
     id: 'ricochet',
     name: '튕겨쏘기',
+    slotType: 'primary',
     tags: ['투사체'],
     requires: ['투사체'],
     modifiers: [],
@@ -77,6 +83,7 @@ const PROJECTILE_SUPPORTS: Support[] = [
   {
     id: 'faster-projectiles',
     name: '투사체 속도 증가',
+    slotType: 'primary',
     tags: ['투사체'],
     requires: ['투사체'],
     modifiers: [
@@ -95,6 +102,7 @@ const AREA_SUPPORTS: Support[] = [
   {
     id: 'explosive-ground',
     name: '폭발하는 지대',
+    slotType: 'primary',
     tags: ['지대', '지속시간', '화염'],
     requires: ['지대'],
     modifiers: [{ stat: 'damage', mode: 'reduce', value: 0.6 }],
@@ -107,6 +115,7 @@ const AREA_SUPPORTS: Support[] = [
   {
     id: 'crackling-ground',
     name: '찌릿거리는 지대',
+    slotType: 'primary',
     tags: ['지대', '지속시간', '번개'],
     requires: ['지대'],
     modifiers: [{ stat: 'duration', mode: 'flat', value: 1 }],
@@ -119,6 +128,7 @@ const AREA_SUPPORTS: Support[] = [
   {
     id: 'dragging-ground',
     name: '끌어내리는 지대',
+    slotType: 'primary',
     tags: ['지대', '지속시간', '냉기'],
     requires: ['지대'],
     modifiers: [{ stat: 'duration', mode: 'flat', value: 2 }],
@@ -131,6 +141,7 @@ const AREA_SUPPORTS: Support[] = [
   {
     id: 'earthquake',
     name: '지진',
+    slotType: 'primary',
     tags: ['지대', '지속시간', '공격', '물리'],
     requires: ['지대'],
     modifiers: [
@@ -151,6 +162,7 @@ const MODIFIER_SUPPORTS: Support[] = [
   {
     id: 'opulence',
     name: '부귀',
+    slotType: 'primary',
     tags: ['공격'],
     requires: ['공격'],
     modifiers: [{ stat: 'damage', mode: 'increase', value: 0.25 }],
@@ -162,6 +174,7 @@ const MODIFIER_SUPPORTS: Support[] = [
     // 못 보는 판이 생길 수 있어, 기댓값은 유지하되 분산을 없앴다.
     id: 'bold-resolve',
     name: '과감한 결단',
+    slotType: 'primary',
     tags: ['공격'],
     requires: ['공격'],
     modifiers: [
@@ -174,6 +187,7 @@ const MODIFIER_SUPPORTS: Support[] = [
   {
     id: 'added-stacks',
     name: '추가 중첩',
+    slotType: 'primary',
     tags: ['중첩'],
     requires: ['중첩'],
     modifiers: [
@@ -185,6 +199,7 @@ const MODIFIER_SUPPORTS: Support[] = [
   {
     id: 'lasting-composure',
     name: '지속되는 평정',
+    slotType: 'primary',
     tags: ['지속시간'],
     requires: ['지속시간'],
     modifiers: [{ stat: 'duration', mode: 'more', value: 0.5 }],
@@ -192,10 +207,44 @@ const MODIFIER_SUPPORTS: Support[] = [
   },
 ];
 
+const SYNERGY_SUPPORTS: Support[] = [
+  {
+    id: 'wound-seeker',
+    name: '상처 추적',
+    slotType: 'synergy',
+    tags: ['투사체', '상처', '시너지'],
+    requires: ['투사체'],
+    modifiers: [],
+    behaviors: [{ kind: 'statusDamage', status: 'wound', more: 0.35 }],
+    description: '상처가 있는 대상에게 투사체 피해 35% 증폭',
+  },
+  {
+    id: 'wound-resonance',
+    name: '상처 공명',
+    slotType: 'synergy',
+    tags: ['지대', '상처', '시너지'],
+    requires: ['지대'],
+    modifiers: [],
+    behaviors: [{ kind: 'statusDamage', status: 'wound', more: 0.35 }],
+    description: '상처가 있는 대상에게 지대 피해 35% 증폭',
+  },
+  {
+    id: 'fracture-resonance',
+    name: '균열 공명',
+    slotType: 'synergy',
+    tags: ['공격', '균열', '시너지'],
+    requires: ['공격'],
+    modifiers: [],
+    behaviors: [{ kind: 'statusDamage', status: 'fracture', more: 0.5 }],
+    description: '균열 상태의 대상에게 피해 50% 증폭',
+  },
+];
+
 export const SUPPORTS: readonly Support[] = [
   ...PROJECTILE_SUPPORTS,
   ...AREA_SUPPORTS,
   ...MODIFIER_SUPPORTS,
+  ...SYNERGY_SUPPORTS,
 ];
 
 export function findSupport(id: string): Support | undefined {

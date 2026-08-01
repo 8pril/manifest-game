@@ -1,6 +1,7 @@
 import type { Tag, Tagged } from '@/engine/tags';
 import type { Modifier, StatBlock } from '@/engine/modifiers';
 import { resolveStats } from '@/engine/modifiers';
+import type { StatusKind } from '@/engine/status';
 
 /**
  * 스킬과 보조능력.
@@ -24,7 +25,9 @@ export type Behavior =
   /** 지대 성질 전환. */
   | { kind: 'areaKind'; value: AreaKind }
   /** 지대가 지속피해를 줄 때마다 적의 이동을 방해한다. */
-  | { kind: 'hinder' };
+  | { kind: 'hinder' }
+  /** 특정 상태이상이 걸린 대상에게 추가 피해를 준다. */
+  | { kind: 'statusDamage'; status: StatusKind; more: number };
 
 export type AreaKind = 'plain' | 'ignite' | 'shock' | 'chill' | 'freeze' | 'wither';
 
@@ -46,6 +49,8 @@ export interface Skill extends Tagged {
 export interface Support extends Tagged {
   id: string;
   name: string;
+  /** 1형은 스킬 자체 강화, 2형은 다른 무기/상태와의 시너지. 생략하면 1형이다. */
+  slotType?: 'primary' | 'synergy';
   /** 이 태그를 모두 가진 스킬에만 장착할 수 있다. */
   requires: readonly Tag[];
   modifiers: readonly Modifier[];
@@ -76,6 +81,10 @@ export function canAttach(
     return { ok: false, reason: `보조능력 슬롯이 가득 찼습니다. (${skill.supportSlots}개)` };
   }
   return { ok: true };
+}
+
+export function supportSlotType(support: Support): 'primary' | 'synergy' {
+  return support.slotType ?? 'primary';
 }
 
 export interface ResolvedSkill {

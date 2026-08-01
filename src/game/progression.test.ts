@@ -98,30 +98,30 @@ describe('weapon wheel', () => {
 
 describe('manifestation config', () => {
   it('해금된 무기의 콤보스킬과 보조형스킬 슬롯을 바꾼다', () => {
-    const progress = unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['multiple-projectiles', 'fork']);
+    const progress = unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['multiple-projectiles', 'wound-seeker']);
     const configured = configureManifestation(progress, 'bow', {
-      primarySupportId: 'multi-projectile',
-      synergySupportId: 'fork',
+      primarySupportId: 'multiple-projectiles',
+      synergySupportId: 'wound-seeker',
     });
 
     expect(configured.configs.bow).toMatchObject({
       comboSkillId: 'volley',
-      primarySupportId: null,
-      synergySupportId: 'fork',
+      primarySupportId: 'multiple-projectiles',
+      synergySupportId: 'wound-seeker',
     });
   });
 
   it('설정 슬롯에서 실제 보조능력 데이터를 읽는다', () => {
     const progress = configureManifestation(
-      unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['multiple-projectiles', 'fork']),
+      unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['multiple-projectiles', 'wound-seeker']),
       'bow',
       {
         primarySupportId: 'multiple-projectiles',
-        synergySupportId: 'fork',
+        synergySupportId: 'wound-seeker',
       },
     );
 
-    expect(configuredSupports(progress, 'bow').map((support) => support.id)).toEqual(['multiple-projectiles', 'fork']);
+    expect(configuredSupports(progress, 'bow').map((support) => support.id)).toEqual(['multiple-projectiles', 'wound-seeker']);
   });
 
   it('미보유 보조형스킬은 설정과 읽기 경로에서 적용하지 않는다', () => {
@@ -129,6 +129,21 @@ describe('manifestation config', () => {
     const configured = configureManifestation(progress, 'bow', {
       primarySupportId: 'multiple-projectiles',
       synergySupportId: 'fork',
+    });
+
+    expect(configured.configs.bow.primarySupportId).toBeNull();
+    expect(configured.configs.bow.synergySupportId).toBeNull();
+    expect(configuredSupports(configured, 'bow')).toEqual([]);
+  });
+
+  it('보유했더라도 슬롯 유형이 다르면 설정하지 않는다', () => {
+    const progress = unlockSupports(
+      unlockWeapons(createInitialProgress(), ['bow']),
+      ['multiple-projectiles', 'wound-seeker'],
+    );
+    const configured = configureManifestation(progress, 'bow', {
+      primarySupportId: 'wound-seeker',
+      synergySupportId: 'multiple-projectiles',
     });
 
     expect(configured.configs.bow.primarySupportId).toBeNull();

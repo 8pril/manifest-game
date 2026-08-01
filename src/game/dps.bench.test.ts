@@ -137,9 +137,9 @@ describe('지대 겹침이 발동 주기에 반비례하는지', () => {
 describe('마을 기본 세팅을 붙였을 때', () => {
   it('검·활·방패 각성 피해', () => {
     const defaults: Record<string, string[]> = {
-      sword: ['earthquake', 'lasting-composure'],
-      bow: ['multiple-projectiles', 'fork'],
-      shield: ['earthquake', 'dragging-ground'],
+      sword: ['earthquake', 'wound-resonance'],
+      bow: ['multiple-projectiles', 'wound-seeker'],
+      shield: ['earthquake', 'fracture-resonance'],
     };
     const lines: string[] = [];
     for (const weapon of WEAPON_LIST) {

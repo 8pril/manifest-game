@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { SUPPORTS } from '@/data/supports';
 import { SKILLS, findSkill } from '@/data/skills';
 import { WEAPON_LIST, awakenedAttackInterval, deliveryOf } from '@/data/weapons';
-import { canAttach, resolveSkill } from '@/engine/support';
+import { canAttach, resolveSkill, supportSlotType } from '@/engine/support';
 import { TAGS } from '@/engine/tags';
 
 /**
@@ -56,6 +56,26 @@ describe('보조능력 데이터 무결성', () => {
     for (const support of SUPPORTS) {
       const attachable = SKILLS.some((skill) => canAttach(skill, support).ok);
       expect(attachable, `${support.name}을 붙일 수 있는 스킬이 없습니다`).toBe(true);
+    }
+  });
+
+  it('보조1형과 보조2형이 데이터에서 구분된다', () => {
+    const primary = SUPPORTS.filter((support) => supportSlotType(support) === 'primary');
+    const synergy = SUPPORTS.filter((support) => supportSlotType(support) === 'synergy');
+
+    expect(primary.length).toBeGreaterThan(0);
+    expect(synergy.map((support) => support.id)).toEqual([
+      'wound-seeker',
+      'wound-resonance',
+      'fracture-resonance',
+    ]);
+  });
+
+  it('보조2형은 상태이상 시너지 거동을 갖는다', () => {
+    const synergy = SUPPORTS.filter((support) => supportSlotType(support) === 'synergy');
+
+    for (const support of synergy) {
+      expect(support.behaviors?.some((behavior) => behavior.kind === 'statusDamage'), support.id).toBe(true);
     }
   });
 

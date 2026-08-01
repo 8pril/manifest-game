@@ -110,13 +110,14 @@ export interface Enemy extends StatusHost {
   boss?: BossState;
 }
 
-export type BossPhase = 'idle' | 'telegraph' | 'charging';
+export type BossPhase = 'idle' | 'telegraph' | 'charging' | 'staggered';
 
 export interface BossState {
   phase: BossPhase;
   chargeCooldown: number;
   telegraphRemaining: number;
   chargeRemaining: number;
+  staggerRemaining: number;
   chargeDirection: Vec2;
   summonedAt: readonly number[];
 }
@@ -131,7 +132,8 @@ export const BOSS_CHARGE_TELEGRAPH = 0.75;
 export const BOSS_CHARGE_DURATION = 0.45;
 export const BOSS_CHARGE_SPEED = 520;
 export const BOSS_CHARGE_DAMAGE_MULTIPLIER = 1.6;
-export const BOSS_SUMMON_THRESHOLDS = [0.7, 0.4] as const;
+export const BOSS_WALL_STAGGER = 1.1;
+export const BOSS_SUMMON_THRESHOLDS = [0.7, 0.35] as const;
 export const BOSS_SUMMON_COUNT = 4;
 
 let nextId = 1;
@@ -162,6 +164,7 @@ function createBossState(): BossState {
     chargeCooldown: BOSS_CHARGE_COOLDOWN,
     telegraphRemaining: 0,
     chargeRemaining: 0,
+    staggerRemaining: 0,
     chargeDirection: { x: 1, y: 0 },
     summonedAt: [],
   };
@@ -252,6 +255,15 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
     return events;
   }
 
+  if (boss.phase === 'staggered') {
+    boss.staggerRemaining -= deltaSeconds;
+    if (boss.staggerRemaining <= 0) {
+      boss.phase = 'idle';
+      boss.chargeCooldown = BOSS_CHARGE_COOLDOWN;
+    }
+    return events;
+  }
+
   if (boss.phase === 'telegraph') {
     boss.telegraphRemaining -= deltaSeconds;
     if (boss.telegraphRemaining <= 0) {
@@ -275,6 +287,7 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
 
 export function bossMoveDirection(enemy: Enemy, target: Vec2): Vec2 | null {
   if (enemy.boss?.phase === 'telegraph') return null;
+  if (enemy.boss?.phase === 'staggered') return null;
   if (enemy.boss?.phase === 'charging') return enemy.boss.chargeDirection;
   return desiredDirection(enemy, target);
 }
@@ -286,6 +299,14 @@ export function bossMoveSpeed(enemy: Enemy): number {
 export function bossContactDamage(enemy: Enemy): number {
   const base = ENEMY_STATS[enemy.kind].contactDamage;
   return enemy.boss?.phase === 'charging' ? base * BOSS_CHARGE_DAMAGE_MULTIPLIER : base;
+}
+
+export function staggerBossOnWall(enemy: Enemy): boolean {
+  if (enemy.boss?.phase !== 'charging') return false;
+  enemy.boss.phase = 'staggered';
+  enemy.boss.chargeRemaining = 0;
+  enemy.boss.staggerRemaining = BOSS_WALL_STAGGER;
+  return true;
 }
 
 function directionTo(enemy: Enemy, target: Vec2): Vec2 {

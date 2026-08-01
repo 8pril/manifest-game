@@ -16,7 +16,9 @@ import {
   BOSS_CHARGE_TELEGRAPH,
   BOSS_CHARGE_DURATION,
   BOSS_CHARGE_SPEED,
+  BOSS_WALL_STAGGER,
   BOSS_SUMMON_COUNT,
+  staggerBossOnWall,
 } from '@/game/enemy';
 import { beforeEach } from 'vitest';
 
@@ -139,6 +141,28 @@ describe('boss patterns', () => {
     expect(boss.boss?.phase).toBe('idle');
   });
 
+  it('돌진 중 벽에 부딪히면 잠시 멈춘다', () => {
+    const boss = createEnemy('boss', 100, 0);
+
+    advanceBossPattern(boss, player, BOSS_CHARGE_COOLDOWN);
+    advanceBossPattern(boss, player, BOSS_CHARGE_TELEGRAPH);
+
+    expect(staggerBossOnWall(boss)).toBe(true);
+    expect(boss.boss?.phase).toBe('staggered');
+    expect(bossMoveDirection(boss, player)).toBeNull();
+    expect(boss.boss?.staggerRemaining).toBe(BOSS_WALL_STAGGER);
+
+    advanceBossPattern(boss, player, BOSS_WALL_STAGGER);
+    expect(boss.boss?.phase).toBe('idle');
+  });
+
+  it('돌진 중이 아니면 벽 충돌 멈춤을 걸지 않는다', () => {
+    const boss = createEnemy('boss', 100, 0);
+
+    expect(staggerBossOnWall(boss)).toBe(false);
+    expect(boss.boss?.phase).toBe('idle');
+  });
+
   it('체력 구간마다 사냥개 소환 이벤트를 한 번만 낸다', () => {
     const boss = createEnemy('boss', 0, 0);
     boss.hp = boss.maxHp * 0.69;
@@ -146,8 +170,8 @@ describe('boss patterns', () => {
     expect(advanceBossPattern(boss, player, 0)).toEqual([{ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold: 0.7 }]);
     expect(advanceBossPattern(boss, player, 0)).toEqual([]);
 
-    boss.hp = boss.maxHp * 0.39;
-    expect(advanceBossPattern(boss, player, 0)).toEqual([{ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold: 0.4 }]);
+    boss.hp = boss.maxHp * 0.34;
+    expect(advanceBossPattern(boss, player, 0)).toEqual([{ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold: 0.35 }]);
   });
 
   it('일반 적은 보스 패턴 이벤트를 내지 않는다', () => {

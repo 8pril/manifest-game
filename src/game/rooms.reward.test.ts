@@ -37,7 +37,7 @@ describe('방 보상', () => {
     const r = ROOMS[1].reward!;
     expect(r.weapons?.map((id) => weaponOf(id).name).join(' / ')).toBe('활 / 방패');
     expect(r.supports?.map((id) => findSupport(id)!.name).join(' / '))
-      .toBe('지진 / 지속되는 평정 / 다중투사체 / 갈래 / 끌어내리는 지대');
+      .toBe('지진 / 상처 공명 / 다중투사체 / 상처 추적 / 끌어내리는 지대 / 균열 공명');
   });
 
   it('최종 보스 보상 문구', () => {

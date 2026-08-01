@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canAttach, resolveSkill, sortBehaviors, type Skill, type Support } from '@/engine/support';
+import { canAttach, resolveSkill, sortBehaviors, supportSlotType, type Skill, type Support } from '@/engine/support';
 
 const arrowShot: Skill = {
   id: 'arrow-shot',
@@ -73,6 +73,16 @@ describe('canAttach - 태그 기반 장착 제약', () => {
     const result = canAttach(arrowShot, opulence, [multipleProjectiles, pierce]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain('슬롯');
+  });
+});
+
+describe('supportSlotType', () => {
+  it('slotType을 생략한 기존 보조능력은 보조1형으로 취급한다', () => {
+    expect(supportSlotType(multipleProjectiles)).toBe('primary');
+  });
+
+  it('명시된 시너지 보조능력은 보조2형으로 취급한다', () => {
+    expect(supportSlotType({ ...opulence, slotType: 'synergy' })).toBe('synergy');
   });
 });
 

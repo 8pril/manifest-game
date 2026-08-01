@@ -114,13 +114,13 @@ function applyRoomReward(progress: PlayerProgress, reward?: RoomReward): PlayerP
 function configureDefaultTownLoadout(progress: PlayerProgress): PlayerProgress {
   let next = progress;
   if (next.unlockedWeapons.includes('sword')) {
-    next = configureManifestation(next, 'sword', { primarySupportId: 'earthquake', synergySupportId: 'lasting-composure' });
+    next = configureManifestation(next, 'sword', { primarySupportId: 'earthquake', synergySupportId: 'wound-resonance' });
   }
   if (next.unlockedWeapons.includes('bow')) {
-    next = configureManifestation(next, 'bow', { primarySupportId: 'multiple-projectiles', synergySupportId: 'fork' });
+    next = configureManifestation(next, 'bow', { primarySupportId: 'multiple-projectiles', synergySupportId: 'wound-seeker' });
   }
   if (next.unlockedWeapons.includes('shield')) {
-    next = configureManifestation(next, 'shield', { primarySupportId: 'earthquake', synergySupportId: 'dragging-ground' });
+    next = configureManifestation(next, 'shield', { primarySupportId: 'earthquake', synergySupportId: 'fracture-resonance' });
   }
   return next;
 }
