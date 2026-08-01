@@ -77,6 +77,7 @@ import { createRun, clearRoom, leaveTown, damagePlayer, addKill, advanceTime, is
 import { configureManifestation, createInitialProgress, equipFromWheel, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
+import { playSfx } from '@/audio/sfx';
 
 const MOVE_SPEED = 300;
 const DASH_SPEED = 900;
@@ -172,6 +173,7 @@ export class PlayScene extends Phaser.Scene {
   private dashReadyAt = 0;
   private dashAngle = 0;
   private arcaneFlowUntil = 0;
+  private nextHitSfxAt = 0;
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
   private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0, fracture: 0 };
   private weapons: { left: WeaponId; right: WeaponId | null } = { left: 'sword', right: null };
@@ -182,6 +184,7 @@ export class PlayScene extends Phaser.Scene {
   private roomFloor: Phaser.GameObjects.GameObject[] = [];
   /** 방을 정리해 출구가 열렸는지. */
   private exitOpen = false;
+  private resultScheduled = false;
   /** 화면 밖 대상을 가리키는 화살표. 적용 하나, 출구용 하나. */
   private offscreenMarks: Phaser.GameObjects.Triangle[] = [];
   private minimap!: {
@@ -232,6 +235,7 @@ export class PlayScene extends Phaser.Scene {
     this.areas = [];
     this.overlay = null;
     this.transientOverlays = [];
+    this.resultScheduled = false;
     this.arcaneFlowUntil = 0;
 
     this.run = { ...createRun(this.weapons.left, this.weapons.right, this.initialProgress ?? undefined), roomIndex: this.startRoomIndex };
@@ -374,6 +378,7 @@ export class PlayScene extends Phaser.Scene {
   /** 스킬 하나를 전달 방식에 맞게 내보낸다. */
   private useSkill(runtime: WeaponRuntime, skill: Skill, angle: number, basic: boolean): void {
     const resolved = resolveFor(this.run.loadout, skill);
+    playSfx(basic ? 'attack' : 'combo');
 
     switch (deliveryOf(skill)) {
       case 'projectile':
@@ -544,6 +549,10 @@ export class PlayScene extends Phaser.Scene {
 
     // 평범한 명중에도 반응이 있어야 한다. 지금까지는 체력바만 줄었다.
     hitSpark(this, enemy.x, enemy.y, weapon.color);
+    if (this.time.now >= this.nextHitSfxAt) {
+      playSfx('hit');
+      this.nextHitSfxAt = this.time.now + 55;
+    }
 
     // 비전 흐름: 낙인을 소비해 얻은 증폭
     if (weapon.id === 'arcane' && this.time.now < this.arcaneFlowUntil) {
@@ -634,6 +643,7 @@ export class PlayScene extends Phaser.Scene {
     this.roomFloor = [];
 
     this.exitOpen = false;
+    this.resultScheduled = false;
     this.bounds = { minX: WALL, minY: WALL, maxX: room.width - WALL, maxY: room.height - WALL };
     // 방마다 크기가 다르므로 긴 변을 기준으로 맞춰 비율을 유지한다.
     this.minimapRoom = {
@@ -759,33 +769,25 @@ export class PlayScene extends Phaser.Scene {
 
   /**
    * 방을 정리하면 출구가 열린다. 바로 넘어가지 않고 걸어 나가야 한다.
-   * 마지막 방(최종 보스)만 정리 즉시 승리로 간다.
+   * 마지막 방(최종 보스)만 보상 연출을 잠시 보여준 뒤 승리로 간다.
    */
   private checkRoomCleared(): void {
-    if (this.run.phase !== 'combat' || this.exitOpen) return;
+    if (this.run.phase !== 'combat' || this.exitOpen || this.resultScheduled) return;
     if (this.enemies.some((e) => isAlive(e.state))) return;
 
-    const room = ROOMS[this.run.roomIndex];
-    if (room?.entersTown) {
-      this.run = clearRoom(this.run);
-      this.saveCurrentProgress();
-      this.clearTransientOverlays();
-      this.showTown();
-      if (DEBUG_ENABLED) this.publishDebug();
-      return;
-    }
-
     if (this.run.roomIndex >= TOTAL_ROOMS - 1) {
+      this.resultScheduled = true;
       this.run = clearRoom(this.run);
       this.saveCurrentProgress();
-      this.showResult(true);
+      this.time.delayedCall(1200, () => this.showResult(true));
       if (DEBUG_ENABLED) this.publishDebug();
       return;
     }
 
+    const room = ROOMS[this.run.roomIndex];
     this.exitOpen = true;
     this.exit.setFillStyle(COLORS.accent);
-    this.exitLabel.setText('출구 →');
+    this.exitLabel.setText(room?.entersTown ? '마을 →' : '출구 →');
     this.tweens.add({ targets: this.exit, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
   }
 
@@ -1023,6 +1025,7 @@ export class PlayScene extends Phaser.Scene {
           this.run = damagePlayer(this.run, isBossKind(enemy.kind) ? bossContactDamage(enemy) : stats.contactDamage);
 
           if (this.run !== before) {
+            playSfx('playerHit');
             this.flashPlayer();
             this.refreshHud();
           }
@@ -1040,9 +1043,11 @@ export class PlayScene extends Phaser.Scene {
     const enemy = entity.state;
     switch (event.kind) {
       case 'chargeTelegraph':
+        playSfx('bossWarning');
         this.showBossChargeTelegraph(enemy, event.direction);
         break;
       case 'chargeStart':
+        playSfx('bossImpact');
         ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: 18, to: ENEMY_STATS[enemy.kind].radius * 1.8, duration: 260, width: 4 });
         floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '돌진', '#ffd166');
         break;
@@ -1050,12 +1055,15 @@ export class PlayScene extends Phaser.Scene {
         this.summonBossAdds(enemy, event.count);
         break;
       case 'shockTelegraph':
+        playSfx('bossWarning');
         this.showBossShockTelegraph(enemy, event.radius);
         break;
       case 'shockwave':
+        playSfx('bossImpact');
         this.bossShockwave(enemy, event.radius, event.damage);
         break;
       case 'shardBurst':
+        playSfx('bossImpact');
         this.bossShardBurst(enemy, event.count, event.damage, event.speed);
         break;
     }
@@ -1109,6 +1117,7 @@ export class PlayScene extends Phaser.Scene {
       const before = this.run;
       this.run = damagePlayer(this.run, damage);
       if (this.run !== before) {
+        playSfx('playerHit');
         this.flashPlayer();
         this.refreshHud();
       }
@@ -1172,6 +1181,7 @@ export class PlayScene extends Phaser.Scene {
         const before = this.run;
         this.run = damagePlayer(this.run, shot.damage);
         if (this.run !== before) {
+          playSfx('playerHit');
           this.flashPlayer();
           this.refreshHud();
         }
@@ -1301,6 +1311,7 @@ export class PlayScene extends Phaser.Scene {
     entity.hpBar.width = (radius * 2 * enemy.hp) / enemy.maxHp;
 
     if (enemy.hp <= 0) {
+      playSfx('death');
       if (isBossKind(enemy.kind)) this.showBossDrop(enemy);
       deathBurst(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, radius * 2);
       entity.view.destroy();
@@ -1317,6 +1328,7 @@ export class PlayScene extends Phaser.Scene {
 
     const lines = this.rewardLines(reward, '보스 드랍');
     if (lines.length === 0) return;
+    playSfx('reward');
 
     const x = Phaser.Math.Clamp(enemy.x, this.bounds.minX + 180, this.bounds.maxX - 180);
     const radius = ENEMY_STATS[enemy.kind].radius;
