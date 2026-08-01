@@ -3,6 +3,11 @@ import { isBossKind } from '@/game/enemy';
 import { enemyCount, ROOMS } from '@/game/rooms';
 
 describe('room composition', () => {
+  it('초반 두 방은 적 수를 낮춰 조작과 첫 보스 학습에 집중하게 한다', () => {
+    expect(enemyCount(ROOMS[0])).toBeLessThanOrEqual(6);
+    expect(enemyCount(ROOMS[1])).toBeLessThanOrEqual(5);
+  });
+
   it('보상 방은 빈 방이 아니며 보스를 포함한다', () => {
     const rewardRooms = ROOMS.filter((room) => room.reward);
 

@@ -13,9 +13,9 @@ export interface RoomReward {
  * 예선 빌드는 첫 보스가 성장 루프를 열고, 이후 방에서는 해금된 무기를 시험한다.
  * 웨이브 사이 보조능력 선택은 새 기획에서 폐기되어 모두 꺼져 있다.
  *
- * 적 수를 정하는 기준은 **방 전체 체력이 아니라 처치 횟수**다.
- * 방마다 총 체력은 예전과 비슷하게 두고 마리당 체력을 낮춰 수를 두 배 이상
- * 늘렸다. 같은 시간 안에 죽는 것이 훨씬 많아야 "썰면서 나아가는" 감각이 난다.
+ * 적 수를 정하는 기준은 방의 역할이다.
+ * 1~2번 방은 조작과 첫 보스 학습 구간이라 적을 적게 두고, 마을 이후부터
+ * "썰면서 나아가는" 밀도를 올린다.
  */
 
 export interface RoomDef {
@@ -38,7 +38,7 @@ export const ROOMS: readonly RoomDef[] = [
   {
     // 첫 방은 조금 작게 잡아 조작을 익히게 한다.
     label: '흐린 입구',
-    spawns: [{ kind: 'chaser', count: 12 }],
+    spawns: [{ kind: 'chaser', count: 6 }],
     width: 1900,
     height: 1150,
   },
@@ -47,7 +47,7 @@ export const ROOMS: readonly RoomDef[] = [
     label: '첫 문지기',
     spawns: [
       { kind: 'gatekeeper', count: 1 },
-      { kind: 'chaser', count: 16 },
+      { kind: 'chaser', count: 4 },
     ],
     entersTown: true,
     reward: {
