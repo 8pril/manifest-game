@@ -16,7 +16,7 @@ import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { awakenedAttackInterval, deliveryOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
 import { findSupport } from '@/data/supports';
 import { findSkill } from '@/data/skills';
-import { canAttach, findBehavior, supportSlotType, type Behavior, type Skill, type Support } from '@/engine/support';
+import { canAttach, findBehavior, resolveSkill, supportSlotType, type Behavior, type Skill, type Support } from '@/engine/support';
 import {
   spawnProjectiles,
   advance,
@@ -27,6 +27,7 @@ import {
 } from '@/engine/projectile';
 import { targetsInArc } from '@/engine/melee';
 import { applyKnockback } from '@/engine/knockback';
+import type { Stat } from '@/engine/modifiers';
 import {
   createArea,
   tickArea,
@@ -163,6 +164,7 @@ export class PlayScene extends Phaser.Scene {
   /** 비전 흐름이 걸린 동안 플레이어를 감싸는 오라. 버프가 살아 있다는 유일한 표시다. */
   private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
+  private transientOverlays: Phaser.GameObjects.GameObject[] = [];
   private weaponWheel: WeaponWheelMenu | null = null;
 
   private keys!: Record<'up' | 'down' | 'left' | 'right' | 'shift', Phaser.Input.Keyboard.Key>;
@@ -229,6 +231,7 @@ export class PlayScene extends Phaser.Scene {
     this.enemyShots = [];
     this.areas = [];
     this.overlay = null;
+    this.transientOverlays = [];
     this.arcaneFlowUntil = 0;
 
     this.run = { ...createRun(this.weapons.left, this.weapons.right, this.initialProgress ?? undefined), roomIndex: this.startRoomIndex };
@@ -626,6 +629,7 @@ export class PlayScene extends Phaser.Scene {
     const room = ROOMS[this.run.roomIndex];
     if (!room) return;
 
+    this.clearTransientOverlays();
     for (const object of this.roomFloor) object.destroy();
     this.roomFloor = [];
 
@@ -765,6 +769,7 @@ export class PlayScene extends Phaser.Scene {
     if (room?.entersTown) {
       this.run = clearRoom(this.run);
       this.saveCurrentProgress();
+      this.clearTransientOverlays();
       this.showTown();
       if (DEBUG_ENABLED) this.publishDebug();
       return;
@@ -1331,6 +1336,7 @@ export class PlayScene extends Phaser.Scene {
       .rectangle(x, y, Math.max(260, text.width + 32), text.height + 24, 0x171923, 0.86)
       .setStrokeStyle(2, BOSS_PATTERN_COLOR, 0.8)
       .setDepth(16);
+    this.transientOverlays.push(text, plate);
 
     ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: radius, to: radius * 2.8, duration: 620, width: 5 });
     this.tweens.add({
@@ -1343,8 +1349,16 @@ export class PlayScene extends Phaser.Scene {
       onComplete: () => {
         text.destroy();
         plate.destroy();
+        this.transientOverlays = this.transientOverlays.filter((object) => object !== text && object !== plate);
       },
     });
+  }
+
+  private clearTransientOverlays(): void {
+    for (const object of this.transientOverlays) {
+      if (object.active) object.destroy();
+    }
+    this.transientOverlays = [];
   }
 
   private flashPlayer(): void {
@@ -1636,6 +1650,7 @@ export class PlayScene extends Phaser.Scene {
 
   private showTown(): void {
     const container = this.add.container(0, 0).setDepth(30);
+    this.clearTransientOverlays();
     pinContainer(this, container);
 
     container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
@@ -1661,8 +1676,8 @@ export class PlayScene extends Phaser.Scene {
     const reward = ROOMS[this.run.roomIndex]?.reward;
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 220, [...this.rewardLines(reward), `보유 무기: ${unlocked}`, `R키 무기 교체 기능 해금`].join('\n'), {
-          fontSize: '16px',
+        .text((VIEW_WIDTH / 2), 202, [...this.rewardLines(reward), `보유 무기: ${unlocked}`, `R키 무기 교체 기능 해금`].join('\n'), {
+          fontSize: '15px',
           color: COLORS.text,
           align: 'center',
           lineSpacing: 4,
@@ -1690,8 +1705,8 @@ export class PlayScene extends Phaser.Scene {
 
   private renderManifestationPanel(container: Phaser.GameObjects.Container): void {
     const startX = 98;
-    const startY = 318;
-    const rowHeight = 50;
+    const startY = 286;
+    const rowHeight = 58;
     const column = {
       weapon: startX,
       combo: startX + 170,
@@ -1699,16 +1714,16 @@ export class PlayScene extends Phaser.Scene {
       synergy: startX + 660,
     };
 
-    container.add(this.add.text(startX, startY - 36, '실체화 장비 설정', { fontSize: '22px', color: COLORS.text, fontStyle: 'bold' }));
-    container.add(this.add.text(column.weapon, startY - 8, '무기', { fontSize: '14px', color: COLORS.textDim }));
-    container.add(this.add.text(column.combo, startY - 8, '콤보스킬', { fontSize: '14px', color: COLORS.textDim }));
-    container.add(this.add.text(column.primary, startY - 8, '보조1형', { fontSize: '14px', color: COLORS.textDim }));
-    container.add(this.add.text(column.synergy, startY - 8, '보조2형', { fontSize: '14px', color: COLORS.textDim }));
+    container.add(this.add.text(startX, startY - 42, '실체화 장비 설정', { fontSize: '21px', color: COLORS.text, fontStyle: 'bold' }));
+    container.add(this.add.text(column.weapon, startY - 14, '무기', { fontSize: '13px', color: COLORS.textDim }));
+    container.add(this.add.text(column.combo, startY - 14, '콤보스킬', { fontSize: '13px', color: COLORS.textDim }));
+    container.add(this.add.text(column.primary, startY - 14, '보조1형: 자체 강화', { fontSize: '13px', color: COLORS.textDim }));
+    container.add(this.add.text(column.synergy, startY - 14, '보조2형: 상태 시너지', { fontSize: '13px', color: COLORS.textDim }));
 
     for (const [index, weaponId] of this.run.progress.unlockedWeapons.entries()) {
       const weapon = weaponOf(weaponId);
       const config = this.run.progress.configs[weaponId];
-      const y = startY + 20 + index * rowHeight;
+      const y = startY + 24 + index * rowHeight;
       const comboName = findSkill(config.comboSkillId)?.name ?? weapon.combo.name;
       const primary = config.primarySupportId ? findSupport(config.primarySupportId) : undefined;
       const synergy = config.synergySupportId ? findSupport(config.synergySupportId) : undefined;
@@ -1717,13 +1732,63 @@ export class PlayScene extends Phaser.Scene {
 
       container.add(this.add.text(column.weapon, y, weapon.name, { fontSize: '18px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0, 0.5));
       container.add(this.add.text(column.combo, y, comboName, { fontSize: '16px', color: COLORS.text }).setOrigin(0, 0.5));
-      this.addSlotButton(container, column.primary, y, primary?.name ?? '비어 있음', primaryCandidates.length > 0, () => {
+      this.addSlotButton(container, column.primary, y, this.supportSlotLabel(weapon.combo, primary, primaryCandidates), primaryCandidates.length > 0, () => {
         this.cycleSupport(weaponId, 'primarySupportId', primaryCandidates);
       });
-      this.addSlotButton(container, column.synergy, y, synergy?.name ?? '비어 있음', synergyCandidates.length > 0, () => {
+      this.addSlotButton(container, column.synergy, y, this.supportSlotLabel(weapon.combo, synergy, synergyCandidates), synergyCandidates.length > 0, () => {
         this.cycleSupport(weaponId, 'synergySupportId', synergyCandidates);
       });
     }
+  }
+
+  private supportSlotLabel(skill: Skill, current: Support | undefined, candidates: readonly Support[]): string {
+    const currentIndex = current ? candidates.findIndex((support) => support.id === current.id) : -1;
+    const counter = candidates.length > 0 ? ` (${currentIndex >= 0 ? currentIndex + 1 : 0}/${candidates.length})` : '';
+    if (!current) return `비어 있음${counter}`;
+    const preview = this.supportPreview(skill, current);
+    return `${current.name}${counter}\n${preview || this.shortSupportSummary(current)}`;
+  }
+
+  private supportPreview(skill: Skill, support: Support): string {
+    const before = resolveSkill(skill, []).stats;
+    const after = resolveSkill(skill, [support]).stats;
+    const pairs: [Stat, string][] = [
+      ['projectileCount', '투사체'],
+      ['areaRadius', '반경'],
+      ['duration', '지속'],
+      ['tickInterval', '틱'],
+      ['damage', '피해'],
+      ['projectileSpeed', '속도'],
+      ['comboGain', '콤보'],
+    ];
+
+    for (const [stat, label] of pairs) {
+      const from = before[stat];
+      const to = after[stat];
+      if (from === undefined || to === undefined || Math.abs(from - to) < 0.001) continue;
+      return `${label} ${this.formatStat(from)}→${this.formatStat(to)}`;
+    }
+    const behavior = support.behaviors?.find((item) => item.kind === 'statusDamage');
+    if (behavior?.kind === 'statusDamage') return `상태 대상 피해 +${Math.round(behavior.more * 100)}%`;
+    const pierce = support.behaviors?.find((item) => item.kind === 'pierce');
+    if (pierce?.kind === 'pierce') return pierce.count === 'all' ? '모든 대상 관통' : `관통 +${pierce.count}`;
+    const chain = support.behaviors?.find((item) => item.kind === 'chain');
+    if (chain?.kind === 'chain') return `연쇄 +${chain.count}`;
+    const fork = support.behaviors?.find((item) => item.kind === 'fork');
+    if (fork?.kind === 'fork') return `갈래 +${fork.count}`;
+    const ricochet = support.behaviors?.find((item) => item.kind === 'ricochet');
+    if (ricochet?.kind === 'ricochet') return `튕김 +${ricochet.count}`;
+    return '';
+  }
+
+  private shortSupportSummary(support: Support): string {
+    if (support.tags.includes('지대')) return '지대 성질 변경';
+    if (support.tags.includes('투사체')) return '투사체 성질 변경';
+    return '스킬 성능 변경';
+  }
+
+  private formatStat(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
   }
 
   private supportCandidates(skill: Skill, slot: 'primary' | 'synergy'): Support[] {
@@ -1744,7 +1809,7 @@ export class PlayScene extends Phaser.Scene {
     onClick: () => void,
   ): void {
     const width = 220;
-    const height = 36;
+    const height = 48;
     const fill = enabled ? 0x242a3a : 0x171923;
     const stroke = enabled ? COLORS.accent : 0x3a4059;
     const rect = this.add
@@ -1753,17 +1818,22 @@ export class PlayScene extends Phaser.Scene {
       .setStrokeStyle(1, stroke, enabled ? 0.75 : 0.35);
     const text = this.add
       .text(x + 14, y, label, {
-        fontSize: '16px',
+        fontSize: label.includes('\n') ? '13px' : '15px',
         color: enabled ? COLORS.text : COLORS.textDim,
+        lineSpacing: 2,
         wordWrap: { width: width - 28 },
       })
       .setOrigin(0, 0.5);
 
     if (enabled) {
       rect.setInteractive({ useHandCursor: true });
+      text.setInteractive({ useHandCursor: true });
       rect.on('pointerover', () => rect.setFillStyle(0x2e3650, 0.96));
       rect.on('pointerout', () => rect.setFillStyle(fill, 0.92));
       rect.on('pointerdown', onClick);
+      text.on('pointerover', () => rect.setFillStyle(0x2e3650, 0.96));
+      text.on('pointerout', () => rect.setFillStyle(fill, 0.92));
+      text.on('pointerdown', onClick);
     }
 
     container.add(rect);
@@ -1783,8 +1853,7 @@ export class PlayScene extends Phaser.Scene {
     };
     this.saveCurrentProgress();
     this.refreshHud();
-    this.closeOverlay();
-    this.showTown();
+    this.reopenTownOverlay();
   }
 
   private renderWheelSetupPanel(container: Phaser.GameObjects.Container): void {
@@ -1809,7 +1878,8 @@ export class PlayScene extends Phaser.Scene {
     hand: Hand,
     index: 0 | 1,
   ): void {
-    this.addSlotButton(container, x, y, `${label}: ${weapon ? weaponOf(weapon).name : '-'}`, true, () => {
+    const active = weapon && this.run.progress.active[hand] === weapon ? ' 장착 중' : '';
+    this.addSlotButton(container, x, y, `${label}: ${weapon ? weaponOf(weapon).name : '-'}${active}`, true, () => {
       this.cycleWheelSlot(hand, index);
     });
   }
@@ -1827,12 +1897,16 @@ export class PlayScene extends Phaser.Scene {
     };
     this.saveCurrentProgress();
     this.refreshHud();
-    this.closeOverlay();
-    this.showTown();
+    this.reopenTownOverlay();
   }
 
   private saveCurrentProgress(): void {
     saveProgress(this.run.progress);
+  }
+
+  private reopenTownOverlay(): void {
+    this.closeOverlay();
+    this.time.delayedCall(0, () => this.showTown());
   }
 
   /**
