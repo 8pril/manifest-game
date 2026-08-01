@@ -24,9 +24,9 @@ const multipleProjectiles: Support = {
   requires: ['투사체'],
   modifiers: [
     { stat: 'projectileCount', mode: 'flat', value: 2 },
-    { stat: 'damage', mode: 'reduce', value: 0.4 },
+    { stat: 'damage', mode: 'reduce', value: 0.2 },
   ],
-  description: '투사체 수 +2, 투사체 피해 40% 감소',
+  description: '투사체 수 +2, 투사체 피해 20% 감소',
 };
 
 const pierce: Support = {
@@ -90,8 +90,8 @@ describe('resolveSkill', () => {
   it('장착된 보조능력의 수정자를 모두 반영한다', () => {
     const resolved = resolveSkill(arrowShot, [multipleProjectiles, opulence]);
     expect(resolved.stats.projectileCount).toBe(3);
-    // 100 * 1.25 / 1.4
-    expect(resolved.stats.damage).toBeCloseTo(89.29, 2);
+    // 100 * 1.25 / 1.2
+    expect(resolved.stats.damage).toBeCloseTo(104.17, 2);
     expect(resolved.rejected).toHaveLength(0);
   });
 

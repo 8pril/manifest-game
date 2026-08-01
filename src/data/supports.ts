@@ -26,9 +26,9 @@ const PROJECTILE_SUPPORTS: Support[] = [
     requires: ['투사체'],
     modifiers: [
       { stat: 'projectileCount', mode: 'flat', value: 2 },
-      { stat: 'damage', mode: 'reduce', value: 0.4 },
+      { stat: 'damage', mode: 'reduce', value: 0.2 },
     ],
-    description: '발사하는 투사체 수 +2, 투사체 피해 40% 감소',
+    description: '발사하는 투사체 수 +2, 투사체 피해 20% 감소',
   },
   {
     id: 'fork',

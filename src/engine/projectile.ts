@@ -60,6 +60,7 @@ export function spawnProjectiles(
   spreadRadians = 0.18,
 ): Projectile[] {
   const count = Math.max(1, Math.round(stats.projectileCount ?? 1));
+  const damage = (stats.damage ?? 0) * projectileDamageMultiplier(count);
   const pierce = findBehavior(behaviors, 'pierce');
   const chain = findBehavior(behaviors, 'chain');
   const fork = findBehavior(behaviors, 'fork');
@@ -76,7 +77,7 @@ export function spawnProjectiles(
       y: origin.y,
       angle: angle + start + i * spreadRadians,
       speed: stats.projectileSpeed ?? 400,
-      damage: stats.damage ?? 0,
+      damage,
       pierceRemaining: pierce ? pierce.count : 0,
       chainRemaining: chain?.count ?? 0,
       forkRemaining: fork?.count ?? 0,
@@ -87,6 +88,18 @@ export function spawnProjectiles(
     });
   }
   return projectiles;
+}
+
+/**
+ * 투사체 수가 늘어날수록 발당 피해를 낮춘다.
+ *
+ * 몸집이 큰 보스에게 여러 발이 동시에 맞으면 투사체 수만큼 피해가 정직하게 곱해진다.
+ * 그래도 콤보스킬/보조형스킬을 장착한 보상은 남아야 하므로, 총합 피해는 1발보다 크되
+ * 선형 증가보다는 낮게 둔다. 총합 배율은 count^0.6이다.
+ */
+export function projectileDamageMultiplier(count: number): number {
+  const normalized = Math.max(1, Math.round(count));
+  return normalized === 1 ? 1 : normalized ** -0.4;
 }
 
 export function advance(projectile: Projectile, deltaSeconds: number): void {

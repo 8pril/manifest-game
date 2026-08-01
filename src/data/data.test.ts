@@ -123,7 +123,7 @@ describe('실제 조합 결과', () => {
 
     // 기본값은 밸런스에 따라 바뀌므로 스킬에서 읽어 비율로 검증한다.
     expect(resolved.stats.projectileCount).toBe((ARROW_SHOT_.base.projectileCount ?? 1) + 2);
-    expect(resolved.stats.damage).toBeCloseTo((ARROW_SHOT_.base.damage ?? 0) / 1.4, 10);
+    expect(resolved.stats.damage).toBeCloseTo((ARROW_SHOT_.base.damage ?? 0) / 1.2, 10);
     expect(resolved.behaviors).toContainEqual({ kind: 'pierce', count: 2 });
     expect(resolved.rejected).toHaveLength(0);
   });

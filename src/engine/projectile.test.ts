@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   spawnProjectiles,
+  projectileDamageMultiplier,
   onHitTarget,
   onHitTerrain,
   advance,
@@ -22,6 +23,31 @@ describe('spawnProjectiles', () => {
   it('projectileCount만큼 만든다', () => {
     const ps = spawnProjectiles({ ...stats, projectileCount: 3 }, [], origin, 0);
     expect(ps).toHaveLength(3);
+  });
+
+  it('1발 투사체는 피해 보정을 받지 않는다', () => {
+    const [p] = spawnProjectiles(stats, [], origin, 0);
+    expect(p.damage).toBe(100);
+  });
+
+  it('다발 투사체는 발당 피해를 낮추되 총합은 1발보다 강하다', () => {
+    const ps = spawnProjectiles({ ...stats, projectileCount: 5 }, [], origin, 0);
+    const total = ps.reduce((sum, p) => sum + p.damage, 0);
+
+    expect(ps[0].damage).toBeLessThan(100);
+    expect(total).toBeGreaterThan(100);
+    expect(total).toBeLessThan(500);
+    expect(total).toBeCloseTo(100 * 5 ** 0.6, 8);
+  });
+
+  it('투사체 수가 늘어날수록 총합 피해는 증가하지만 선형으로 증가하지 않는다', () => {
+    const totals = [1, 3, 5, 7].map((count) => count * projectileDamageMultiplier(count));
+
+    expect(totals[0]).toBe(1);
+    expect(totals[1]).toBeGreaterThan(totals[0]);
+    expect(totals[2]).toBeGreaterThan(totals[1]);
+    expect(totals[3]).toBeGreaterThan(totals[2]);
+    expect(totals[3]).toBeLessThan(7);
   });
 
   it('홀수 개면 가운데 투사체가 정면을 향한다', () => {

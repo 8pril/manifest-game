@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { WEAPON_LIST, awakenedAttackInterval, deliveryOf, type Weapon } from '@/data/weapons';
 import { resolveSkill, type Support } from '@/engine/support';
+import { projectileDamageMultiplier } from '@/engine/projectile';
 import { findSupport } from '@/data/supports';
 import type { Skill } from '@/engine/support';
 
@@ -28,8 +29,9 @@ function dps(skill: Skill, supports: readonly Support[], intervalMs: number): nu
     return overlap * ((stats.damage ?? 0) / tick);
   }
 
+  // 엔진과 같은 규칙을 쓴다. 여기서 선형으로 곱하면 벤치가 게임에 없는 값을 재게 된다.
   const count = Math.max(1, Math.round(stats.projectileCount ?? 1));
-  return ((stats.damage ?? 0) * count) / interval;
+  return ((stats.damage ?? 0) * count * projectileDamageMultiplier(count)) / interval;
 }
 
 function basicDps(weapon: Weapon): number {
