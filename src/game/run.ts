@@ -58,6 +58,11 @@ export interface RunState {
   invulnerable: number;
   /** 처치한 적 수. 결과 화면에 쓴다. */
   kills: number;
+  /**
+   * 방금 정리한 방에서 **실제로 새로 얻은 것**. 이미 갖고 있던 것은 빠진다.
+   * 연출이 방의 `reward`를 그대로 읽으면 두 번째 판에서 거짓말을 하게 된다.
+   */
+  gained?: RoomReward;
   /** 경과 시간(초). */
   elapsed: number;
 }
@@ -106,6 +111,8 @@ export function clearRoom(run: RunState): RunState {
   if (run.phase !== 'combat') return run;
 
   const room = roomAt(run.roomIndex);
+  // 적용 전 상태와 비교해야 실제로 늘어난 것을 알 수 있다. 순서를 바꾸면 안 된다.
+  const gained = newPartsOfReward(run.progress, room?.reward);
   const rewarded = applyRoomReward(run.progress, room?.reward);
   const isLastRoom = run.roomIndex >= TOTAL_ROOMS - 1;
   if (isLastRoom) {
@@ -115,6 +122,7 @@ export function clearRoom(run: RunState): RunState {
       shieldEnergy: SHIELD_ENERGY_MAX,
       progress: rewarded,
       loadout: loadoutFromProgress(rewarded, run.loadout),
+      gained,
     };
   }
   if (room?.entersTown) {
@@ -122,7 +130,7 @@ export function clearRoom(run: RunState): RunState {
     progress = setWheelSlot(progress, 'left', 0, progress.active.left);
     progress = setWheelSlot(progress, 'left', 1, progress.unlockedWeapons.includes('shield') ? 'shield' : null);
     progress = setWheelSlot(progress, 'right', 0, progress.unlockedWeapons.includes('bow') ? 'bow' : null);
-    return { ...run, phase: 'town', shieldEnergy: SHIELD_ENERGY_MAX, progress, loadout: loadoutFromProgress(progress, run.loadout) };
+    return { ...run, phase: 'town', shieldEnergy: SHIELD_ENERGY_MAX, progress, loadout: loadoutFromProgress(progress, run.loadout), gained };
   }
   return {
     ...run,
@@ -130,7 +138,27 @@ export function clearRoom(run: RunState): RunState {
     shieldEnergy: SHIELD_ENERGY_MAX,
     progress: rewarded,
     loadout: loadoutFromProgress(rewarded, run.loadout),
+    gained,
   };
+}
+
+/**
+ * 보상 중 **아직 안 가진 것만** 남긴다. 전부 이미 가졌으면 undefined.
+ *
+ * 해금은 집합 연산이라 이미 가진 것을 또 줘도 상태가 바뀌지 않는다.
+ * 그런데 연출은 방의 `reward`를 그대로 읽어서, 저장이 있는 두 번째 판에는
+ * 이미 들고 있는 활/방패를 다시 `획득`이라고 띄웠다.
+ * 실제로 늘어난 것만 보여주려면 적용 전 상태와 비교해야 한다.
+ */
+export function newPartsOfReward(progress: PlayerProgress, reward?: RoomReward): RoomReward | undefined {
+  if (!reward) return undefined;
+
+  const weapons = reward.weapons?.filter((id) => !progress.unlockedWeapons.includes(id)) ?? [];
+  const comboSkills = reward.comboSkills?.filter((id) => !progress.ownedComboSkills.includes(id)) ?? [];
+  const supports = reward.supports?.filter((id) => !progress.ownedSupports.includes(id)) ?? [];
+
+  if (!weapons.length && !comboSkills.length && !supports.length) return undefined;
+  return { weapons, comboSkills, supports };
 }
 
 function applyRoomReward(progress: PlayerProgress, reward?: RoomReward): PlayerProgress {

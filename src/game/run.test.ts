@@ -306,3 +306,44 @@ describe('저장된 진행으로 새 판을 시작할 때', () => {
     expect(run.progress.unlockedWeapons).toContain('shield');
   });
 });
+
+describe('이미 가진 보상은 다시 획득으로 세지 않는다', () => {
+  const firstBossIndex = 1;
+  const atFirstBoss = (progress: ReturnType<typeof createInitialProgress>) => ({
+    ...createRun('sword', null, progress),
+    roomIndex: firstBossIndex,
+  });
+
+  it('처음 만나면 새로 얻은 것으로 집계된다', () => {
+    const run = clearRoom(atFirstBoss(createInitialProgress()));
+
+    expect(run.gained?.weapons).toEqual(['bow', 'shield']);
+    expect(run.gained?.supports).toContain('earthquake');
+  });
+
+  it('이미 다 가지고 있으면 새로 얻은 것이 없다', () => {
+    // 저장이 있는 두 번째 판. 같은 보상을 또 받지만 실제로 늘어나는 것은 없다.
+    const owned = unlockSupports(
+      unlockWeapons(createInitialProgress(), ['bow', 'shield']),
+      ['earthquake', 'wound-resonance', 'multiple-projectiles', 'wound-seeker', 'dragging-ground', 'fracture-resonance'],
+    );
+
+    const run = clearRoom(atFirstBoss(owned));
+
+    expect(run.gained).toBeUndefined();
+  });
+
+  it('일부만 가진 경우 나머지만 남는다', () => {
+    const owned = unlockWeapons(createInitialProgress(), ['bow']);
+
+    const run = clearRoom(atFirstBoss(owned));
+
+    expect(run.gained?.weapons).toEqual(['shield']);
+  });
+
+  it('보상이 없는 방은 새로 얻은 것도 없다', () => {
+    const run = clearRoom(createRun('sword', null));
+
+    expect(run.gained).toBeUndefined();
+  });
+});

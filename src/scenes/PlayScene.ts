@@ -82,6 +82,7 @@ import {
   advanceTime,
   hasActiveShield,
   isOver,
+  newPartsOfReward,
   SHIELD_ENERGY_MAX,
   type RunState,
 } from '@/game/run';
@@ -1405,7 +1406,9 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private showBossDrop(enemy: Enemy): void {
-    const reward = ROOMS[this.run.roomIndex]?.reward;
+    // 이 시점에는 아직 clearRoom이 보상을 적용하지 않았으므로 현재 보유와 비교할 수 있다.
+    // 이미 가진 것을 다시 `획득`이라고 띄우면 두 번째 판에서 거짓말이 된다.
+    const reward = newPartsOfReward(this.run.progress, ROOMS[this.run.roomIndex]?.reward);
     if (!reward) return;
 
     const lines = this.rewardLines(reward, '보스 드랍');
@@ -2147,7 +2150,8 @@ export class PlayScene extends Phaser.Scene {
     );
 
     const hands = describeByHand(this.run.loadout);
-    const reward = won ? ROOMS[this.run.roomIndex]?.reward : undefined;
+    // 방의 보상이 아니라 이번 판에서 실제로 새로 얻은 것만 적는다.
+    const reward = won ? this.run.gained : undefined;
     container.add(
       this.add
         .text(
