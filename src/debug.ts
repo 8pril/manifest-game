@@ -19,6 +19,8 @@ export interface DebugEnemy {
   y: number;
   hp: number;
   maxHp: number;
+  /** 기절 중인지. 기절이 실제로 이동을 멈추는지 검증할 때 쓴다. */
+  stunned: boolean;
 }
 
 export interface DebugState {
@@ -35,7 +37,7 @@ export interface DebugState {
   /** 출구가 열렸으면 그 위치. 닫혀 있으면 null. */
   exit: { x: number; y: number } | null;
   /** 규칙 발동 횟수. 검증 드라이버가 변화를 감지해 그 순간을 찍는다. */
-  events: { burst: number; wallSlam: number; brand: number; woundConsume: number };
+  events: { burst: number; wallSlam: number; brand: number; woundConsume: number; fracture: number };
   /** 살아 있는 투사체 수. 발사가 실제로 나갔는지 확인하는 데 쓴다. */
   projectiles: number;
   /** 현재 방의 크기. */

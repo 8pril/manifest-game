@@ -80,3 +80,35 @@ describe('무기별 넉백 차이', () => {
     expect(strong.x - target.x).toBeGreaterThan(weak.x - target.x);
   });
 });
+
+describe('이미 벽에 붙어 있는 적', () => {
+  const bounds = { minX: 24, minY: 24, maxX: 1876, maxY: 1126 };
+
+  it('더 밀리지 않지만 벽 충돌로 친다', () => {
+    // 균열 파동이 벽에 붙은 적에게 깔린 경우. 위치는 그대로인데
+    // 벽 충돌이 나서 확정 기절과 추가 피해가 들어간다.
+    const atWall = { x: bounds.maxX, y: 600 };
+    const result = applyKnockback({ x: 1500, y: 600 }, atWall, 62, bounds);
+
+    expect(result.x).toBe(bounds.maxX);
+    expect(result.y).toBe(600);
+    expect(result.hitWall).toBe(true);
+  });
+
+  it('벽에서 떨어져 있으면 밀리기만 하고 충돌은 아니다', () => {
+    const away = { x: 1000, y: 600 };
+    const result = applyKnockback({ x: 900, y: 600 }, away, 62, bounds);
+
+    expect(result.x).toBeCloseTo(1062, 5);
+    expect(result.hitWall).toBe(false);
+  });
+
+  it('벽까지 남은 거리보다 넉백이 크면 벽에 붙고 충돌한다', () => {
+    // 벽에서 30px 떨어진 적을 62만큼 밀면 벽에 닿는다.
+    const near = { x: bounds.maxX - 30, y: 600 };
+    const result = applyKnockback({ x: 1000, y: 600 }, near, 62, bounds);
+
+    expect(result.x).toBe(bounds.maxX);
+    expect(result.hitWall).toBe(true);
+  });
+});

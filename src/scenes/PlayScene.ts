@@ -84,6 +84,7 @@ const WALL_SLAM_DAMAGE = 40;
 /** 상태 연출 색. 상태 표시 점과 같은 색을 써서 무엇이 터졌는지 연결되게 한다. */
 const BURST_COLOR = 0xff6b6b;
 const BRAND_COLOR = 0xb08bff;
+const STUN_COLOR = 0xd8f3ff;
 /** R키 링 메뉴가 완전히 펼쳐져 선택 가능해지는 시간(ms). */
 const WHEEL_OPEN_MS = 150;
 const WHEEL_RADIUS = 122;
@@ -158,7 +159,7 @@ export class PlayScene extends Phaser.Scene {
   private dashAngle = 0;
   private arcaneFlowUntil = 0;
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
-  private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0 };
+  private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0, fracture: 0 };
   private weapons: { left: WeaponId; right: WeaponId | null } = { left: 'sword', right: null };
   /** 현재 방의 이동 가능 영역. 방마다 크기가 다르다. */
   private bounds = { minX: WALL, minY: WALL, maxX: GAME_WIDTH - WALL, maxY: GAME_HEIGHT - WALL };
@@ -442,12 +443,18 @@ export class PlayScene extends Phaser.Scene {
    * 적을 밀어낸다. 벽까지 밀리면 추가 피해와 확정 기절을 준다.
    * 방패의 정체성이 수치가 아니라 이 동작에서 나온다.
    */
-  private pushEnemy(entity: EnemyEntity, distance: number): void {
+  /**
+   * 적을 밀어낸다.
+   *
+   * 기준점을 받는 이유: 근접 공격은 플레이어에서 밀어내지만, 지대는 조준 방향
+   * 앞쪽에 깔리므로 지대 중심에서 밀어내야 방향이 자연스럽다.
+   */
+  private pushEnemy(entity: EnemyEntity, distance: number, origin?: { x: number; y: number }): void {
     if (distance <= 0 || !isAlive(entity.state)) return;
 
     const radius = ENEMY_STATS[entity.state.kind].radius;
     const result = applyKnockback(
-      { x: this.player.x, y: this.player.y },
+      origin ?? { x: this.player.x, y: this.player.y },
       entity.state,
       distance,
       {
@@ -463,7 +470,8 @@ export class PlayScene extends Phaser.Scene {
 
     if (result.hitWall) {
       // 벽꿍. 확률 판정을 건너뛰고 확정으로 건다.
-      applyStatus(entity.state, 'fracture', Math.random, true);
+      const status = applyStatus(entity.state, 'fracture', Math.random, true);
+      if (status.applied) this.showStunFeedback(entity);
       this.ruleEvents.wallSlam++;
       impact(this, entity.state.x, entity.state.y);
       const slamRadius = ENEMY_STATS[entity.state.kind].radius;
@@ -493,7 +501,10 @@ export class PlayScene extends Phaser.Scene {
     if (owner) {
       for (const entity of this.enemies) {
         if (!isAlive(entity.state) || !containsPoint(area, entity.state)) continue;
+        // 상태이상을 먼저 굴린다. 밀어내다 벽에 닿으면 그때 확정 기절이 덮어쓴다.
         this.resolveHit(entity, 0, owner.weapon, false, owner);
+        // 지대 중심에서 밀어낸다. 넉백이 있는 지대만 해당된다(균열 파동).
+        this.pushEnemy(entity, stats.knockback ?? 0, at);
       }
     }
   }
@@ -544,6 +555,9 @@ export class PlayScene extends Phaser.Scene {
     }
 
     const result = applyStatus(enemy, weapon.status);
+    if (weapon.status === 'fracture' && result.applied) {
+      this.showStunFeedback(entity);
+    }
     if (result.burst) {
       damage += WOUND_BURST_DAMAGE;
       this.ruleEvents.burst++;
@@ -567,6 +581,17 @@ export class PlayScene extends Phaser.Scene {
     }
 
     this.damageEnemy(entity, damage);
+  }
+
+  private showStunFeedback(entity: EnemyEntity): void {
+    // 다른 규칙들과 같이 발동 횟수를 센다. 검증 드라이버가 이 값의 변화를 보고
+    // 기절이 실제로 걸린 순간을 잡아 화면을 찍는다.
+    this.ruleEvents.fracture++;
+    const enemy = entity.state;
+    const radius = ENEMY_STATS[enemy.kind].radius;
+    ring(this, enemy.x, enemy.y, STUN_COLOR, { from: radius * 0.5, to: radius * 2.1, duration: 300, width: 4 });
+    flash(this, enemy.x, enemy.y, radius * 2.3, STUN_COLOR);
+    floatingText(this, enemy.x, enemy.y - radius - 12, '기절', '#d8f3ff');
   }
 
   // ───────────────────────── 방
@@ -798,6 +823,7 @@ export class PlayScene extends Phaser.Scene {
           y: e.state.y,
           hp: e.state.hp,
           maxHp: e.state.maxHp,
+          stunned: isStunned(e.state),
       })),
       combo: {
         left: this.left.combo.value,
