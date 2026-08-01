@@ -27,7 +27,9 @@ export type Behavior =
   /** 지대가 지속피해를 줄 때마다 적의 이동을 방해한다. */
   | { kind: 'hinder' }
   /** 특정 상태이상이 걸린 대상에게 추가 피해를 준다. */
-  | { kind: 'statusDamage'; status: StatusKind; more: number };
+  | { kind: 'statusDamage'; status: StatusKind; more: number }
+  /** 보스에게도 넉백, 기절, 이동 방해 같은 CC를 적용할 수 있게 한다. */
+  | { kind: 'bossCc' };
 
 export type AreaKind = 'plain' | 'ignite' | 'shock' | 'chill' | 'freeze' | 'wither';
 

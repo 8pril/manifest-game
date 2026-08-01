@@ -42,6 +42,8 @@ export interface DebugState {
   projectiles: number;
   /** 현재 방의 크기. */
   room: { width: number; height: number };
+  /** 일시정지 여부. P 메뉴가 실제로 멈췄는지 드라이버가 확인한다. */
+  paused: boolean;
   /**
    * 게임이 인식하는 포인터의 월드 좌표.
    *

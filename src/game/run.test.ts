@@ -15,7 +15,7 @@ import {
 import { TOTAL_ROOMS } from '@/game/rooms';
 import { totalSupports, supportsFor } from '@/game/loadout';
 import { createLoadout } from '@/game/loadout';
-import { createInitialProgress, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
+import { configureManifestation, createInitialProgress, unlockSupports, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
 
 const newRun = () => createRun('sword', 'bow');
 
@@ -43,16 +43,19 @@ describe('createRun', () => {
     expect(run.progress.unlockedWeapons).toEqual(['sword', 'bow']);
   });
 
-  it('저장된 진행 상태가 있으면 그 active와 보유 목록으로 시작한다', () => {
+  it('저장된 진행이 있으면 보유는 이어받고 손은 초기값으로 시작한다', () => {
+    // 예전에는 저장된 active 까지 그대로 이어받았다. 그러면 두 번째 판부터
+    // "검 1종으로 시작해 첫 보스에서 무기를 얻는다"는 도입부가 사라진다.
     const progress = {
       ...unlockWeaponSwitch(unlockWeapons(createInitialProgress(), ['bow', 'shield'])),
       active: { left: 'shield' as const, right: 'bow' as const },
     };
     const run = createRun('sword', null, progress);
 
-    expect(run.progress).toBe(progress);
-    expect(run.loadout.left).toBe('shield');
-    expect(run.loadout.right).toBe('bow');
+    expect(run.progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
+    expect(run.progress.weaponSwitchUnlocked).toBe(true);
+    expect(run.loadout.left).toBe('sword');
+    expect(run.loadout.right).toBeNull();
   });
 
   it('방패 보호막은 최대치로 시작한다', () => {
@@ -258,5 +261,48 @@ describe('무적 시간', () => {
   it('isVulnerable이 무적 상태를 알려준다', () => {
     expect(isVulnerable(newRun())).toBe(true);
     expect(isVulnerable(damagePlayer(newRun(), 8))).toBe(false);
+  });
+});
+
+describe('저장된 진행으로 새 판을 시작할 때', () => {
+  it('보유와 세팅은 이어받는다', () => {
+    const saved = configureManifestation(
+      unlockWeaponSwitch(unlockSupports(unlockWeapons(createInitialProgress(), ['bow', 'shield']), ['earthquake'])),
+      'sword',
+      { primarySupportId: 'earthquake', synergySupportId: null },
+    );
+
+    const run = createRun('sword', null, saved);
+
+    expect(run.progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
+    expect(run.progress.ownedSupports).toContain('earthquake');
+    expect(run.progress.weaponSwitchUnlocked).toBe(true);
+    expect(run.progress.configs.sword.primarySupportId).toBe('earthquake');
+  });
+
+  it('손에 든 무기는 이어받지 않는다', () => {
+    // 도입부가 "검 1종으로 시작해 첫 보스에서 무기를 얻는다"이므로,
+    // 저장된 장착까지 복원하면 두 번째 판부터 그 구조가 사라진다.
+    const saved = {
+      ...unlockWeapons(createInitialProgress(), ['bow', 'shield']),
+      active: { left: 'bow' as const, right: 'shield' as const },
+    };
+
+    const run = createRun('sword', null, saved);
+
+    expect(run.progress.active).toEqual({ left: 'sword', right: null });
+    expect(run.loadout.left).toBe('sword');
+    expect(run.loadout.right).toBeNull();
+  });
+
+  it('개발 파라미터로 준 무기는 저장이 있어도 그대로 들린다', () => {
+    // 저장된 진행이 인자를 덮어써서 ?left=, ?right= 가 먹지 않던 회귀가 있었다.
+    const saved = unlockWeapons(createInitialProgress(), ['bow']);
+
+    const run = createRun('arcane', 'shield', saved);
+
+    expect(run.progress.active).toEqual({ left: 'arcane', right: 'shield' });
+    expect(run.progress.unlockedWeapons).toContain('arcane');
+    expect(run.progress.unlockedWeapons).toContain('shield');
   });
 });

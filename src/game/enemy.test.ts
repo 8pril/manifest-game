@@ -108,6 +108,13 @@ describe('enemySpeed', () => {
     enemy.hindered = true;
     expect(enemySpeed(enemy)).toBeCloseTo(base * HINDER_SPEED_FACTOR, 10);
   });
+
+  it('보스는 기본 이동 방해에 느려지지 않는다', () => {
+    const boss = createEnemy('gatekeeper', 0, 0);
+    const base = enemySpeed(boss);
+    boss.hindered = true;
+    expect(enemySpeed(boss)).toBe(base);
+  });
 });
 
 describe('적 구성', () => {

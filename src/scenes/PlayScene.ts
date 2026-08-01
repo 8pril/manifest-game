@@ -73,11 +73,23 @@ import { ROOMS, TOTAL_ROOMS, type RoomReward } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
-import { createRun, clearRoom, leaveTown, damagePlayer, addKill, advanceTime, hasActiveShield, isOver, SHIELD_ENERGY_MAX, type RunState } from '@/game/run';
+import {
+  createRun,
+  clearRoom,
+  leaveTown,
+  damagePlayer as applyPlayerDamage,
+  addKill,
+  advanceTime,
+  hasActiveShield,
+  isOver,
+  SHIELD_ENERGY_MAX,
+  type RunState,
+} from '@/game/run';
 import { configureManifestation, createInitialProgress, equipFromWheel, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
+import { canApplyCrowdControl } from '@/game/crowd-control';
 
 const MOVE_SPEED = 300;
 const DASH_SPEED = 900;
@@ -102,6 +114,8 @@ const BOSS_PATTERN_COLOR = 0xffd166;
 const WHEEL_OPEN_MS = 150;
 const WHEEL_RADIUS = 122;
 const WHEEL_INNER_RADIUS = 24;
+/** 방패 스윙 중에는 보스 CC가 안 통해도 버티는 역할을 갖는다. */
+const SHIELD_GUARD_DAMAGE_TAKEN = 0.45;
 
 interface EnemyEntity {
   state: Enemy;
@@ -142,6 +156,14 @@ interface WeaponWheelMenu {
   segments: WheelSegment[];
 }
 
+interface ComboBadge {
+  back: Phaser.GameObjects.Rectangle;
+  title: Phaser.GameObjects.Text;
+  value: Phaser.GameObjects.Text;
+  timer: Phaser.GameObjects.Rectangle;
+  pips: Phaser.GameObjects.Rectangle[];
+}
+
 /** 한 판의 전투 화면. 진행 규칙과 승패 판정은 game/run.ts가 갖는다. */
 export class PlayScene extends Phaser.Scene {
   private run!: RunState;
@@ -161,7 +183,7 @@ export class PlayScene extends Phaser.Scene {
   private hpBarFill!: Phaser.GameObjects.Rectangle;
   private shieldBarBack!: Phaser.GameObjects.Rectangle;
   private shieldBarFill!: Phaser.GameObjects.Rectangle;
-  private comboText!: Phaser.GameObjects.Text;
+  private comboBadges!: { left: ComboBadge; right: ComboBadge };
   /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
   private comboRings!: { left: Phaser.GameObjects.Arc; right: Phaser.GameObjects.Arc };
   /** 비전 흐름이 걸린 동안 플레이어를 감싸는 오라. 버프가 살아 있다는 유일한 표시다. */
@@ -169,11 +191,19 @@ export class PlayScene extends Phaser.Scene {
   private overlay: Phaser.GameObjects.Container | null = null;
   private transientOverlays: Phaser.GameObjects.GameObject[] = [];
   private weaponWheel: WeaponWheelMenu | null = null;
+  /**
+   * 일시정지 여부.
+   *
+   * 판 도중에 빠져나갈 길이 필요하다. 이게 없으면 기록을 지우려고
+   * 일부러 죽거나 개발자 도구를 열어야 했다.
+   */
+  private paused = false;
 
   private keys!: Record<'up' | 'down' | 'left' | 'right' | 'shift', Phaser.Input.Keyboard.Key>;
   private dashUntil = 0;
   private dashReadyAt = 0;
   private dashAngle = 0;
+  private shieldGuardUntil = 0;
   private arcaneFlowUntil = 0;
   private nextHitSfxAt = 0;
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
@@ -213,13 +243,23 @@ export class PlayScene extends Phaser.Scene {
   }
 
   init(data: { left?: WeaponId; right?: WeaponId | null; progress?: PlayerProgress }): void {
+    // 씬 인스턴스는 재시작해도 그대로 재사용된다. 필드 초기화식은 다시 돌지 않으므로
+    // 일시정지 중에 R로 재시작하면 새 판이 멈춘 채로 시작한다.
+    this.paused = false;
+    this.overlay = null;
+    this.weaponWheel = null;
+
     // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
     const debugStart = parseDebugStart(location.search, TOTAL_ROOMS);
-    const progress = data?.progress ?? (debugStart.left || debugStart.right || debugStart.roomIndex !== undefined ? null : loadProgress()) ?? createInitialProgress();
-    this.initialProgress = progress;
+    const hasDebugWeapons = debugStart.left !== undefined || debugStart.right !== undefined;
+    const progress = data?.progress ?? (hasDebugWeapons || debugStart.roomIndex !== undefined ? null : loadProgress()) ?? createInitialProgress();
+    this.initialProgress = hasDebugWeapons ? null : progress;
+    // 저장된 진행이 있어도 손에 든 무기는 이어받지 않는다. 항상 초기값으로 시작한다.
+    // 자세한 이유는 createRun 참고.
+    const fresh = createInitialProgress();
     this.weapons = {
-      left: debugStart.left ?? data?.left ?? progress.active.left,
-      right: debugStart.right ?? data?.right ?? progress.active.right,
+      left: debugStart.left ?? data?.left ?? fresh.active.left,
+      right: debugStart.right ?? data?.right ?? fresh.active.right,
     };
 
     // 개발용: ?left=bow&right=arcane&wave=4 로 특정 무기/방에서 시작한다.
@@ -239,6 +279,7 @@ export class PlayScene extends Phaser.Scene {
     this.transientOverlays = [];
     this.resultScheduled = false;
     this.arcaneFlowUntil = 0;
+    this.shieldGuardUntil = 0;
 
     this.run = { ...createRun(this.weapons.left, this.weapons.right, this.initialProgress ?? undefined), roomIndex: this.startRoomIndex };
     this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
@@ -284,7 +325,8 @@ export class PlayScene extends Phaser.Scene {
     keyboard.on('keydown-R', () => {
       // 판이 끝났으면 다시 시작. 이 분기가 없으면 죽은 뒤 새로고침 말고는
       // 빠져나갈 방법이 없다. 결과 화면이 R을 안내하는데 아무 반응이 없었다.
-      if (isOver(this.run)) {
+      // 일시정지 중에도 같은 길을 연다.
+      if (isOver(this.run) || this.paused) {
         if (this.keys.shift.isDown) clearSavedProgress();
         this.scene.start('Play');
         return;
@@ -308,9 +350,26 @@ export class PlayScene extends Phaser.Scene {
       if (this.weaponWheel) this.closeWeaponWheel(true);
     });
 
+    // 일시정지는 P가 주 키다.
+    // Esc는 전체화면을 빠져나가는 브라우저 기본 동작과 겹치고, 헤드리스 검증에서도
+    // 같은 입력이 어떤 판에서는 먹고 어떤 판에서는 안 먹었다. 보조로만 붙여 둔다.
+    const togglePause = () => {
+      if (this.weaponWheel) return;
+      if (this.run.phase !== 'combat') return;
+      if (this.paused) {
+        this.closePause();
+        return;
+      }
+      // 보스 드랍 패널처럼 이미 뭔가 떠 있으면 그걸 덮지 않는다.
+      if (this.overlay) return;
+      this.showPause();
+    };
+    keyboard.on('keydown-P', togglePause);
+    keyboard.on('keydown-ESC', togglePause);
+
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.weaponWheel) return;
+      if (this.weaponWheel || this.paused) return;
       if (this.run.phase !== 'combat') return;
       // 트랙패드에서는 두 손가락 탭이 꺼져 있거나 브라우저가 다르게 넘겨줄 수 있어
       // 눌린 버튼 상태와 이벤트의 버튼 번호를 모두 본다.
@@ -323,14 +382,14 @@ export class PlayScene extends Phaser.Scene {
     // 트랙패드에서 우클릭을 반복하는 것은 사실상 불가능하고,
     // 왼손이 WASD에 있으므로 새끼손가락으로 닿는 Shift가 가장 편하다.
     keyboard.on('keydown-SHIFT', () => {
-      if (this.weaponWheel) return;
+      if (this.weaponWheel || this.paused) return;
       if (this.run.phase !== 'combat') return;
       if (this.right) this.useWeapon(this.right);
     });
   }
 
   private tryDash(): void {
-    if (this.weaponWheel) return;
+    if (this.weaponWheel || this.paused) return;
     if (this.run.phase !== 'combat' || this.time.now < this.dashReadyAt) return;
 
     const direction = this.moveDirection();
@@ -425,6 +484,9 @@ export class PlayScene extends Phaser.Scene {
     const range = stats.meleeRange ?? 90;
     const arc = stats.meleeArc ?? 1.7;
     const duration = runtime.weapon.swingDuration || 140;
+    if (runtime.weapon.id === 'shield') {
+      this.shieldGuardUntil = Math.max(this.shieldGuardUntil, this.time.now + duration);
+    }
 
     // 무기 성격을 연출로 드러낸다.
     // 검은 짧고 빠르게 스쳐 지나가고, 방패는 느리게 밀고 나간다.
@@ -465,7 +527,7 @@ export class PlayScene extends Phaser.Scene {
       if (!entity) continue;
 
       this.resolveHit(entity, stats.damage ?? 0, runtime.weapon, basic, runtime, behaviors);
-      this.pushEnemy(entity, stats.knockback ?? 0);
+      this.pushEnemy(entity, stats.knockback ?? 0, undefined, behaviors);
     }
   }
 
@@ -476,8 +538,14 @@ export class PlayScene extends Phaser.Scene {
    * 앞쪽에 깔리므로 지대 중심에서 밀어내야 방향이 자연스럽다.
    * 벽까지 밀리면 추가 피해와 확정 기절을 준다.
    */
-  private pushEnemy(entity: EnemyEntity, distance: number, origin?: { x: number; y: number }): void {
+  private pushEnemy(
+    entity: EnemyEntity,
+    distance: number,
+    origin?: { x: number; y: number },
+    behaviors: readonly Behavior[] = [],
+  ): void {
     if (distance <= 0 || !isAlive(entity.state)) return;
+    if (!canApplyCrowdControl(entity.state, behaviors)) return;
 
     const radius = ENEMY_STATS[entity.state.kind].radius;
     const result = applyKnockback(
@@ -532,7 +600,7 @@ export class PlayScene extends Phaser.Scene {
         // 상태이상을 먼저 굴린다. 밀어내다 벽에 닿으면 그때 확정 기절이 덮어쓴다.
         this.resolveHit(entity, 0, owner.weapon, false, owner, behaviors);
         // 지대 중심에서 밀어낸다. 넉백이 있는 지대만 해당된다(균열 파동).
-        this.pushEnemy(entity, stats.knockback ?? 0, at);
+        this.pushEnemy(entity, stats.knockback ?? 0, at, behaviors);
       }
     }
   }
@@ -587,7 +655,8 @@ export class PlayScene extends Phaser.Scene {
       floatingText(this, this.player.x, this.player.y - 24, '비전 흐름', '#c9a8ff');
     }
 
-    const result = applyStatus(enemy, weapon.status);
+    const canApplyStatus = weapon.status !== 'fracture' || canApplyCrowdControl(enemy, behaviors);
+    const result = canApplyStatus ? applyStatus(enemy, weapon.status) : { applied: false, burst: false };
     if (weapon.status === 'fracture' && result.applied) {
       this.showStunFeedback(entity);
     }
@@ -817,6 +886,12 @@ export class PlayScene extends Phaser.Scene {
     // `active`를 반드시 확인한다. 이 줄은 update의 맨 앞이라, 여기서 예외가 나면
     // 이동을 포함한 아래 전부가 멈춘다. 파괴된 컨테이너를 만지면 그렇게 된다.
     if (this.overlay?.active) pinContainer(this, this.overlay);
+    // 일시정지 중에는 시간도 적도 멈춘다. 오버레이 고정만 위에서 끝냈다.
+    // 디버그 상태는 계속 내보낸다. 여기서 막으면 멈춘 사실 자체가 안 보인다.
+    if (this.paused) {
+      if (DEBUG_ENABLED) this.publishDebug();
+      return;
+    }
     if (this.weaponWheel?.container.active) {
       pinContainer(this, this.weaponWheel.container);
       this.updateWeaponWheel();
@@ -832,6 +907,7 @@ export class PlayScene extends Phaser.Scene {
     this.movePlayer(dt);
     this.updateAim();
     this.updateComboRings();
+    this.updateComboText();
     this.updateArcaneAura();
     this.updateOffscreenMarks();
     this.updateMinimap();
@@ -849,6 +925,7 @@ export class PlayScene extends Phaser.Scene {
   private publishDebug(): void {
     publishDebugState({
       phase: this.run.phase,
+      paused: this.paused,
       roomIndex: this.run.roomIndex,
       totalRooms: TOTAL_ROOMS,
       hp: this.run.hp,
@@ -1023,14 +1100,7 @@ export class PlayScene extends Phaser.Scene {
       if (!dashing && !isStunned(enemy) && distance <= stats.radius + PLAYER_RADIUS) {
         if (enemy.sinceContact >= stats.contactCooldown) {
           enemy.sinceContact = 0;
-          const before = this.run;
-          this.run = damagePlayer(this.run, isBossKind(enemy.kind) ? bossContactDamage(enemy) : stats.contactDamage);
-
-          if (this.run !== before) {
-            playSfx('playerHit');
-            this.flashPlayer();
-            this.refreshHud();
-          }
+          this.hitPlayer(isBossKind(enemy.kind) ? bossContactDamage(enemy) : stats.contactDamage);
           if (this.run.phase === 'lost') {
             this.showResult(false);
             if (DEBUG_ENABLED) this.publishDebug();
@@ -1116,13 +1186,7 @@ export class PlayScene extends Phaser.Scene {
     floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '충격파', '#d7c6ff');
 
     if (Math.hypot(this.player.x - enemy.x, this.player.y - enemy.y) <= radius + PLAYER_RADIUS) {
-      const before = this.run;
-      this.run = damagePlayer(this.run, damage);
-      if (this.run !== before) {
-        playSfx('playerHit');
-        this.flashPlayer();
-        this.refreshHud();
-      }
+      this.hitPlayer(damage);
       if (this.run.phase === 'lost') this.showResult(false);
     }
   }
@@ -1180,13 +1244,7 @@ export class PlayScene extends Phaser.Scene {
         !dashing && Math.hypot(shot.state.x - this.player.x, shot.state.y - this.player.y) <= PLAYER_RADIUS + 8;
 
       if (hitPlayer) {
-        const before = this.run;
-        this.run = damagePlayer(this.run, shot.damage);
-        if (this.run !== before) {
-          playSfx('playerHit');
-          this.flashPlayer();
-          this.refreshHud();
-        }
+        this.hitPlayer(shot.damage);
         if (this.run.phase === 'lost') {
           shot.view.destroy();
           this.enemyShots.splice(i, 1);
@@ -1203,6 +1261,28 @@ export class PlayScene extends Phaser.Scene {
         shot.view.setPosition(shot.state.x, shot.state.y);
       }
     }
+  }
+
+  private hitPlayer(amount: number): void {
+    const damage = this.guardedPlayerDamage(amount);
+    const before = this.run;
+    this.run = applyPlayerDamage(this.run, damage);
+    if (this.run === before) return;
+
+    if (damage < amount) this.showShieldGuardFeedback(amount - damage);
+    playSfx('playerHit');
+    this.flashPlayer();
+    this.refreshHud();
+  }
+
+  private guardedPlayerDamage(amount: number): number {
+    if (!hasActiveShield(this.run) || this.time.now > this.shieldGuardUntil) return amount;
+    return amount * SHIELD_GUARD_DAMAGE_TAKEN;
+  }
+
+  private showShieldGuardFeedback(blocked: number): void {
+    ring(this, this.player.x, this.player.y, 0x7dd3fc, { from: PLAYER_RADIUS + 6, to: PLAYER_RADIUS + 34, duration: 220, width: 4 });
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 8, `방어 ${Math.ceil(blocked)}`, '#d8f3ff');
   }
 
   private syncEnemyView(entity: EnemyEntity): void {
@@ -1239,7 +1319,7 @@ export class PlayScene extends Phaser.Scene {
 
       for (const entity of this.enemies) {
         if (!isAlive(entity.state) || !containsPoint(state, entity.state)) continue;
-        if (state.hinders) entity.state.hindered = true;
+        if (state.hinders && canApplyCrowdControl(entity.state, behaviors)) entity.state.hindered = true;
         if (result.ticked) {
           const damage = this.applyStatusDamageBonus(state.damagePerTick, entity.state, behaviors);
           this.damageEnemy(entity, damage * incomingDamageMultiplier(entity.state));
@@ -1390,13 +1470,13 @@ export class PlayScene extends Phaser.Scene {
     this.hud = this.add
       .text(screenX(24), screenY(58), '', { fontSize: '14px', color: COLORS.text, lineSpacing: 3 })
       .setDepth(20);
-    this.comboText = this.add
-      .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 40), '', { fontSize: '16px', color: COLORS.textDim })
-      .setOrigin(0.5)
-      .setDepth(20);
+    this.comboBadges = {
+      left: this.createComboBadge(screenX(VIEW_WIDTH / 2 - 142), screenY(VIEW_HEIGHT - 54), '왼손'),
+      right: this.createComboBadge(screenX(VIEW_WIDTH / 2 + 142), screenY(VIEW_HEIGHT - 54), '오른손'),
+    };
 
     const hint = this.add
-      .text(screenX(VIEW_WIDTH - 24), screenY(20), 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 무기 교체', {
+      .text(screenX(VIEW_WIDTH - 24), screenY(20), 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 무기 교체 · P 메뉴', {
         fontSize: '13px',
         color: COLORS.textDim,
       })
@@ -1404,7 +1484,16 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(20);
 
     // 카메라가 방을 따라 움직여도 HUD는 화면에 붙어 있어야 한다.
-    pinToScreen(barBack, this.hpBarFill, this.shieldBarBack, this.shieldBarFill, this.hud, this.comboText, hint);
+    pinToScreen(
+      barBack,
+      this.hpBarFill,
+      this.shieldBarBack,
+      this.shieldBarFill,
+      this.hud,
+      hint,
+      ...this.comboBadgeObjects(this.comboBadges.left),
+      ...this.comboBadgeObjects(this.comboBadges.right),
+    );
 
     // 방이 화면보다 크므로 밖에 있는 대상을 가리키는 표시가 필요하다.
     // 없으면 남은 적을 찾아 헤매게 된다.
@@ -1413,6 +1502,33 @@ export class PlayScene extends Phaser.Scene {
     );
 
     this.buildMinimap();
+  }
+
+  private createComboBadge(x: number, y: number, hand: string): ComboBadge {
+    const back = this.add
+      .rectangle(x, y, 260, 66, 0x0a0b0f, 0.74)
+      .setStrokeStyle(1, 0x2a2f42)
+      .setDepth(20);
+    const title = this.add
+      .text(x - 112, y - 24, hand, { fontSize: '13px', color: COLORS.textDim, fontStyle: 'bold' })
+      .setOrigin(0, 0.5)
+      .setDepth(21);
+    const value = this.add
+      .text(x + 112, y - 8, '', { fontSize: '32px', color: COLORS.text, fontStyle: 'bold' })
+      .setOrigin(1, 0.5)
+      .setDepth(21);
+    const timer = this.add.rectangle(x - 112, y + 23, 224, 4, COLORS.accent, 0.7).setOrigin(0, 0.5).setDepth(21);
+    const pips = Array.from({ length: COMBO_REQUIRED }, (_, index) =>
+      this.add.rectangle(x - 112 + index * 24, y + 3, 18, 16, 0x2a2f42, 0.9).setOrigin(0, 0.5).setDepth(21),
+    );
+
+    return { back, title, value, timer, pips };
+  }
+
+  private comboBadgeObjects(
+    badge: ComboBadge,
+  ): (Phaser.GameObjects.Components.ScrollFactor & Phaser.GameObjects.Components.Visible)[] {
+    return [badge.back, badge.title, badge.value, badge.timer, ...badge.pips];
   }
 
   /**
@@ -1508,11 +1624,32 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private updateComboText(): void {
-    const label = (runtime: WeaponRuntime) =>
-      isComboReady(runtime.combo)
-        ? `${runtime.weapon.name} ▶ ${runtime.weapon.combo.name} 발동 준비`
-        : `${runtime.weapon.name} ${runtime.combo.value}/${COMBO_REQUIRED}`;
-    this.comboText.setText(this.right ? `${label(this.left)}      ${label(this.right)}` : `${label(this.left)}      오른손 잠김`);
+    this.updateComboBadge(this.comboBadges.left, this.left);
+    this.updateComboBadge(this.comboBadges.right, this.right);
+  }
+
+  private updateComboBadge(badge: ComboBadge, runtime: WeaponRuntime | null): void {
+    const visible = runtime !== null;
+    for (const object of this.comboBadgeObjects(badge)) object.setVisible(visible);
+    if (!runtime) return;
+
+    const ready = isComboReady(runtime.combo);
+    const color = ready ? COLORS.accent : runtime.weapon.color;
+    const hand = badge === this.comboBadges.left ? '왼손' : '오른손';
+    badge.back.setStrokeStyle(ready ? 2 : 1, color, ready ? 0.95 : 0.55);
+    badge.title.setText(`${hand} ${runtime.weapon.name}`);
+    badge.value.setText(ready ? 'MAX' : `${runtime.combo.value}`);
+    badge.value.setColor(ready ? COLORS.accentText : '#ffffff');
+
+    for (const [index, pip] of badge.pips.entries()) {
+      const filled = index < runtime.combo.value;
+      pip.setFillStyle(filled ? color : 0x2a2f42, filled ? 0.95 : 0.9);
+    }
+
+    const duration = resolveFor(this.run.loadout, runtime.weapon.basic).stats.comboDuration ?? 5;
+    const ratio = runtime.combo.value > 0 ? Phaser.Math.Clamp(runtime.combo.remaining / duration, 0, 1) : 0;
+    badge.timer.width = 224 * ratio;
+    badge.timer.setFillStyle(color, ready ? 0.9 : 0.65);
   }
 
   private openWeaponWheel(): void {
@@ -1946,6 +2083,51 @@ export class PlayScene extends Phaser.Scene {
       if ('disableInteractive' in child) (child as Phaser.GameObjects.GameObject).disableInteractive();
     }
     this.time.delayedCall(0, () => overlay.destroy(true));
+  }
+
+  /**
+   * 일시정지 화면.
+   *
+   * 판 도중에 기록을 지우고 처음부터 볼 수 있어야 한다.
+   * 결과 화면에만 초기화가 있으면 "지금 처음부터 다시 보고 싶다"에 답할 수 없다.
+   */
+  private showPause(): void {
+    this.paused = true;
+
+    const container = this.add.container(0, 0).setDepth(30);
+    pinContainer(this, container);
+    container.add(this.add.rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.82));
+    container.add(
+      this.add
+        .text(VIEW_WIDTH / 2, VIEW_HEIGHT / 2 - 80, '일시정지', { fontSize: '44px', color: COLORS.text, fontStyle: 'bold' })
+        .setOrigin(0.5),
+    );
+    container.add(
+      this.add
+        .text(
+          VIEW_WIDTH / 2,
+          VIEW_HEIGHT / 2 + 10,
+          `${ROOMS[this.run.roomIndex]?.label ?? ''} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   처치 ${this.run.kills}`,
+          { fontSize: '16px', color: COLORS.textDim },
+        )
+        .setOrigin(0.5),
+    );
+    container.add(
+      this.add
+        .text(
+          VIEW_WIDTH / 2,
+          VIEW_HEIGHT / 2 + 80,
+          'P 이어하기\nR 이 판만 다시 시작 (해금 유지)\nShift+R 기록 지우고 처음부터',
+          { fontSize: '18px', color: COLORS.textDim, align: 'center', lineSpacing: 10 },
+        )
+        .setOrigin(0.5),
+    );
+    this.overlay = container;
+  }
+
+  private closePause(): void {
+    this.paused = false;
+    this.closeOverlay();
   }
 
   private showResult(won: boolean): void {

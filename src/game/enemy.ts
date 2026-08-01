@@ -202,6 +202,7 @@ export const HINDER_SPEED_FACTOR = 0.45;
 
 export function enemySpeed(enemy: Enemy): number {
   const base = ENEMY_STATS[enemy.kind].speed;
+  if (isBossKind(enemy.kind)) return base;
   return enemy.hindered ? base * HINDER_SPEED_FACTOR : base;
 }
 

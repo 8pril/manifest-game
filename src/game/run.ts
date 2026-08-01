@@ -62,9 +62,25 @@ export interface RunState {
   elapsed: number;
 }
 
+/**
+ * 한 판을 시작한다.
+ *
+ * 저장된 진행에서 **보유와 세팅은 이어받되 손에 든 무기는 이어받지 않는다.**
+ * 이 게임의 도입부는 "검 1종으로 시작해 첫 보스에서 무기를 얻는다"인데,
+ * 손에 든 것까지 복원하면 두 번째 판부터 그 구조가 통째로 사라진다.
+ * 심사자가 새로고침 한 번만 해도 다른 게임을 보게 된다.
+ *
+ * 해금·보조형·마을 세팅·링 후보는 그대로 남으므로 영구 성장은 유지된다.
+ *
+ * 다만 `weaponSwitchUnlocked`까지 이어받으므로, 두 번째 판은 1번 방에서 R 한 번이면
+ * 해금된 무기를 바로 꺼낼 수 있다. 손에 든 무기만 초기화한 것으로는 도입부가
+ * 반만 지켜진다. 저장 범위를 어디까지 둘지는 `docs/action-tracker.md`의 D1에서
+ * 기획 결정을 기다리는 중이다.
+ */
 export function createRun(left: WeaponId, right: WeaponId | null, savedProgress?: PlayerProgress): RunState {
-  const progress = savedProgress ?? {
-    ...unlockWeapons(createInitialProgress(), right ? [left, right] : [left]),
+  const base = savedProgress ?? createInitialProgress();
+  const progress = {
+    ...unlockWeapons(base, right ? [left, right] : [left]),
     active: { left, right },
   };
 
