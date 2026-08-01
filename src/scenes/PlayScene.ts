@@ -14,6 +14,8 @@ import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effec
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { awakenedAttackInterval, deliveryOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
+import { findSupport } from '@/data/supports';
+import { findSkill } from '@/data/skills';
 import type { Skill } from '@/engine/support';
 import {
   spawnProjectiles,
@@ -50,6 +52,10 @@ import {
 } from '@/engine/status';
 import {
   ENEMY_STATS,
+  advanceBossPattern,
+  bossContactDamage,
+  bossMoveDirection,
+  bossMoveSpeed,
   createEnemy,
   enemySpeed,
   isAlive,
@@ -57,9 +63,10 @@ import {
   desiredDirection,
   readyToFire,
   markFired,
+  type BossEvent,
   type Enemy,
 } from '@/game/enemy';
-import { ROOMS, TOTAL_ROOMS } from '@/game/rooms';
+import { ROOMS, TOTAL_ROOMS, type RoomReward } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
@@ -85,6 +92,7 @@ const WALL_SLAM_DAMAGE = 40;
 const BURST_COLOR = 0xff6b6b;
 const BRAND_COLOR = 0xb08bff;
 const STUN_COLOR = 0xd8f3ff;
+const BOSS_PATTERN_COLOR = 0xffd166;
 /** R키 링 메뉴가 완전히 펼쳐져 선택 가능해지는 시간(ms). */
 const WHEEL_OPEN_MS = 150;
 const WHEEL_RADIUS = 122;
@@ -440,14 +448,11 @@ export class PlayScene extends Phaser.Scene {
   }
 
   /**
-   * 적을 밀어낸다. 벽까지 밀리면 추가 피해와 확정 기절을 준다.
-   * 방패의 정체성이 수치가 아니라 이 동작에서 나온다.
-   */
-  /**
    * 적을 밀어낸다.
    *
    * 기준점을 받는 이유: 근접 공격은 플레이어에서 밀어내지만, 지대는 조준 방향
    * 앞쪽에 깔리므로 지대 중심에서 밀어내야 방향이 자연스럽다.
+   * 벽까지 밀리면 추가 피해와 확정 기절을 준다.
    */
   private pushEnemy(entity: EnemyEntity, distance: number, origin?: { x: number; y: number }): void {
     if (distance <= 0 || !isAlive(entity.state)) return;
@@ -640,22 +645,27 @@ export class PlayScene extends Phaser.Scene {
     for (const spawn of room.spawns) {
       for (let i = 0; i < spawn.count; i++) {
         const at = this.edgeSpawnPoint();
-        const enemy = createEnemy(spawn.kind, at.x, at.y);
-        const stats = ENEMY_STATS[enemy.kind];
-
-        const view = this.add.rectangle(enemy.x, enemy.y, stats.radius * 2, stats.radius * 2, stats.color).setDepth(5);
-        const hpBar = this.add.rectangle(enemy.x, enemy.y - stats.radius - 9, stats.radius * 2, 4, 0x6ee7a8).setDepth(6);
-        const statusDots = STATUS_ORDER.map((kind, index) =>
-          this.add
-            .rectangle(enemy.x + (index - 1.5) * 9, enemy.y - stats.radius - 16, 5, 5, STATUS_COLORS[kind])
-            .setDepth(6)
-            .setVisible(false),
-        );
-
-        this.enemies.push({ state: enemy, view, hpBar, statusDots });
+        this.enemies.push(this.createEnemyEntity(spawn.kind, at.x, at.y));
       }
     }
     this.refreshHud();
+  }
+
+  private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
+    const enemy = createEnemy(kind, x, y);
+    const stats = ENEMY_STATS[enemy.kind];
+
+    return {
+      state: enemy,
+      view: this.add.rectangle(enemy.x, enemy.y, stats.radius * 2, stats.radius * 2, stats.color).setDepth(5),
+      hpBar: this.add.rectangle(enemy.x, enemy.y - stats.radius - 9, stats.radius * 2, 4, 0x6ee7a8).setDepth(6),
+      statusDots: STATUS_ORDER.map((status, index) =>
+        this.add
+          .rectangle(enemy.x + (index - 1.5) * 9, enemy.y - stats.radius - 16, 5, 5, STATUS_COLORS[status])
+          .setDepth(6)
+          .setVisible(false),
+      ),
+    };
   }
 
   /**
@@ -946,9 +956,15 @@ export class PlayScene extends Phaser.Scene {
 
       // 기절한 적은 움직이지도 쏘지도 않는다.
       if (!isStunned(enemy)) {
-        const direction = desiredDirection(enemy, { x: this.player.x, y: this.player.y });
+        for (const event of advanceBossPattern(enemy, { x: this.player.x, y: this.player.y }, dt)) {
+          this.handleBossEvent(entity, event);
+        }
+
+        const direction = enemy.kind === 'boss'
+          ? bossMoveDirection(enemy, { x: this.player.x, y: this.player.y })
+          : desiredDirection(enemy, { x: this.player.x, y: this.player.y });
         if (direction) {
-          const step = enemySpeed(enemy) * dt;
+          const step = enemy.kind === 'boss' ? bossMoveSpeed(enemy) * dt : enemySpeed(enemy) * dt;
           const radius = ENEMY_STATS[enemy.kind].radius;
           enemy.x = Phaser.Math.Clamp(enemy.x + direction.x * step, this.bounds.minX + radius, this.bounds.maxX - radius);
           enemy.y = Phaser.Math.Clamp(enemy.y + direction.y * step, this.bounds.minY + radius, this.bounds.maxY - radius);
@@ -966,7 +982,7 @@ export class PlayScene extends Phaser.Scene {
         if (enemy.sinceContact >= stats.contactCooldown) {
           enemy.sinceContact = 0;
           const before = this.run;
-          this.run = damagePlayer(this.run, stats.contactDamage);
+          this.run = damagePlayer(this.run, enemy.kind === 'boss' ? bossContactDamage(enemy) : stats.contactDamage);
 
           if (this.run !== before) {
             this.flashPlayer();
@@ -979,6 +995,47 @@ export class PlayScene extends Phaser.Scene {
           }
         }
       }
+    }
+  }
+
+  private handleBossEvent(entity: EnemyEntity, event: BossEvent): void {
+    const enemy = entity.state;
+    switch (event.kind) {
+      case 'chargeTelegraph':
+        this.showBossChargeTelegraph(enemy, event.direction);
+        break;
+      case 'chargeStart':
+        ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: 18, to: ENEMY_STATS.boss.radius * 1.8, duration: 260, width: 4 });
+        floatingText(this, enemy.x, enemy.y - ENEMY_STATS.boss.radius - 18, '돌진', '#ffd166');
+        break;
+      case 'summon':
+        this.summonBossAdds(enemy, event.count);
+        break;
+    }
+  }
+
+  private showBossChargeTelegraph(enemy: Enemy, direction: { x: number; y: number }): void {
+    const length = 520;
+    const line = this.add
+      .line(0, 0, enemy.x, enemy.y, enemy.x + direction.x * length, enemy.y + direction.y * length, BOSS_PATTERN_COLOR, 0.75)
+      .setOrigin(0, 0)
+      .setLineWidth(5)
+      .setDepth(4);
+    floatingText(this, enemy.x, enemy.y - ENEMY_STATS.boss.radius - 18, '돌진 예고', '#ffd166');
+    this.tweens.add({ targets: line, alpha: 0, duration: 740, ease: 'Quad.easeIn', onComplete: () => line.destroy() });
+  }
+
+  private summonBossAdds(enemy: Enemy, count: number): void {
+    ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: 24, to: ENEMY_STATS.boss.radius * 2.4, duration: 360, width: 4 });
+    floatingText(this, enemy.x, enemy.y - ENEMY_STATS.boss.radius - 18, '사냥개 소환', '#ffd166');
+
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count;
+      const distance = ENEMY_STATS.boss.radius + 70;
+      const radius = ENEMY_STATS.chaser.radius;
+      const x = Phaser.Math.Clamp(enemy.x + Math.cos(angle) * distance, this.bounds.minX + radius, this.bounds.maxX - radius);
+      const y = Phaser.Math.Clamp(enemy.y + Math.sin(angle) * distance, this.bounds.minY + radius, this.bounds.maxY - radius);
+      this.enemies.push(this.createEnemyEntity('chaser', x, y));
     }
   }
 
@@ -1045,6 +1102,7 @@ export class PlayScene extends Phaser.Scene {
 
     entity.view.setPosition(enemy.x, enemy.y);
     entity.view.setAlpha(isStunned(enemy) ? 0.5 : 1);
+    entity.view.setFillStyle(this.enemyFillColor(enemy));
     entity.hpBar.setPosition(enemy.x, enemy.y - radius - 9);
 
     for (const [index, kind] of STATUS_ORDER.entries()) {
@@ -1052,6 +1110,12 @@ export class PlayScene extends Phaser.Scene {
       dot.setVisible(hasStatus(enemy, kind));
       dot.setPosition(enemy.x + (index - 1.5) * 9, enemy.y - radius - 16);
     }
+  }
+
+  private enemyFillColor(enemy: Enemy): number {
+    if (enemy.boss?.phase === 'telegraph') return BOSS_PATTERN_COLOR;
+    if (enemy.boss?.phase === 'charging') return 0xff6b3d;
+    return ENEMY_STATS[enemy.kind].color;
   }
 
   private updateAreas(dt: number): void {
@@ -1456,13 +1520,15 @@ export class PlayScene extends Phaser.Scene {
     );
 
     const unlocked = this.run.progress.unlockedWeapons.map((id) => weaponOf(id).name).join(' / ');
+    const reward = ROOMS[this.run.roomIndex]?.reward;
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 270, [`획득: 활 / 방패`, `보유 무기: ${unlocked}`, `R키 무기 교체 기능 해금`].join('\n'), {
+        .text((VIEW_WIDTH / 2), 270, [...this.rewardLines(reward), `보유 무기: ${unlocked}`, `R키 무기 교체 기능 해금`].join('\n'), {
           fontSize: '22px',
           color: COLORS.text,
           align: 'center',
           lineSpacing: 14,
+          wordWrap: { width: VIEW_WIDTH - 180 },
         })
         .setOrigin(0.5),
     );
@@ -1526,6 +1592,7 @@ export class PlayScene extends Phaser.Scene {
     );
 
     const hands = describeByHand(this.run.loadout);
+    const reward = won ? ROOMS[this.run.roomIndex]?.reward : undefined;
     container.add(
       this.add
         .text(
@@ -1535,8 +1602,9 @@ export class PlayScene extends Phaser.Scene {
             this.right ? `${this.left.weapon.name} + ${this.right.weapon.name}` : `${this.left.weapon.name}`,
             `처치 ${this.run.kills}   시간 ${this.run.elapsed.toFixed(1)}초`,
             hands.map((h) => `${h.hand} ${h.weapon}` + (h.lines.length ? ` — ${h.lines.join(', ')}` : '')).join('\n'),
+            ...this.rewardLines(reward, '이번 판에서 얻은 것'),
           ].join('\n'),
-          { fontSize: '16px', color: COLORS.text, align: 'center', lineSpacing: 8 },
+          { fontSize: '16px', color: COLORS.text, align: 'center', lineSpacing: 8, wordWrap: { width: VIEW_WIDTH - 180 } },
         )
         .setOrigin(0.5),
     );
@@ -1544,5 +1612,24 @@ export class PlayScene extends Phaser.Scene {
       this.add.text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 다시 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
     );
     this.overlay = container;
+  }
+
+  private rewardLines(reward: RoomReward | undefined, title = '획득'): string[] {
+    if (!reward) return [];
+
+    const lines: string[] = [title];
+    const weapons = reward.weapons?.map((id) => weaponOf(id).name) ?? [];
+    if (weapons.length) lines.push(`무기: ${weapons.join(' / ')}`);
+
+    const comboSkills = reward.comboSkills?.map((id) => findSkill(id)?.name ?? id) ?? [];
+    if (comboSkills.length) lines.push(`콤보스킬: ${comboSkills.join(' / ')}`);
+
+    const supports = reward.supports?.flatMap((id) => {
+      const support = findSupport(id);
+      return support ? [support.name] : [];
+    }) ?? [];
+    if (supports.length) lines.push(`보조형: ${supports.join(' / ')}`);
+
+    return lines.length > 1 ? lines : [];
   }
 }

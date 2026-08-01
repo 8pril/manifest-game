@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   createEnemy,
+  advanceBossPattern,
+  bossContactDamage,
+  bossMoveDirection,
+  bossMoveSpeed,
   desiredDirection,
   readyToFire,
   markFired,
@@ -8,6 +12,11 @@ import {
   resetEnemyIds,
   ENEMY_STATS,
   HINDER_SPEED_FACTOR,
+  BOSS_CHARGE_COOLDOWN,
+  BOSS_CHARGE_TELEGRAPH,
+  BOSS_CHARGE_DURATION,
+  BOSS_CHARGE_SPEED,
+  BOSS_SUMMON_COUNT,
 } from '@/game/enemy';
 import { beforeEach } from 'vitest';
 
@@ -107,5 +116,42 @@ describe('적 구성', () => {
     // 추적형만 있으면 플레이어가 계속 도망치는 것만으로 무적이 된다.
     const ranged = Object.values(ENEMY_STATS).filter((s) => s.behavior === 'ranged');
     expect(ranged.length).toBeGreaterThan(0);
+  });
+});
+
+describe('boss patterns', () => {
+  it('보스는 돌진 예고 뒤 돌진하고 다시 대기한다', () => {
+    const boss = createEnemy('boss', 100, 0);
+
+    const telegraph = advanceBossPattern(boss, player, BOSS_CHARGE_COOLDOWN);
+    expect(telegraph).toEqual([{ kind: 'chargeTelegraph', direction: { x: -1, y: 0 } }]);
+    expect(boss.boss?.phase).toBe('telegraph');
+    expect(bossMoveDirection(boss, player)).toBeNull();
+
+    const charge = advanceBossPattern(boss, player, BOSS_CHARGE_TELEGRAPH);
+    expect(charge).toEqual([{ kind: 'chargeStart', direction: { x: -1, y: 0 } }]);
+    expect(boss.boss?.phase).toBe('charging');
+    expect(bossMoveDirection(boss, player)).toEqual({ x: -1, y: 0 });
+    expect(bossMoveSpeed(boss)).toBe(BOSS_CHARGE_SPEED);
+    expect(bossContactDamage(boss)).toBeGreaterThan(ENEMY_STATS.boss.contactDamage);
+
+    advanceBossPattern(boss, player, BOSS_CHARGE_DURATION);
+    expect(boss.boss?.phase).toBe('idle');
+  });
+
+  it('체력 구간마다 사냥개 소환 이벤트를 한 번만 낸다', () => {
+    const boss = createEnemy('boss', 0, 0);
+    boss.hp = boss.maxHp * 0.69;
+
+    expect(advanceBossPattern(boss, player, 0)).toEqual([{ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold: 0.7 }]);
+    expect(advanceBossPattern(boss, player, 0)).toEqual([]);
+
+    boss.hp = boss.maxHp * 0.39;
+    expect(advanceBossPattern(boss, player, 0)).toEqual([{ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold: 0.4 }]);
+  });
+
+  it('일반 적은 보스 패턴 이벤트를 내지 않는다', () => {
+    const chaser = createEnemy('chaser', 0, 0);
+    expect(advanceBossPattern(chaser, player, 99)).toEqual([]);
   });
 });

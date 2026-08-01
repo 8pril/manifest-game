@@ -106,7 +106,33 @@ export interface Enemy extends StatusHost {
   sinceAttack: number;
   /** 지대의 이동 방해가 걸린 동안 감속된다. */
   hindered: boolean;
+  /** 보스 전용 패턴 상태. 일반 적은 없다. */
+  boss?: BossState;
 }
+
+export type BossPhase = 'idle' | 'telegraph' | 'charging';
+
+export interface BossState {
+  phase: BossPhase;
+  chargeCooldown: number;
+  telegraphRemaining: number;
+  chargeRemaining: number;
+  chargeDirection: Vec2;
+  summonedAt: readonly number[];
+}
+
+export type BossEvent =
+  | { kind: 'chargeTelegraph'; direction: Vec2 }
+  | { kind: 'chargeStart'; direction: Vec2 }
+  | { kind: 'summon'; count: number; threshold: number };
+
+export const BOSS_CHARGE_COOLDOWN = 4.2;
+export const BOSS_CHARGE_TELEGRAPH = 0.75;
+export const BOSS_CHARGE_DURATION = 0.45;
+export const BOSS_CHARGE_SPEED = 520;
+export const BOSS_CHARGE_DAMAGE_MULTIPLIER = 1.6;
+export const BOSS_SUMMON_THRESHOLDS = [0.7, 0.4] as const;
+export const BOSS_SUMMON_COUNT = 4;
 
 let nextId = 1;
 export function resetEnemyIds(): void {
@@ -126,6 +152,18 @@ export function createEnemy(kind: EnemyKind, x: number, y: number): Enemy {
     sinceContact: stats.contactCooldown,
     sinceAttack: 0,
     hindered: false,
+    boss: kind === 'boss' ? createBossState() : undefined,
+  };
+}
+
+function createBossState(): BossState {
+  return {
+    phase: 'idle',
+    chargeCooldown: BOSS_CHARGE_COOLDOWN,
+    telegraphRemaining: 0,
+    chargeRemaining: 0,
+    chargeDirection: { x: 1, y: 0 },
+    summonedAt: [],
   };
 }
 
@@ -189,4 +227,70 @@ export function readyToFire(enemy: Enemy): boolean {
 
 export function markFired(enemy: Enemy): void {
   enemy.sinceAttack = 0;
+}
+
+export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: number): BossEvent[] {
+  if (!enemy.boss) return [];
+
+  const events: BossEvent[] = [];
+  const boss = enemy.boss;
+
+  const hpRatio = enemy.maxHp > 0 ? enemy.hp / enemy.maxHp : 0;
+  for (const threshold of BOSS_SUMMON_THRESHOLDS) {
+    if (hpRatio <= threshold && !boss.summonedAt.includes(threshold)) {
+      boss.summonedAt = [...boss.summonedAt, threshold];
+      events.push({ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold });
+    }
+  }
+
+  if (boss.phase === 'charging') {
+    boss.chargeRemaining -= deltaSeconds;
+    if (boss.chargeRemaining <= 0) {
+      boss.phase = 'idle';
+      boss.chargeCooldown = BOSS_CHARGE_COOLDOWN;
+    }
+    return events;
+  }
+
+  if (boss.phase === 'telegraph') {
+    boss.telegraphRemaining -= deltaSeconds;
+    if (boss.telegraphRemaining <= 0) {
+      boss.phase = 'charging';
+      boss.chargeRemaining = BOSS_CHARGE_DURATION;
+      events.push({ kind: 'chargeStart', direction: boss.chargeDirection });
+    }
+    return events;
+  }
+
+  boss.chargeCooldown -= deltaSeconds;
+  if (boss.chargeCooldown <= 0) {
+    boss.phase = 'telegraph';
+    boss.telegraphRemaining = BOSS_CHARGE_TELEGRAPH;
+    boss.chargeDirection = directionTo(enemy, target);
+    events.push({ kind: 'chargeTelegraph', direction: boss.chargeDirection });
+  }
+
+  return events;
+}
+
+export function bossMoveDirection(enemy: Enemy, target: Vec2): Vec2 | null {
+  if (enemy.boss?.phase === 'telegraph') return null;
+  if (enemy.boss?.phase === 'charging') return enemy.boss.chargeDirection;
+  return desiredDirection(enemy, target);
+}
+
+export function bossMoveSpeed(enemy: Enemy): number {
+  return enemy.boss?.phase === 'charging' ? BOSS_CHARGE_SPEED : enemySpeed(enemy);
+}
+
+export function bossContactDamage(enemy: Enemy): number {
+  const base = ENEMY_STATS[enemy.kind].contactDamage;
+  return enemy.boss?.phase === 'charging' ? base * BOSS_CHARGE_DAMAGE_MULTIPLIER : base;
+}
+
+function directionTo(enemy: Enemy, target: Vec2): Vec2 {
+  const dx = target.x - enemy.x;
+  const dy = target.y - enemy.y;
+  const distance = Math.hypot(dx, dy);
+  return distance === 0 ? { x: 1, y: 0 } : { x: dx / distance, y: dy / distance };
 }

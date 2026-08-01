@@ -1,6 +1,12 @@
 import type { EnemyKind } from '@/game/enemy';
 import type { WeaponId } from '@/data/weapons';
 
+export interface RoomReward {
+  weapons?: readonly WeaponId[];
+  comboSkills?: readonly string[];
+  supports?: readonly string[];
+}
+
 /**
  * 방 구성.
  *
@@ -17,8 +23,8 @@ export interface RoomDef {
   spawns: { kind: EnemyKind; count: number }[];
   /** 이 방을 정리하면 마을로 들어가는지. 첫 보스 뒤 해금 연출에 쓴다. */
   entersTown?: boolean;
-  /** 이 방을 정리할 때 확정 해금되는 무기. */
-  unlocksWeapons?: readonly WeaponId[];
+  /** 이 방을 정리할 때 보유 목록에 들어가는 확정 보상. */
+  reward?: RoomReward;
   /** 방의 크기. 화면(1280×720)보다 크면 카메라가 플레이어를 따라간다. */
   width: number;
   height: number;
@@ -44,7 +50,10 @@ export const ROOMS: readonly RoomDef[] = [
       { kind: 'chaser', count: 16 },
     ],
     entersTown: true,
-    unlocksWeapons: ['bow', 'shield'],
+    reward: {
+      weapons: ['bow', 'shield'],
+      supports: ['earthquake', 'lasting-composure', 'multiple-projectiles', 'fork', 'dragging-ground'],
+    },
     width: 2000,
     height: 1250,
   },
@@ -75,7 +84,7 @@ export const ROOMS: readonly RoomDef[] = [
     // 기획 의도가 "잡몹을 썰면서 나아간 다음 **여러 보스**를 잡아 아이템을 얻는 것"이고
     // "보스는 한 종류로 하면 절대 안 된다"였다. 한 판에 보스를 두 번 만난다.
     //  - 첫 문지기: 해금의 순간. 활/방패를 주고 마을로 보낸다
-    //  - 여기: 마무리의 순간. 영구 성장 드랍을 준다 (드랍은 아직 미구현)
+    //  - 여기: 마무리의 순간. 영구 성장 드랍을 준다
     //
     // 잡몹 정리로 판이 끝나면 핵앤슬래시의 마무리가 서지 않는다.
     label: '무너진 문',
@@ -85,6 +94,10 @@ export const ROOMS: readonly RoomDef[] = [
       { kind: 'archer', count: 4 },
       { kind: 'brute', count: 2 },
     ],
+    reward: {
+      weapons: ['arcane'],
+      supports: ['chain', 'crackling-ground'],
+    },
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
   },

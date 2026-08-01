@@ -55,6 +55,14 @@ describe('clearRoom', () => {
     expect(town.phase).toBe('town');
     expect(town.roomIndex).toBe(1);
     expect(town.progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
+    expect(town.progress.ownedComboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
+    expect(town.progress.ownedSupports).toEqual([
+      'earthquake',
+      'lasting-composure',
+      'multiple-projectiles',
+      'fork',
+      'dragging-ground',
+    ]);
     expect(town.progress.weaponSwitchUnlocked).toBe(true);
     expect(town.progress.wheel.left).toEqual(['sword', 'shield']);
     expect(town.progress.wheel.right).toEqual(['bow', null]);
@@ -65,6 +73,23 @@ describe('clearRoom', () => {
   it('마지막 웨이브를 정리하면 승리한다', () => {
     const run = clearRoom(advanceWaves(TOTAL_ROOMS - 1));
     expect(run.phase).toBe('won');
+  });
+
+  it('마지막 보스 보상은 승리 상태의 보유 목록에 남는다', () => {
+    const run = clearRoom(advanceWaves(TOTAL_ROOMS - 1));
+
+    expect(run.phase).toBe('won');
+    expect(run.progress.unlockedWeapons).toContain('arcane');
+    expect(run.progress.ownedComboSkills).toContain('arcane-daggers');
+    expect(run.progress.ownedSupports).toEqual([
+      'earthquake',
+      'lasting-composure',
+      'multiple-projectiles',
+      'fork',
+      'dragging-ground',
+      'chain',
+      'crackling-ground',
+    ]);
   });
 
   it('전투 중이 아니면 아무 일도 하지 않는다', () => {

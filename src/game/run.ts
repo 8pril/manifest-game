@@ -1,10 +1,11 @@
-import { roomAt, TOTAL_ROOMS } from '@/game/rooms';
+import { roomAt, TOTAL_ROOMS, type RoomReward } from '@/game/rooms';
 import { loadoutFromProgress, type Loadout } from '@/game/loadout';
 import type { WeaponId } from '@/data/weapons';
 import {
   configureManifestation,
   createInitialProgress,
   setWheelSlot,
+  unlockComboSkills,
   unlockSupports,
   unlockWeapons,
   unlockWeaponSwitch,
@@ -85,29 +86,33 @@ export function clearRoom(run: RunState): RunState {
   if (run.phase !== 'combat') return run;
 
   const room = roomAt(run.roomIndex);
+  const rewarded = applyRoomReward(run.progress, room?.reward);
   const isLastRoom = run.roomIndex >= TOTAL_ROOMS - 1;
   if (isLastRoom) {
-    return { ...run, phase: 'won' };
+    return { ...run, phase: 'won', progress: rewarded, loadout: loadoutFromProgress(rewarded, run.loadout) };
   }
   if (room?.entersTown) {
-    let progress = unlockWeaponSwitch(unlockWeapons(run.progress, room.unlocksWeapons ?? []));
+    let progress = unlockWeaponSwitch(rewarded);
     progress = configureDefaultTownLoadout(progress);
     progress = setWheelSlot(progress, 'left', 0, progress.active.left);
     progress = setWheelSlot(progress, 'left', 1, progress.unlockedWeapons.includes('shield') ? 'shield' : null);
     progress = setWheelSlot(progress, 'right', 0, progress.unlockedWeapons.includes('bow') ? 'bow' : null);
     return { ...run, phase: 'town', progress, loadout: loadoutFromProgress(progress, run.loadout) };
   }
-  return { ...run, roomIndex: run.roomIndex + 1 };
+  return { ...run, roomIndex: run.roomIndex + 1, progress: rewarded, loadout: loadoutFromProgress(rewarded, run.loadout) };
+}
+
+function applyRoomReward(progress: PlayerProgress, reward?: RoomReward): PlayerProgress {
+  if (!reward) return progress;
+  let next = progress;
+  if (reward.weapons?.length) next = unlockWeapons(next, reward.weapons);
+  if (reward.comboSkills?.length) next = unlockComboSkills(next, reward.comboSkills);
+  if (reward.supports?.length) next = unlockSupports(next, reward.supports);
+  return next;
 }
 
 function configureDefaultTownLoadout(progress: PlayerProgress): PlayerProgress {
-  let next = unlockSupports(progress, [
-    'earthquake',
-    'lasting-composure',
-    'multiple-projectiles',
-    'fork',
-    'dragging-ground',
-  ]);
+  let next = progress;
   if (next.unlockedWeapons.includes('sword')) {
     next = configureManifestation(next, 'sword', { primarySupportId: 'earthquake', synergySupportId: 'lasting-composure' });
   }
