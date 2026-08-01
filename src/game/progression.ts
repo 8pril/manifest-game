@@ -149,6 +149,17 @@ export function equipFromWheel(progress: PlayerProgress, hand: Hand, index: 0 | 
   };
 }
 
+export function equipFirstWheelSlots(progress: PlayerProgress): PlayerProgress {
+  if (!progress.weaponSwitchUnlocked) return progress;
+  const left = firstAvailableWheelSlot(progress, 'left') ?? progress.active.left;
+  const right = firstAvailableWheelSlot(progress, 'right');
+
+  return {
+    ...progress,
+    active: { left, right },
+  };
+}
+
 export function configureManifestation(
   progress: PlayerProgress,
   weapon: WeaponId,
@@ -211,6 +222,10 @@ function canUseSupportInSlot(progress: PlayerProgress, supportId: string, slot: 
   if (!hasSupport(progress, supportId)) return false;
   const support = findSupport(supportId);
   return support !== undefined && supportSlotType(support) === slot;
+}
+
+function firstAvailableWheelSlot(progress: PlayerProgress, hand: Hand): WeaponId | null {
+  return progress.wheel[hand].find((weapon): weapon is WeaponId => Boolean(weapon && hasWeapon(progress, weapon))) ?? null;
 }
 
 function orderedComboSkillIds(existing: readonly string[], added: readonly string[]): readonly string[] {

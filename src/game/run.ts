@@ -3,6 +3,7 @@ import { loadoutFromProgress, type Loadout } from '@/game/loadout';
 import type { WeaponId } from '@/data/weapons';
 import {
   createInitialProgress,
+  equipFirstWheelSlots,
   setWheelSlot,
   unlockComboSkills,
   unlockSupports,
@@ -58,8 +59,8 @@ export interface RunState {
   elapsed: number;
 }
 
-export function createRun(left: WeaponId, right: WeaponId | null): RunState {
-  const progress = {
+export function createRun(left: WeaponId, right: WeaponId | null, savedProgress?: PlayerProgress): RunState {
+  const progress = savedProgress ?? {
     ...unlockWeapons(createInitialProgress(), right ? [left, right] : [left]),
     active: { left, right },
   };
@@ -112,10 +113,13 @@ function applyRoomReward(progress: PlayerProgress, reward?: RoomReward): PlayerP
 /** 마을을 나와 다음 전투 방으로 이동한다. */
 export function leaveTown(run: RunState): RunState {
   if (run.phase !== 'town') return run;
+  const progress = equipFirstWheelSlots(run.progress);
   return {
     ...run,
     phase: 'combat',
     roomIndex: run.roomIndex + 1,
+    progress,
+    loadout: loadoutFromProgress(progress, run.loadout),
   };
 }
 

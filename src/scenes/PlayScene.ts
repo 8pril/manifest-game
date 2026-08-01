@@ -75,6 +75,7 @@ import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_RE
 import { createRun, clearRoom, leaveTown, damagePlayer, addKill, advanceTime, isOver, type RunState } from '@/game/run';
 import { configureManifestation, createInitialProgress, equipFromWheel, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
+import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
 
 const MOVE_SPEED = 300;
 const DASH_SPEED = 900;
@@ -164,7 +165,7 @@ export class PlayScene extends Phaser.Scene {
   private overlay: Phaser.GameObjects.Container | null = null;
   private weaponWheel: WeaponWheelMenu | null = null;
 
-  private keys!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
+  private keys!: Record<'up' | 'down' | 'left' | 'right' | 'shift', Phaser.Input.Keyboard.Key>;
   private dashUntil = 0;
   private dashReadyAt = 0;
   private dashAngle = 0;
@@ -198,6 +199,7 @@ export class PlayScene extends Phaser.Scene {
     text: Phaser.GameObjects.Text;
   }[] = [];
   private startRoomIndex = 0;
+  private initialProgress: PlayerProgress | null = null;
 
   constructor() {
     super('Play');
@@ -205,8 +207,9 @@ export class PlayScene extends Phaser.Scene {
 
   init(data: { left?: WeaponId; right?: WeaponId | null; progress?: PlayerProgress }): void {
     // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
-    const progress = data?.progress ?? createInitialProgress();
     const debugStart = parseDebugStart(location.search, TOTAL_ROOMS);
+    const progress = data?.progress ?? (debugStart.left || debugStart.right || debugStart.roomIndex !== undefined ? null : loadProgress()) ?? createInitialProgress();
+    this.initialProgress = progress;
     this.weapons = {
       left: debugStart.left ?? data?.left ?? progress.active.left,
       right: debugStart.right ?? data?.right ?? progress.active.right,
@@ -228,7 +231,7 @@ export class PlayScene extends Phaser.Scene {
     this.overlay = null;
     this.arcaneFlowUntil = 0;
 
-    this.run = { ...createRun(this.weapons.left, this.weapons.right), roomIndex: this.startRoomIndex };
+    this.run = { ...createRun(this.weapons.left, this.weapons.right, this.initialProgress ?? undefined), roomIndex: this.startRoomIndex };
     this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
     const right = rightWeapon(this.run.loadout);
     this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0 } : null;
@@ -265,6 +268,7 @@ export class PlayScene extends Phaser.Scene {
       down: keyboard.addKey(KeyCodes.S),
       left: keyboard.addKey(KeyCodes.A),
       right: keyboard.addKey(KeyCodes.D),
+      shift: keyboard.addKey(KeyCodes.SHIFT),
     };
 
     keyboard.on('keydown-SPACE', () => this.tryDash());
@@ -272,12 +276,15 @@ export class PlayScene extends Phaser.Scene {
       // 판이 끝났으면 다시 시작. 이 분기가 없으면 죽은 뒤 새로고침 말고는
       // 빠져나갈 방법이 없다. 결과 화면이 R을 안내하는데 아무 반응이 없었다.
       if (isOver(this.run)) {
+        if (this.keys.shift.isDown) clearSavedProgress();
         this.scene.start('Play');
         return;
       }
       if (this.run.phase === 'town') {
         this.closeOverlay();
         this.run = leaveTown(this.run);
+        this.saveCurrentProgress();
+        this.syncWeaponRuntimes();
         this.enterRoom();
         return;
       }
@@ -757,6 +764,7 @@ export class PlayScene extends Phaser.Scene {
     const room = ROOMS[this.run.roomIndex];
     if (room?.entersTown) {
       this.run = clearRoom(this.run);
+      this.saveCurrentProgress();
       this.showTown();
       if (DEBUG_ENABLED) this.publishDebug();
       return;
@@ -764,6 +772,7 @@ export class PlayScene extends Phaser.Scene {
 
     if (this.run.roomIndex >= TOTAL_ROOMS - 1) {
       this.run = clearRoom(this.run);
+      this.saveCurrentProgress();
       this.showResult(true);
       if (DEBUG_ENABLED) this.publishDebug();
       return;
@@ -783,6 +792,7 @@ export class PlayScene extends Phaser.Scene {
 
     this.exitOpen = false;
     this.run = clearRoom(this.run);
+    this.saveCurrentProgress();
 
     if (this.run.phase === 'town') this.showTown();
     else this.enterRoom();
@@ -1597,6 +1607,7 @@ export class PlayScene extends Phaser.Scene {
       progress,
       loadout: loadoutFromProgress(progress, this.run.loadout),
     };
+    this.saveCurrentProgress();
     this.syncWeaponRuntimes();
     this.refreshHud();
   }
@@ -1770,6 +1781,7 @@ export class PlayScene extends Phaser.Scene {
       progress,
       loadout: loadoutFromProgress(progress, this.run.loadout),
     };
+    this.saveCurrentProgress();
     this.refreshHud();
     this.closeOverlay();
     this.showTown();
@@ -1813,9 +1825,14 @@ export class PlayScene extends Phaser.Scene {
       progress,
       loadout: loadoutFromProgress(progress, this.run.loadout),
     };
+    this.saveCurrentProgress();
     this.refreshHud();
     this.closeOverlay();
     this.showTown();
+  }
+
+  private saveCurrentProgress(): void {
+    saveProgress(this.run.progress);
   }
 
   /**
@@ -1871,7 +1888,14 @@ export class PlayScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
     container.add(
-      this.add.text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 다시 시작', { fontSize: '18px', color: COLORS.textDim }).setOrigin(0.5),
+      this.add
+        .text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 다시 시작\nShift+R 기록 지우고 처음부터', {
+          fontSize: '18px',
+          color: COLORS.textDim,
+          align: 'center',
+          lineSpacing: 8,
+        })
+        .setOrigin(0.5),
     );
     this.overlay = container;
   }

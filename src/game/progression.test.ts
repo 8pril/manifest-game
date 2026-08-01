@@ -4,6 +4,7 @@ import {
   configuredSupports,
   createInitialProgress,
   equipFromWheel,
+  equipFirstWheelSlots,
   hasComboSkill,
   hasSupport,
   hasWeapon,
@@ -93,6 +94,16 @@ describe('weapon wheel', () => {
 
     expect(equipFromWheel(progress, 'left', 1).active.left).toBe('shield');
     expect(equipFromWheel(progress, 'right', 0).active.right).toBe('bow');
+  });
+
+  it('마을을 나갈 때 쓸 첫 번째 좌우 후보를 active로 반영한다', () => {
+    let progress = createInitialProgress();
+    progress = unlockWeapons(progress, ['bow', 'shield']);
+    progress = setWheelSlot(progress, 'left', 0, 'shield');
+    progress = setWheelSlot(progress, 'right', 0, 'bow');
+    progress = unlockWeaponSwitch(progress);
+
+    expect(equipFirstWheelSlots(progress).active).toEqual({ left: 'shield', right: 'bow' });
   });
 });
 

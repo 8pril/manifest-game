@@ -13,6 +13,7 @@ import {
 } from '@/game/run';
 import { TOTAL_ROOMS } from '@/game/rooms';
 import { totalSupports, supportsFor } from '@/game/loadout';
+import { createInitialProgress, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
 
 const newRun = () => createRun('sword', 'bow');
 
@@ -38,6 +39,18 @@ describe('createRun', () => {
   it('활성 무기를 진행 상태의 보유 무기로 기록한다', () => {
     const run = newRun();
     expect(run.progress.unlockedWeapons).toEqual(['sword', 'bow']);
+  });
+
+  it('저장된 진행 상태가 있으면 그 active와 보유 목록으로 시작한다', () => {
+    const progress = {
+      ...unlockWeaponSwitch(unlockWeapons(createInitialProgress(), ['bow', 'shield'])),
+      active: { left: 'shield' as const, right: 'bow' as const },
+    };
+    const run = createRun('sword', null, progress);
+
+    expect(run.progress).toBe(progress);
+    expect(run.loadout.left).toBe('shield');
+    expect(run.loadout.right).toBe('bow');
   });
 });
 
@@ -108,6 +121,9 @@ describe('leaveTown', () => {
 
     expect(next.phase).toBe('combat');
     expect(next.roomIndex).toBe(2);
+    expect(next.progress.active).toEqual({ left: 'sword', right: 'bow' });
+    expect(next.loadout.left).toBe('sword');
+    expect(next.loadout.right).toBe('bow');
   });
 
   it('마을이 아니면 아무 일도 하지 않는다', () => {
