@@ -52,6 +52,7 @@ export const ROOMS: readonly RoomDef[] = [
     entersTown: true,
     reward: {
       weapons: ['bow', 'shield'],
+      comboSkills: ['annihilation', 'volley', 'fracture-wave'],
       supports: [
         'earthquake',
         'wound-resonance',
@@ -103,6 +104,7 @@ export const ROOMS: readonly RoomDef[] = [
     ],
     reward: {
       weapons: ['arcane'],
+      comboSkills: ['arcane-daggers'],
       supports: ['chain', 'crackling-ground'],
     },
     width: ROOM_WIDTH,

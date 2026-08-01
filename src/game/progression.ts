@@ -45,7 +45,7 @@ export interface PlayerProgress {
 export function createInitialProgress(): PlayerProgress {
   return {
     unlockedWeapons: ['sword'],
-    ownedComboSkills: [weaponOf('sword').combo.id],
+    ownedComboSkills: [],
     ownedSupports: [],
     weaponSwitchUnlocked: false,
     active: { left: 'sword', right: null },
@@ -89,7 +89,6 @@ export function unlockWeapons(progress: PlayerProgress, weapons: readonly Weapon
   return {
     ...progress,
     unlockedWeapons: WEAPON_IDS.filter((weapon) => unlocked.has(weapon)),
-    ownedComboSkills: orderedComboSkillIds(progress.ownedComboSkills, [...unlocked].map((weapon) => weaponOf(weapon).combo.id)),
   };
 }
 

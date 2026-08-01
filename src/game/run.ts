@@ -112,7 +112,7 @@ export function clearRoom(run: RunState): RunState {
 
   const room = roomAt(run.roomIndex);
   // 적용 전 상태와 비교해야 실제로 늘어난 것을 알 수 있다. 순서를 바꾸면 안 된다.
-  const gained = newPartsOfReward(run.progress, room?.reward);
+  const gained = newPartsOfReward(run.progress, room?.reward) ?? (room?.reward ? run.gained : undefined);
   const rewarded = applyRoomReward(run.progress, room?.reward);
   const isLastRoom = run.roomIndex >= TOTAL_ROOMS - 1;
   if (isLastRoom) {
@@ -136,6 +136,19 @@ export function clearRoom(run: RunState): RunState {
     ...run,
     roomIndex: run.roomIndex + 1,
     shieldEnergy: SHIELD_ENERGY_MAX,
+    progress: rewarded,
+    loadout: loadoutFromProgress(rewarded, run.loadout),
+    gained,
+  };
+}
+
+/** 전투 방 안에서 바닥 드랍을 주웠을 때 보상만 먼저 적용한다. */
+export function collectRoomReward(run: RunState, reward?: RoomReward): RunState {
+  if (run.phase !== 'combat') return run;
+  const gained = newPartsOfReward(run.progress, reward);
+  const rewarded = applyRoomReward(run.progress, reward);
+  return {
+    ...run,
     progress: rewarded,
     loadout: loadoutFromProgress(rewarded, run.loadout),
     gained,

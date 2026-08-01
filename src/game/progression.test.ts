@@ -19,7 +19,7 @@ describe('createInitialProgress', () => {
     const progress = createInitialProgress();
 
     expect(progress.unlockedWeapons).toEqual(['sword']);
-    expect(progress.ownedComboSkills).toEqual(['annihilation']);
+    expect(progress.ownedComboSkills).toEqual([]);
     expect(progress.ownedSupports).toEqual([]);
     expect(progress.weaponSwitchUnlocked).toBe(false);
     expect(progress.active).toEqual({ left: 'sword', right: null });
@@ -44,9 +44,9 @@ describe('weapon unlocks', () => {
     const progress = unlockWeapons(createInitialProgress(), ['bow', 'shield']);
 
     expect(progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
-    expect(progress.ownedComboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
+    expect(progress.ownedComboSkills).toEqual([]);
     expect(hasWeapon(progress, 'bow')).toBe(true);
-    expect(hasComboSkill(progress, 'volley')).toBe(true);
+    expect(hasComboSkill(progress, 'volley')).toBe(false);
     expect(hasWeapon(progress, 'arcane')).toBe(false);
   });
 
@@ -54,7 +54,7 @@ describe('weapon unlocks', () => {
     const progress = unlockWeapons(createInitialProgress(), ['shield', 'bow']);
 
     expect(progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
-    expect(progress.ownedComboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
+    expect(progress.ownedComboSkills).toEqual([]);
   });
 });
 

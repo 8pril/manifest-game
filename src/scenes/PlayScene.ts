@@ -76,6 +76,7 @@ import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_RE
 import {
   createRun,
   clearRoom,
+  collectRoomReward,
   leaveTown,
   damagePlayer as applyPlayerDamage,
   addKill,
@@ -86,7 +87,7 @@ import {
   SHIELD_ENERGY_MAX,
   type RunState,
 } from '@/game/run';
-import { configureManifestation, createInitialProgress, equipFromWheel, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
+import { configureManifestation, createInitialProgress, equipFromWheel, hasComboSkill, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
@@ -115,6 +116,10 @@ const BOSS_PATTERN_COLOR = 0xffd166;
 const WHEEL_OPEN_MS = 150;
 const WHEEL_RADIUS = 122;
 const WHEEL_INNER_RADIUS = 24;
+const REWARD_PICKUP_RADIUS = 78;
+const TOWN_WIDTH = 1600;
+const TOWN_HEIGHT = 900;
+const TOWN_NPC_RADIUS = 92;
 /** 방패 스윙 중에는 보스 CC가 안 통해도 버티는 역할을 갖는다. */
 const SHIELD_GUARD_DAMAGE_TAKEN = 0.45;
 
@@ -165,6 +170,23 @@ interface ComboBadge {
   pips: Phaser.GameObjects.Rectangle[];
 }
 
+interface RewardDrop {
+  reward: RoomReward;
+  x: number;
+  y: number;
+  collected: boolean;
+  marker: Phaser.GameObjects.Rectangle;
+  glow: Phaser.GameObjects.Arc;
+  prompt: Phaser.GameObjects.Text;
+}
+
+interface TownNpc {
+  x: number;
+  y: number;
+  body: Phaser.GameObjects.Rectangle;
+  prompt: Phaser.GameObjects.Text;
+}
+
 /** 한 판의 전투 화면. 진행 규칙과 승패 판정은 game/run.ts가 갖는다. */
 export class PlayScene extends Phaser.Scene {
   private run!: RunState;
@@ -191,6 +213,8 @@ export class PlayScene extends Phaser.Scene {
   private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
   private transientOverlays: Phaser.GameObjects.GameObject[] = [];
+  private rewardDrop: RewardDrop | null = null;
+  private townNpc: TownNpc | null = null;
   private weaponWheel: WeaponWheelMenu | null = null;
   /**
    * 일시정지 여부.
@@ -278,6 +302,7 @@ export class PlayScene extends Phaser.Scene {
     this.areas = [];
     this.overlay = null;
     this.transientOverlays = [];
+    this.rewardDrop = null;
     this.resultScheduled = false;
     this.arcaneFlowUntil = 0;
     this.shieldGuardUntil = 0;
@@ -333,19 +358,19 @@ export class PlayScene extends Phaser.Scene {
         return;
       }
       if (this.run.phase === 'town') {
-        this.closeOverlay();
-        this.run = leaveTown(this.run);
-        this.saveCurrentProgress();
-        this.syncWeaponRuntimes();
-        this.enterRoom();
+        if (this.overlay) this.closeOverlay();
         return;
       }
       if (this.run.phase !== 'combat') return;
-      if (!this.run.progress.weaponSwitchUnlocked) {
+      if (!this.run.progress.weaponSwitchUnlocked || this.run.roomIndex === 0) {
         floatingText(this, this.player.x, this.player.y - 28, '아직 잠겨 있다', COLORS.textDim);
         return;
       }
       this.openWeaponWheel();
+    });
+    keyboard.on('keydown-F', () => {
+      if (this.tryCollectRewardDrop()) return;
+      this.tryTalkTownNpc();
     });
     keyboard.on('keyup-R', () => {
       if (this.weaponWheel) this.closeWeaponWheel(true);
@@ -427,7 +452,7 @@ export class PlayScene extends Phaser.Scene {
   private useWeapon(runtime: WeaponRuntime, angle = this.aimAngle()): void {
     if (this.time.now < runtime.readyAt) return;
 
-    if (isComboReady(runtime.combo)) {
+    if (this.canUseComboSkill(runtime)) {
       runtime.readyAt = this.time.now + awakenedAttackInterval(runtime.weapon);
       this.useSkill(runtime, runtime.weapon.combo, angle, false);
     } else {
@@ -435,6 +460,10 @@ export class PlayScene extends Phaser.Scene {
       this.useSkill(runtime, runtime.weapon.basic, angle, true);
     }
     this.refreshHud();
+  }
+
+  private canUseComboSkill(runtime: WeaponRuntime): boolean {
+    return isComboReady(runtime.combo) && hasComboSkill(this.run.progress, runtime.weapon.combo.id);
   }
 
   /** 스킬 하나를 전달 방식에 맞게 내보낸다. */
@@ -711,8 +740,22 @@ export class PlayScene extends Phaser.Scene {
     if (!room) return;
 
     this.clearTransientOverlays();
+    this.rewardDrop = null;
+    this.townNpc = null;
     for (const object of this.roomFloor) object.destroy();
     this.roomFloor = [];
+    for (const entity of this.enemies) {
+      entity.view.destroy();
+      entity.hpBar.destroy();
+      for (const dot of entity.statusDots) dot.destroy();
+    }
+    this.enemies = [];
+    for (const projectile of this.projectiles) projectile.view.destroy();
+    this.projectiles = [];
+    for (const area of this.areas) area.view.destroy();
+    this.areas = [];
+    for (const shot of this.enemyShots) shot.view.destroy();
+    this.enemyShots = [];
 
     this.exitOpen = false;
     this.resultScheduled = false;
@@ -754,6 +797,67 @@ export class PlayScene extends Phaser.Scene {
         this.enemies.push(this.createEnemyEntity(spawn.kind, at.x, at.y));
       }
     }
+    this.refreshHud();
+  }
+
+  /** 마을은 전투를 멈추는 전체 화면 모달이 아니라 직접 걸어 다니는 비전투 방이다. */
+  private enterTownRoom(): void {
+    this.clearTransientOverlays();
+    this.rewardDrop = null;
+    for (const object of this.roomFloor) object.destroy();
+    this.roomFloor = [];
+    for (const projectile of this.projectiles) projectile.view.destroy();
+    this.projectiles = [];
+    for (const area of this.areas) area.view.destroy();
+    this.areas = [];
+    for (const shot of this.enemyShots) shot.view.destroy();
+    this.enemyShots = [];
+    this.enemies = [];
+
+    this.exitOpen = true;
+    this.resultScheduled = false;
+    this.bounds = { minX: WALL, minY: WALL, maxX: TOWN_WIDTH - WALL, maxY: TOWN_HEIGHT - WALL };
+    this.minimapRoom = {
+      width: TOWN_WIDTH,
+      height: TOWN_HEIGHT,
+      scale: MINIMAP_MAX / Math.max(TOWN_WIDTH, TOWN_HEIGHT),
+    };
+
+    const cx = TOWN_WIDTH / 2;
+    const cy = TOWN_HEIGHT / 2;
+    this.roomFloor.push(
+      this.add.grid(cx, cy, TOWN_WIDTH, TOWN_HEIGHT, 64, 64, 0x11131c, 1, 0x24283a, 1).setDepth(0),
+      this.add
+        .rectangle(cx, cy, TOWN_WIDTH - WALL * 2, TOWN_HEIGHT - WALL * 2)
+        .setStrokeStyle(3, 0x3a4059)
+        .setDepth(0),
+    );
+
+    this.exit = this.add.rectangle(TOWN_WIDTH - WALL / 2, cy, WALL, EXIT_SIZE, COLORS.accent, 0.75).setDepth(1);
+    this.exitLabel = this.add
+      .text(TOWN_WIDTH - WALL - 110, cy, '다음 전투 →', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(2);
+    this.roomFloor.push(this.exit, this.exitLabel);
+
+    const npcX = cx - 120;
+    const npcY = cy;
+    const npcBody = this.add.rectangle(npcX, npcY, 38, 58, 0x8ea4ff, 0.95).setDepth(5);
+    const npcStand = this.add.circle(npcX, npcY + 26, 32, 0x29304a, 0.75).setDepth(4);
+    const npcPrompt = this.add
+      .text(this.player.x - 78, this.player.y + PLAYER_RADIUS + 18, 'F 대화', {
+        fontSize: '15px',
+        color: COLORS.accentText,
+        fontStyle: 'bold',
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(22)
+      .setVisible(false);
+    this.townNpc = { x: npcX, y: npcY, body: npcBody, prompt: npcPrompt };
+    this.roomFloor.push(npcStand, npcBody, npcPrompt);
+
+    this.player.setPosition(WALL + 90, cy);
+    followInRoom(this, this.player, TOWN_WIDTH, TOWN_HEIGHT);
     this.refreshHud();
   }
 
@@ -846,6 +950,7 @@ export class PlayScene extends Phaser.Scene {
   private checkRoomCleared(): void {
     if (this.run.phase !== 'combat' || this.exitOpen || this.resultScheduled) return;
     if (this.enemies.some((e) => isAlive(e.state))) return;
+    if (this.rewardDrop && !this.rewardDrop.collected) return;
 
     if (this.run.roomIndex >= TOTAL_ROOMS - 1) {
       this.resultScheduled = true;
@@ -865,6 +970,7 @@ export class PlayScene extends Phaser.Scene {
 
   /** 열린 출구에 닿으면 다음 방으로 넘어간다. */
   private checkExitReached(): void {
+    if (this.run.phase !== 'combat') return;
     if (!this.exitOpen) return;
     if (Math.abs(this.player.x - this.exit.x) > WALL + PLAYER_RADIUS) return;
     if (Math.abs(this.player.y - this.exit.y) > EXIT_SIZE / 2 + PLAYER_RADIUS) return;
@@ -873,8 +979,24 @@ export class PlayScene extends Phaser.Scene {
     this.run = clearRoom(this.run);
     this.saveCurrentProgress();
 
-    if (this.run.phase === 'town') this.showTown();
+    if (this.run.phase === 'town') this.enterTownRoom();
     else this.enterRoom();
+
+    if (DEBUG_ENABLED) this.publishDebug();
+  }
+
+  /** 마을 오른쪽 출구에 닿으면 다음 전투 방으로 넘어간다. */
+  private checkTownExitReached(): void {
+    if (this.run.phase !== 'town' || !this.exitOpen || this.overlay) return;
+    if (Math.abs(this.player.x - this.exit.x) > WALL + PLAYER_RADIUS) return;
+    if (Math.abs(this.player.y - this.exit.y) > EXIT_SIZE / 2 + PLAYER_RADIUS) return;
+
+    this.exitOpen = false;
+    this.closeOverlay();
+    this.run = leaveTown(this.run);
+    this.saveCurrentProgress();
+    this.syncWeaponRuntimes();
+    this.enterRoom();
 
     if (DEBUG_ENABLED) this.publishDebug();
   }
@@ -898,6 +1020,21 @@ export class PlayScene extends Phaser.Scene {
       this.updateWeaponWheel();
       return;
     }
+    if (this.run.phase === 'town') {
+      if (this.overlay) {
+        if (DEBUG_ENABLED) this.publishDebug();
+        return;
+      }
+      const dt = delta / 1000;
+      this.movePlayer(dt);
+      this.updateAim();
+      this.updateComboRings();
+      this.updateTownNpcPrompt();
+      this.updateMinimap();
+      this.checkTownExitReached();
+      if (DEBUG_ENABLED) this.publishDebug();
+      return;
+    }
     if (this.run.phase !== 'combat') return;
     const dt = delta / 1000;
 
@@ -913,6 +1050,7 @@ export class PlayScene extends Phaser.Scene {
     this.updateOffscreenMarks();
     this.updateMinimap();
     this.updateLore();
+    this.updateRewardDropPrompt();
     if (DEBUG_ENABLED) this.publishDebug();
     this.updateAreas(dt);
     this.updateEnemies(dt);
@@ -951,6 +1089,7 @@ export class PlayScene extends Phaser.Scene {
         required: COMBO_REQUIRED,
       },
       exit: this.exitOpen ? { x: this.exit.x, y: this.exit.y } : null,
+      drop: this.rewardDrop && !this.rewardDrop.collected ? { x: this.rewardDrop.x, y: this.rewardDrop.y } : null,
       events: { ...this.ruleEvents },
       projectiles: this.projectiles.length,
       room: { width: this.bounds.maxX + WALL, height: this.bounds.maxY + WALL },
@@ -1038,7 +1177,9 @@ export class PlayScene extends Phaser.Scene {
         ring.setVisible(false);
         continue;
       }
-      const ready = isComboReady(runtime.combo);
+      // 콤보스킬을 아직 못 얻은 무기는 게이지가 차도 발동하지 않는다.
+      // 링만 준비 완료로 돌면 배지의 `잠김`과 서로 다른 말을 하게 된다.
+      const ready = this.canUseComboSkill(runtime);
       ring.setVisible(ready);
       if (!ready) continue;
 
@@ -1395,7 +1536,7 @@ export class PlayScene extends Phaser.Scene {
 
     if (enemy.hp <= 0) {
       playSfx('death');
-      if (isBossKind(enemy.kind)) this.showBossDrop(enemy);
+      if (isBossKind(enemy.kind)) this.spawnBossDrop(enemy);
       deathBurst(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, radius * 2);
       entity.view.destroy();
       entity.hpBar.destroy();
@@ -1405,50 +1546,85 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
-  private showBossDrop(enemy: Enemy): void {
+  private spawnBossDrop(enemy: Enemy): void {
     // 이 시점에는 아직 clearRoom이 보상을 적용하지 않았으므로 현재 보유와 비교할 수 있다.
     // 이미 가진 것을 다시 `획득`이라고 띄우면 두 번째 판에서 거짓말이 된다.
     const reward = newPartsOfReward(this.run.progress, ROOMS[this.run.roomIndex]?.reward);
     if (!reward) return;
 
-    const lines = this.rewardLines(reward, '보스 드랍');
-    if (lines.length === 0) return;
-    playSfx('reward');
-
-    const x = Phaser.Math.Clamp(enemy.x, this.bounds.minX + 180, this.bounds.maxX - 180);
+    const x = Phaser.Math.Clamp(enemy.x, this.bounds.minX + 60, this.bounds.maxX - 60);
     const radius = ENEMY_STATS[enemy.kind].radius;
-    const y = Phaser.Math.Clamp(enemy.y - radius - 78, this.bounds.minY + 80, this.bounds.maxY - 80);
-    const text = this.add
-      .text(x, y, lines.join('\n'), {
-        fontFamily: 'sans-serif',
-        fontSize: '18px',
-        color: '#fff8dc',
-        align: 'center',
-        lineSpacing: 4,
-        wordWrap: { width: 320 },
+    const y = Phaser.Math.Clamp(enemy.y, this.bounds.minY + 60, this.bounds.maxY - 60);
+    const glow = this.add.circle(x, y, 34, BOSS_PATTERN_COLOR, 0.2).setDepth(8);
+    const marker = this.add.rectangle(x, y, 32, 32, BOSS_PATTERN_COLOR, 0.95).setAngle(45).setDepth(9);
+    const prompt = this.add
+      .text(this.player.x - 54, this.player.y + PLAYER_RADIUS + 18, 'F 획득', {
+        fontSize: '15px',
+        color: COLORS.accentText,
+        fontStyle: 'bold',
       })
-      .setOrigin(0.5)
-      .setDepth(17);
-    const plate = this.add
-      .rectangle(x, y, Math.max(260, text.width + 32), text.height + 24, 0x171923, 0.86)
-      .setStrokeStyle(2, BOSS_PATTERN_COLOR, 0.8)
-      .setDepth(16);
-    this.transientOverlays.push(text, plate);
+      .setOrigin(0, 0.5)
+      .setDepth(22)
+      .setVisible(false);
+
+    this.rewardDrop = { reward, x, y, collected: false, marker, glow, prompt };
+    this.roomFloor.push(glow, marker, prompt);
 
     ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: radius, to: radius * 2.8, duration: 620, width: 5 });
     this.tweens.add({
-      targets: [text, plate],
-      y: y - 18,
-      alpha: 0,
-      delay: 1800,
-      duration: 600,
-      ease: 'Quad.easeIn',
-      onComplete: () => {
-        text.destroy();
-        plate.destroy();
-        this.transientOverlays = this.transientOverlays.filter((object) => object !== text && object !== plate);
-      },
+      targets: glow,
+      alpha: 0.45,
+      scale: 1.18,
+      duration: 520,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
     });
+  }
+
+  private updateRewardDropPrompt(): void {
+    const drop = this.rewardDrop;
+    if (!drop || drop.collected) return;
+    const near = Math.hypot(this.player.x - drop.x, this.player.y - drop.y) <= REWARD_PICKUP_RADIUS;
+    drop.prompt.setVisible(near);
+    if (near) drop.prompt.setPosition(this.player.x - 54, this.player.y + PLAYER_RADIUS + 18);
+  }
+
+  private tryCollectRewardDrop(): boolean {
+    const drop = this.rewardDrop;
+    if (!drop || drop.collected || this.run.phase !== 'combat') return false;
+    if (Math.hypot(this.player.x - drop.x, this.player.y - drop.y) > REWARD_PICKUP_RADIUS) return false;
+
+    drop.collected = true;
+    this.run = collectRoomReward(this.run, drop.reward);
+    this.saveCurrentProgress();
+    playSfx('reward');
+    ring(this, drop.x, drop.y, BOSS_PATTERN_COLOR, { from: 18, to: 86, duration: 420, width: 4 });
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 12, '획득', COLORS.accentText);
+
+    drop.marker.destroy();
+    drop.glow.destroy();
+    drop.prompt.destroy();
+    this.rewardDrop = null;
+    this.refreshHud();
+    if (DEBUG_ENABLED) this.publishDebug();
+    return true;
+  }
+
+  private updateTownNpcPrompt(): void {
+    const npc = this.townNpc;
+    if (!npc) return;
+    const near = Math.hypot(this.player.x - npc.x, this.player.y - npc.y) <= TOWN_NPC_RADIUS;
+    npc.prompt.setVisible(near && !this.overlay);
+    npc.body.setFillStyle(near ? COLORS.accent : 0x8ea4ff, 0.95);
+    if (near) npc.prompt.setPosition(this.player.x - 64, this.player.y + PLAYER_RADIUS + 18);
+  }
+
+  private tryTalkTownNpc(): void {
+    const npc = this.townNpc;
+    if (!npc || this.run.phase !== 'town' || this.overlay) return;
+    if (Math.hypot(this.player.x - npc.x, this.player.y - npc.y) > TOWN_NPC_RADIUS) return;
+    this.showTown();
   }
 
   private clearTransientOverlays(): void {
@@ -1606,6 +1782,7 @@ export class PlayScene extends Phaser.Scene {
   private refreshHud(): void {
     const wave = ROOMS[this.run.roomIndex];
     const remaining = this.enemies.filter((e) => isAlive(e.state)).length;
+    const inTown = this.run.phase === 'town';
     this.hpBarFill.width = (240 * this.run.hp) / this.run.maxHp;
     this.shieldBarBack.setVisible(hasActiveShield(this.run));
     this.shieldBarFill.width = (240 * this.run.shieldEnergy) / SHIELD_ENERGY_MAX;
@@ -1616,11 +1793,11 @@ export class PlayScene extends Phaser.Scene {
       [
         `체력 ${Math.ceil(this.run.hp)} / ${this.run.maxHp}`,
         ...(hasActiveShield(this.run) ? [`보호막 ${Math.ceil(this.run.shieldEnergy)} / ${SHIELD_ENERGY_MAX}`] : []),
-        `${wave?.label ?? '-'} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   남은 적 ${remaining}   처치 ${this.run.kills}`,
+        inTown ? `마을   NPC 근처 F 대화   오른쪽 출구로 이동` : `${wave?.label ?? '-'} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   남은 적 ${remaining}   처치 ${this.run.kills}`,
         ...hands.map(
           (h) => `${h.hand} ${h.weapon}` + (h.lines.length ? `   ${h.lines.join('  ·  ')}` : ''),
         ),
-        ...(this.exitOpen ? ['방을 정리했다. 출구로 이동 →'] : []),
+        ...(this.exitOpen && !inTown ? ['방을 정리했다. 출구로 이동 →'] : []),
       ].join('\n'),
     );
     this.updateComboText();
@@ -1636,21 +1813,22 @@ export class PlayScene extends Phaser.Scene {
     for (const object of this.comboBadgeObjects(badge)) object.setVisible(visible);
     if (!runtime) return;
 
-    const ready = isComboReady(runtime.combo);
+    const unlocked = hasComboSkill(this.run.progress, runtime.weapon.combo.id);
+    const ready = unlocked && isComboReady(runtime.combo);
     const color = ready ? COLORS.accent : runtime.weapon.color;
     const hand = badge === this.comboBadges.left ? '왼손' : '오른손';
     badge.back.setStrokeStyle(ready ? 2 : 1, color, ready ? 0.95 : 0.55);
     badge.title.setText(`${hand} ${runtime.weapon.name}`);
-    badge.value.setText(ready ? 'MAX' : `${runtime.combo.value}`);
+    badge.value.setText(unlocked ? ready ? 'MAX' : `${runtime.combo.value}` : '잠김');
     badge.value.setColor(ready ? COLORS.accentText : '#ffffff');
 
     for (const [index, pip] of badge.pips.entries()) {
-      const filled = index < runtime.combo.value;
+      const filled = unlocked && index < runtime.combo.value;
       pip.setFillStyle(filled ? color : 0x2a2f42, filled ? 0.95 : 0.9);
     }
 
     const duration = resolveFor(this.run.loadout, runtime.weapon.basic).stats.comboDuration ?? 5;
-    const ratio = runtime.combo.value > 0 ? Phaser.Math.Clamp(runtime.combo.remaining / duration, 0, 1) : 0;
+    const ratio = unlocked && runtime.combo.value > 0 ? Phaser.Math.Clamp(runtime.combo.remaining / duration, 0, 1) : 0;
     badge.timer.width = 224 * ratio;
     badge.timer.setFillStyle(color, ready ? 0.9 : 0.65);
   }
@@ -1813,11 +1991,17 @@ export class PlayScene extends Phaser.Scene {
     this.clearTransientOverlays();
     pinContainer(this, container);
 
-    container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
+    // 패널이 화면보다 작아서 뒤로 HUD 글자가 비쳐 읽혔다. 전체를 덮는 막을 먼저 깐다.
+    container.add(this.add.rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, VIEW_WIDTH, VIEW_HEIGHT, 0x05060a, 0.92));
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 82, '마을', {
-          fontSize: '42px',
+        .rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, VIEW_WIDTH - 116, VIEW_HEIGHT - 82, 0x0a0b0f, 0.94)
+        .setStrokeStyle(2, 0x3a4059, 0.95),
+    );
+    container.add(
+      this.add
+        .text((VIEW_WIDTH / 2), 74, '마을 관리인', {
+          fontSize: '34px',
           color: COLORS.text,
           fontStyle: 'bold',
         })
@@ -1825,18 +2009,19 @@ export class PlayScene extends Phaser.Scene {
     );
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 128, '실체화 장비가 새로운 무기 형태를 기억했다', {
-          fontSize: '17px',
+        .text((VIEW_WIDTH / 2), 116, '장갑이 기억한 무기와 콤보스킬을 여기서 정리해 두게.', {
+          fontSize: '16px',
           color: COLORS.textDim,
         })
         .setOrigin(0.5),
     );
 
+    // 획득 내역은 적지 않는다. 바닥 드랍을 F로 주울 때 이미 알렸고,
+    // 여기서 또 띄우면 이미 받은 것을 시스템이 다시 알리는 표시가 된다.
     const unlocked = this.run.progress.unlockedWeapons.map((id) => weaponOf(id).name).join(' / ');
-    const reward = ROOMS[this.run.roomIndex]?.reward;
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 202, [...this.rewardLines(reward), `보유 무기: ${unlocked}`, `R키 무기 교체 기능 해금`].join('\n'), {
+        .text((VIEW_WIDTH / 2), 162, [`보유 무기: ${unlocked}`, `전투 중 R링 교체 가능`].join('\n'), {
           fontSize: '15px',
           color: COLORS.text,
           align: 'center',
@@ -1851,8 +2036,8 @@ export class PlayScene extends Phaser.Scene {
 
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), VIEW_HEIGHT - 56, 'R 키를 눌러 다음 전투로 이동', {
-          fontSize: '20px',
+        .text((VIEW_WIDTH / 2), VIEW_HEIGHT - 48, 'R 닫기   ·   오른쪽 출구로 다음 전투', {
+          fontSize: '17px',
           color: COLORS.accentText,
           fontStyle: 'bold',
         })

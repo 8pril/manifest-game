@@ -36,6 +36,8 @@ export interface DebugState {
   combo: { left: number; right: number; required: number };
   /** 출구가 열렸으면 그 위치. 닫혀 있으면 null. */
   exit: { x: number; y: number } | null;
+  /** 바닥에 놓인 미획득 보상 드랍의 위치. 없으면 null. */
+  drop: { x: number; y: number } | null;
   /** 규칙 발동 횟수. 검증 드라이버가 변화를 감지해 그 순간을 찍는다. */
   events: { burst: number; wallSlam: number; brand: number; woundConsume: number; fracture: number };
   /** 살아 있는 투사체 수. 발사가 실제로 나갔는지 확인하는 데 쓴다. */

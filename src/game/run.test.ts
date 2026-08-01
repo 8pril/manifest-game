@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createRun,
   clearRoom,
+  collectRoomReward,
   leaveTown,
   damagePlayer,
   addKill,
@@ -15,7 +16,7 @@ import {
 import { TOTAL_ROOMS } from '@/game/rooms';
 import { totalSupports, supportsFor } from '@/game/loadout';
 import { createLoadout } from '@/game/loadout';
-import { configureManifestation, createInitialProgress, unlockSupports, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
+import { configureManifestation, createInitialProgress, unlockComboSkills, unlockSupports, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
 
 const newRun = () => createRun('sword', 'bow');
 
@@ -122,6 +123,30 @@ describe('clearRoom', () => {
   it('전투 중이 아니면 아무 일도 하지 않는다', () => {
     const town = clearRoom(clearRoom(newRun()));
     expect(clearRoom(town)).toBe(town);
+  });
+});
+
+describe('collectRoomReward', () => {
+  it('방 이동 없이 보상만 먼저 적용한다', () => {
+    const run = clearRoom(createRun('sword', null));
+    const reward = { weapons: ['bow' as const], supports: ['multiple-projectiles'] };
+    const collected = collectRoomReward(run, reward);
+
+    expect(collected.phase).toBe('combat');
+    expect(collected.roomIndex).toBe(1);
+    expect(collected.progress.unlockedWeapons).toContain('bow');
+    expect(collected.progress.ownedSupports).toContain('multiple-projectiles');
+    expect(collected.gained).toEqual({ weapons: ['bow'], comboSkills: [], supports: ['multiple-projectiles'] });
+  });
+
+  it('이미 가진 보상은 gained에 다시 표시하지 않는다', () => {
+    let run = clearRoom(createRun('sword', null));
+    const reward = { weapons: ['bow' as const] };
+    run = collectRoomReward(run, reward);
+    const again = collectRoomReward(run, reward);
+
+    expect(again.gained).toBeUndefined();
+    expect(again.progress.unlockedWeapons.filter((id) => id === 'bow')).toHaveLength(1);
   });
 });
 
@@ -324,7 +349,7 @@ describe('이미 가진 보상은 다시 획득으로 세지 않는다', () => {
   it('이미 다 가지고 있으면 새로 얻은 것이 없다', () => {
     // 저장이 있는 두 번째 판. 같은 보상을 또 받지만 실제로 늘어나는 것은 없다.
     const owned = unlockSupports(
-      unlockWeapons(createInitialProgress(), ['bow', 'shield']),
+      unlockComboSkills(unlockWeapons(createInitialProgress(), ['bow', 'shield']), ['annihilation', 'volley', 'fracture-wave']),
       ['earthquake', 'wound-resonance', 'multiple-projectiles', 'wound-seeker', 'dragging-ground', 'fracture-resonance'],
     );
 
