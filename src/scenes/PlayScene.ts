@@ -73,7 +73,7 @@ import { ROOMS, TOTAL_ROOMS, type RoomReward } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
-import { createRun, clearRoom, leaveTown, damagePlayer, addKill, advanceTime, isOver, type RunState } from '@/game/run';
+import { createRun, clearRoom, leaveTown, damagePlayer, addKill, advanceTime, hasActiveShield, isOver, SHIELD_ENERGY_MAX, type RunState } from '@/game/run';
 import { configureManifestation, createInitialProgress, equipFromWheel, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
@@ -159,6 +159,8 @@ export class PlayScene extends Phaser.Scene {
 
   private hud!: Phaser.GameObjects.Text;
   private hpBarFill!: Phaser.GameObjects.Rectangle;
+  private shieldBarBack!: Phaser.GameObjects.Rectangle;
+  private shieldBarFill!: Phaser.GameObjects.Rectangle;
   private comboText!: Phaser.GameObjects.Text;
   /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
   private comboRings!: { left: Phaser.GameObjects.Arc; right: Phaser.GameObjects.Arc };
@@ -1383,8 +1385,10 @@ export class PlayScene extends Phaser.Scene {
   private buildHud(): void {
     const barBack = this.add.rectangle(screenX(24), screenY(26), 240, 14, 0x2a2f42).setOrigin(0, 0.5).setDepth(19);
     this.hpBarFill = this.add.rectangle(screenX(24), screenY(26), 240, 14, 0x6ee7a8).setOrigin(0, 0.5).setDepth(20);
+    this.shieldBarBack = this.add.rectangle(screenX(24), screenY(44), 240, 10, 0x20263a).setOrigin(0, 0.5).setDepth(19);
+    this.shieldBarFill = this.add.rectangle(screenX(24), screenY(44), 240, 10, 0x7dd3fc).setOrigin(0, 0.5).setDepth(20);
     this.hud = this.add
-      .text(screenX(24), screenY(44), '', { fontSize: '14px', color: COLORS.text, lineSpacing: 3 })
+      .text(screenX(24), screenY(58), '', { fontSize: '14px', color: COLORS.text, lineSpacing: 3 })
       .setDepth(20);
     this.comboText = this.add
       .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 40), '', { fontSize: '16px', color: COLORS.textDim })
@@ -1400,7 +1404,7 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(20);
 
     // 카메라가 방을 따라 움직여도 HUD는 화면에 붙어 있어야 한다.
-    pinToScreen(barBack, this.hpBarFill, this.hud, this.comboText, hint);
+    pinToScreen(barBack, this.hpBarFill, this.shieldBarBack, this.shieldBarFill, this.hud, this.comboText, hint);
 
     // 방이 화면보다 크므로 밖에 있는 대상을 가리키는 표시가 필요하다.
     // 없으면 남은 적을 찾아 헤매게 된다.
@@ -1484,11 +1488,15 @@ export class PlayScene extends Phaser.Scene {
     const wave = ROOMS[this.run.roomIndex];
     const remaining = this.enemies.filter((e) => isAlive(e.state)).length;
     this.hpBarFill.width = (240 * this.run.hp) / this.run.maxHp;
+    this.shieldBarBack.setVisible(hasActiveShield(this.run));
+    this.shieldBarFill.width = (240 * this.run.shieldEnergy) / SHIELD_ENERGY_MAX;
+    this.shieldBarFill.setVisible(hasActiveShield(this.run));
 
     const hands = describeByHand(this.run.loadout);
     this.hud.setText(
       [
         `체력 ${Math.ceil(this.run.hp)} / ${this.run.maxHp}`,
+        ...(hasActiveShield(this.run) ? [`보호막 ${Math.ceil(this.run.shieldEnergy)} / ${SHIELD_ENERGY_MAX}`] : []),
         `${wave?.label ?? '-'} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   남은 적 ${remaining}   처치 ${this.run.kills}`,
         ...hands.map(
           (h) => `${h.hand} ${h.weapon}` + (h.lines.length ? `   ${h.lines.join('  ·  ')}` : ''),

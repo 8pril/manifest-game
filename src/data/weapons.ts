@@ -146,7 +146,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       id: 'shield-bash',
       name: '밀치기',
       tags: ['공격', '근접', '물리'],
-      base: { damage: 38, meleeRange: 104, meleeArc: 2.4, knockback: 115, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 24, meleeRange: 104, meleeArc: 2.4, knockback: 115, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
     combo: {
@@ -166,7 +166,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       // 벽 충돌은 각성 중에 거의 나지 않는다. 넉백을 400으로 올려 확인해 보니
       // 벽 충돌이 나므로 경로는 정상이고, 값이 낮아 벽까지 닿지 않을 뿐이다.
       // 벽 충돌을 흔하게 만들려면 값을 올려야 하지만 그만큼 지대 피해를 잃는다.
-      base: { damage: 34, areaRadius: 150, duration: 2.4, tickInterval: 0.4, knockback: 62 },
+      base: { damage: 22, areaRadius: 150, duration: 2.4, tickInterval: 0.4, knockback: 62 },
       supportSlots: 2,
     },
   },

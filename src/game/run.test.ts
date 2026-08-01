@@ -9,10 +9,12 @@ import {
   isOver,
   isVulnerable,
   PLAYER_MAX_HP,
+  SHIELD_ENERGY_MAX,
   INVULNERABLE_SECONDS,
 } from '@/game/run';
 import { TOTAL_ROOMS } from '@/game/rooms';
 import { totalSupports, supportsFor } from '@/game/loadout';
+import { createLoadout } from '@/game/loadout';
 import { createInitialProgress, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
 
 const newRun = () => createRun('sword', 'bow');
@@ -52,13 +54,19 @@ describe('createRun', () => {
     expect(run.loadout.left).toBe('shield');
     expect(run.loadout.right).toBe('bow');
   });
+
+  it('방패 보호막은 최대치로 시작한다', () => {
+    expect(createRun('shield', null).shieldEnergy).toBe(SHIELD_ENERGY_MAX);
+  });
 });
 
 describe('clearRoom', () => {
   it('방을 정리하면 선택 없이 다음 전투로 간다', () => {
-    const run = clearRoom(newRun());
+    const damaged = damagePlayer(createRun('shield', null), 20);
+    const run = clearRoom(damaged);
     expect(run.phase).toBe('combat');
     expect(run.roomIndex).toBe(1);
+    expect(run.shieldEnergy).toBe(SHIELD_ENERGY_MAX);
   });
 
   it('첫 보스를 정리하면 활/방패와 무기 교체를 해금하고 마을로 들어간다', () => {
@@ -150,6 +158,45 @@ describe('damagePlayer', () => {
   it('이미 패배한 뒤에는 상태가 바뀌지 않는다', () => {
     const lost = damagePlayer(newRun(), PLAYER_MAX_HP);
     expect(damagePlayer(lost, 10)).toBe(lost);
+  });
+
+  it('방패를 들고 있으면 보호막이 체력보다 먼저 소모된다', () => {
+    const run = damagePlayer(createRun('shield', null), 30);
+
+    expect(run.hp).toBe(PLAYER_MAX_HP);
+    expect(run.shieldEnergy).toBe(SHIELD_ENERGY_MAX - 30);
+  });
+
+  it('방패 보호막이 부족하면 남은 피해만 체력에 들어간다', () => {
+    let run = damagePlayer(createRun('shield', null), SHIELD_ENERGY_MAX - 5);
+    run = advanceTime(run, INVULNERABLE_SECONDS);
+    run = damagePlayer(run, 20);
+
+    expect(run.shieldEnergy).toBe(0);
+    expect(run.hp).toBe(PLAYER_MAX_HP - 15);
+  });
+
+  it('방패를 내려놓으면 남은 보호막이 있어도 체력으로 피해를 받는다', () => {
+    let run = damagePlayer(createRun('shield', null), 20);
+    run = advanceTime(run, INVULNERABLE_SECONDS);
+    run = { ...run, loadout: createLoadout('sword', 'bow') };
+    const withoutShield = damagePlayer(run, 10);
+
+    expect(withoutShield.hp).toBe(PLAYER_MAX_HP - 10);
+    expect(withoutShield.shieldEnergy).toBe(SHIELD_ENERGY_MAX - 20);
+  });
+
+  it('방패를 다시 들어도 보호막은 자동으로 차지 않는다', () => {
+    let run = damagePlayer(createRun('shield', null), 20);
+    run = advanceTime(run, INVULNERABLE_SECONDS);
+    run = { ...run, loadout: createLoadout('sword', 'bow') };
+    run = damagePlayer(run, 10);
+    run = advanceTime(run, INVULNERABLE_SECONDS);
+    run = { ...run, loadout: createLoadout('shield', 'bow') };
+    const backToShield = damagePlayer(run, 10);
+
+    expect(backToShield.hp).toBe(PLAYER_MAX_HP - 10);
+    expect(backToShield.shieldEnergy).toBe(SHIELD_ENERGY_MAX - 30);
   });
 });
 

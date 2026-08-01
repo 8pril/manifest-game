@@ -31,6 +31,7 @@ export type RunPhase =
   | 'lost';
 
 export const PLAYER_MAX_HP = 100;
+export const SHIELD_ENERGY_MAX = 45;
 
 /**
  * 피격 후 무적 시간(초).
@@ -47,6 +48,8 @@ export interface RunState {
   roomIndex: number;
   hp: number;
   maxHp: number;
+  /** 방패를 들고 있을 때 체력보다 먼저 소모되는 방별 보호막. */
+  shieldEnergy: number;
   /** 무기 2종과 스킬별 보조능력. */
   loadout: Loadout;
   /** 해금된 무기와 마을 장비 설정. */
@@ -70,6 +73,7 @@ export function createRun(left: WeaponId, right: WeaponId | null, savedProgress?
     roomIndex: 0,
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
+    shieldEnergy: SHIELD_ENERGY_MAX,
     loadout: loadoutFromProgress(progress),
     progress,
     invulnerable: 0,
@@ -89,16 +93,28 @@ export function clearRoom(run: RunState): RunState {
   const rewarded = applyRoomReward(run.progress, room?.reward);
   const isLastRoom = run.roomIndex >= TOTAL_ROOMS - 1;
   if (isLastRoom) {
-    return { ...run, phase: 'won', progress: rewarded, loadout: loadoutFromProgress(rewarded, run.loadout) };
+    return {
+      ...run,
+      phase: 'won',
+      shieldEnergy: SHIELD_ENERGY_MAX,
+      progress: rewarded,
+      loadout: loadoutFromProgress(rewarded, run.loadout),
+    };
   }
   if (room?.entersTown) {
     let progress = unlockWeaponSwitch(rewarded);
     progress = setWheelSlot(progress, 'left', 0, progress.active.left);
     progress = setWheelSlot(progress, 'left', 1, progress.unlockedWeapons.includes('shield') ? 'shield' : null);
     progress = setWheelSlot(progress, 'right', 0, progress.unlockedWeapons.includes('bow') ? 'bow' : null);
-    return { ...run, phase: 'town', progress, loadout: loadoutFromProgress(progress, run.loadout) };
+    return { ...run, phase: 'town', shieldEnergy: SHIELD_ENERGY_MAX, progress, loadout: loadoutFromProgress(progress, run.loadout) };
   }
-  return { ...run, roomIndex: run.roomIndex + 1, progress: rewarded, loadout: loadoutFromProgress(rewarded, run.loadout) };
+  return {
+    ...run,
+    roomIndex: run.roomIndex + 1,
+    shieldEnergy: SHIELD_ENERGY_MAX,
+    progress: rewarded,
+    loadout: loadoutFromProgress(rewarded, run.loadout),
+  };
 }
 
 function applyRoomReward(progress: PlayerProgress, reward?: RoomReward): PlayerProgress {
@@ -118,6 +134,7 @@ export function leaveTown(run: RunState): RunState {
     ...run,
     phase: 'combat',
     roomIndex: run.roomIndex + 1,
+    shieldEnergy: SHIELD_ENERGY_MAX,
     progress,
     loadout: loadoutFromProgress(progress, run.loadout),
   };
@@ -131,13 +148,20 @@ export function damagePlayer(run: RunState, amount: number): RunState {
   if (run.phase !== 'combat') return run;
   if (run.invulnerable > 0) return run;
 
-  const hp = Math.max(0, run.hp - amount);
+  const absorbed = hasActiveShield(run) ? Math.min(run.shieldEnergy, amount) : 0;
+  const shieldEnergy = run.shieldEnergy - absorbed;
+  const hp = Math.max(0, run.hp - (amount - absorbed));
   return {
     ...run,
     hp,
+    shieldEnergy,
     invulnerable: INVULNERABLE_SECONDS,
     phase: hp <= 0 ? 'lost' : run.phase,
   };
+}
+
+export function hasActiveShield(run: RunState): boolean {
+  return run.loadout.left === 'shield' || run.loadout.right === 'shield';
 }
 
 /** 지금 피해를 받을 수 있는 상태인지. 씬이 피격 연출을 결정할 때 쓴다. */
