@@ -111,20 +111,14 @@ describe('handOf', () => {
 });
 
 describe('supportsFromProgress', () => {
-  it('첫 보스 뒤 기본 세팅이 전부 유효하게 붙는다', () => {
-    // 마을 진입 시 자동 장착되는 기본 세팅이 태그 규칙을 어기면
-    // 조용히 버려져 성장이 사라진다. 붙은 개수로 그것을 고정한다.
+  it('첫 보스 뒤에는 보유만 늘고 장착은 마을 UI 선택을 기다린다', () => {
     let run = createRun('sword', null);
     run = clearRoom(run); // 흐린 입구
     run = clearRoom(run); // 첫 문지기 → 마을
 
     expect(run.phase).toBe('town');
-    const bySkill = run.loadout.supports;
-    // 검·활·방패가 해금되고 각각 콤보스킬에 보조형 2개가 붙는다.
-    expect(Object.keys(bySkill).sort()).toEqual(['annihilation', 'fracture-wave', 'volley']);
-    for (const [skillId, list] of Object.entries(bySkill)) {
-      expect(list.length, skillId).toBe(2);
-    }
+    expect(run.progress.ownedSupports.length).toBeGreaterThan(0);
+    expect(run.loadout.supports).toEqual({});
   });
 
   it('태그가 맞지 않는 보조능력은 붙지 않는다', () => {

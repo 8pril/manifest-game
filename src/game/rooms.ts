@@ -46,7 +46,7 @@ export const ROOMS: readonly RoomDef[] = [
     // 첫 보스. 클리어하면 활/방패와 무기 교체 기능이 해금되고 마을로 들어간다.
     label: '첫 문지기',
     spawns: [
-      { kind: 'boss', count: 1 },
+      { kind: 'gatekeeper', count: 1 },
       { kind: 'chaser', count: 16 },
     ],
     entersTown: true,
@@ -96,7 +96,7 @@ export const ROOMS: readonly RoomDef[] = [
     // 잡몹 정리로 판이 끝나면 핵앤슬래시의 마무리가 서지 않는다.
     label: '무너진 문',
     spawns: [
-      { kind: 'boss', count: 1 },
+      { kind: 'collapsedDoor', count: 1 },
       { kind: 'chaser', count: 14 },
       { kind: 'archer', count: 4 },
       { kind: 'brute', count: 2 },

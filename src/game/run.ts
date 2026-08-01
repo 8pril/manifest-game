@@ -2,7 +2,6 @@ import { roomAt, TOTAL_ROOMS, type RoomReward } from '@/game/rooms';
 import { loadoutFromProgress, type Loadout } from '@/game/loadout';
 import type { WeaponId } from '@/data/weapons';
 import {
-  configureManifestation,
   createInitialProgress,
   setWheelSlot,
   unlockComboSkills,
@@ -93,7 +92,6 @@ export function clearRoom(run: RunState): RunState {
   }
   if (room?.entersTown) {
     let progress = unlockWeaponSwitch(rewarded);
-    progress = configureDefaultTownLoadout(progress);
     progress = setWheelSlot(progress, 'left', 0, progress.active.left);
     progress = setWheelSlot(progress, 'left', 1, progress.unlockedWeapons.includes('shield') ? 'shield' : null);
     progress = setWheelSlot(progress, 'right', 0, progress.unlockedWeapons.includes('bow') ? 'bow' : null);
@@ -108,20 +106,6 @@ function applyRoomReward(progress: PlayerProgress, reward?: RoomReward): PlayerP
   if (reward.weapons?.length) next = unlockWeapons(next, reward.weapons);
   if (reward.comboSkills?.length) next = unlockComboSkills(next, reward.comboSkills);
   if (reward.supports?.length) next = unlockSupports(next, reward.supports);
-  return next;
-}
-
-function configureDefaultTownLoadout(progress: PlayerProgress): PlayerProgress {
-  let next = progress;
-  if (next.unlockedWeapons.includes('sword')) {
-    next = configureManifestation(next, 'sword', { primarySupportId: 'earthquake', synergySupportId: 'wound-resonance' });
-  }
-  if (next.unlockedWeapons.includes('bow')) {
-    next = configureManifestation(next, 'bow', { primarySupportId: 'multiple-projectiles', synergySupportId: 'wound-seeker' });
-  }
-  if (next.unlockedWeapons.includes('shield')) {
-    next = configureManifestation(next, 'shield', { primarySupportId: 'earthquake', synergySupportId: 'fracture-resonance' });
-  }
   return next;
 }
 

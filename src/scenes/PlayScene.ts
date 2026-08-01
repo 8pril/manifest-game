@@ -16,7 +16,7 @@ import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { awakenedAttackInterval, deliveryOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
 import { findSupport } from '@/data/supports';
 import { findSkill } from '@/data/skills';
-import { findBehavior, type Behavior, type Skill } from '@/engine/support';
+import { canAttach, findBehavior, supportSlotType, type Behavior, type Skill, type Support } from '@/engine/support';
 import {
   spawnProjectiles,
   advance,
@@ -58,6 +58,7 @@ import {
   bossMoveSpeed,
   createEnemy,
   enemySpeed,
+  isBossKind,
   isAlive,
   resetEnemyIds,
   desiredDirection,
@@ -72,7 +73,7 @@ import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
 import { createRun, clearRoom, leaveTown, damagePlayer, addKill, advanceTime, isOver, type RunState } from '@/game/run';
-import { createInitialProgress, equipFromWheel, type Hand, type PlayerProgress } from '@/game/progression';
+import { configureManifestation, createInitialProgress, equipFromWheel, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 
 const MOVE_SPEED = 300;
@@ -972,11 +973,12 @@ export class PlayScene extends Phaser.Scene {
           this.handleBossEvent(entity, event);
         }
 
-        const direction = enemy.kind === 'boss'
+        const isBoss = isBossKind(enemy.kind);
+        const direction = isBoss
           ? bossMoveDirection(enemy, { x: this.player.x, y: this.player.y })
           : desiredDirection(enemy, { x: this.player.x, y: this.player.y });
         if (direction) {
-          const step = enemy.kind === 'boss' ? bossMoveSpeed(enemy) * dt : enemySpeed(enemy) * dt;
+          const step = isBoss ? bossMoveSpeed(enemy) * dt : enemySpeed(enemy) * dt;
           const radius = ENEMY_STATS[enemy.kind].radius;
           const nextX = enemy.x + direction.x * step;
           const nextY = enemy.y + direction.y * step;
@@ -986,7 +988,7 @@ export class PlayScene extends Phaser.Scene {
 
           enemy.x = clampedX;
           enemy.y = clampedY;
-          if (enemy.kind === 'boss' && hitWall && staggerBossOnWall(enemy)) {
+          if (isBoss && hitWall && staggerBossOnWall(enemy)) {
             this.showBossWallStagger(enemy);
           }
         }
@@ -1003,7 +1005,7 @@ export class PlayScene extends Phaser.Scene {
         if (enemy.sinceContact >= stats.contactCooldown) {
           enemy.sinceContact = 0;
           const before = this.run;
-          this.run = damagePlayer(this.run, enemy.kind === 'boss' ? bossContactDamage(enemy) : stats.contactDamage);
+          this.run = damagePlayer(this.run, isBossKind(enemy.kind) ? bossContactDamage(enemy) : stats.contactDamage);
 
           if (this.run !== before) {
             this.flashPlayer();
@@ -1026,11 +1028,20 @@ export class PlayScene extends Phaser.Scene {
         this.showBossChargeTelegraph(enemy, event.direction);
         break;
       case 'chargeStart':
-        ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: 18, to: ENEMY_STATS.boss.radius * 1.8, duration: 260, width: 4 });
-        floatingText(this, enemy.x, enemy.y - ENEMY_STATS.boss.radius - 18, '돌진', '#ffd166');
+        ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: 18, to: ENEMY_STATS[enemy.kind].radius * 1.8, duration: 260, width: 4 });
+        floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '돌진', '#ffd166');
         break;
       case 'summon':
         this.summonBossAdds(enemy, event.count);
+        break;
+      case 'shockTelegraph':
+        this.showBossShockTelegraph(enemy, event.radius);
+        break;
+      case 'shockwave':
+        this.bossShockwave(enemy, event.radius, event.damage);
+        break;
+      case 'shardBurst':
+        this.bossShardBurst(enemy, event.count, event.damage, event.speed);
         break;
     }
   }
@@ -1042,12 +1053,12 @@ export class PlayScene extends Phaser.Scene {
       .setOrigin(0, 0)
       .setLineWidth(5)
       .setDepth(4);
-    floatingText(this, enemy.x, enemy.y - ENEMY_STATS.boss.radius - 18, '돌진 예고', '#ffd166');
+    floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '돌진 예고', '#ffd166');
     this.tweens.add({ targets: line, alpha: 0, duration: 740, ease: 'Quad.easeIn', onComplete: () => line.destroy() });
   }
 
   private showBossWallStagger(enemy: Enemy): void {
-    const radius = ENEMY_STATS.boss.radius;
+    const radius = ENEMY_STATS[enemy.kind].radius;
     impact(this, enemy.x, enemy.y);
     ring(this, enemy.x, enemy.y, STUN_COLOR, { from: radius * 0.7, to: radius * 2.6, duration: 420, width: 5 });
     flash(this, enemy.x, enemy.y, radius * 2.4, STUN_COLOR);
@@ -1055,16 +1066,58 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private summonBossAdds(enemy: Enemy, count: number): void {
-    ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: 24, to: ENEMY_STATS.boss.radius * 2.4, duration: 360, width: 4 });
-    floatingText(this, enemy.x, enemy.y - ENEMY_STATS.boss.radius - 18, '사냥개 소환', '#ffd166');
+    const bossRadius = ENEMY_STATS[enemy.kind].radius;
+    ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: 24, to: bossRadius * 2.4, duration: 360, width: 4 });
+    floatingText(this, enemy.x, enemy.y - bossRadius - 18, '사냥개 소환', '#ffd166');
 
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count;
-      const distance = ENEMY_STATS.boss.radius + 70;
+      const distance = bossRadius + 70;
       const radius = ENEMY_STATS.chaser.radius;
       const x = Phaser.Math.Clamp(enemy.x + Math.cos(angle) * distance, this.bounds.minX + radius, this.bounds.maxX - radius);
       const y = Phaser.Math.Clamp(enemy.y + Math.sin(angle) * distance, this.bounds.minY + radius, this.bounds.maxY - radius);
       this.enemies.push(this.createEnemyEntity('chaser', x, y));
+    }
+  }
+
+  private showBossShockTelegraph(enemy: Enemy, radius: number): void {
+    ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: ENEMY_STATS[enemy.kind].radius, to: radius, duration: 820, width: 5 });
+    floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '충격파 예고', '#d7c6ff');
+  }
+
+  private bossShockwave(enemy: Enemy, radius: number, damage: number): void {
+    ring(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, { from: 32, to: radius, duration: 360, width: 6 });
+    flash(this, enemy.x, enemy.y, radius * 0.55, ENEMY_STATS[enemy.kind].color);
+    floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '충격파', '#d7c6ff');
+
+    if (Math.hypot(this.player.x - enemy.x, this.player.y - enemy.y) <= radius + PLAYER_RADIUS) {
+      const before = this.run;
+      this.run = damagePlayer(this.run, damage);
+      if (this.run !== before) {
+        this.flashPlayer();
+        this.refreshHud();
+      }
+      if (this.run.phase === 'lost') this.showResult(false);
+    }
+  }
+
+  private bossShardBurst(enemy: Enemy, count: number, damage: number, speed: number): void {
+    ring(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, { from: 22, to: ENEMY_STATS[enemy.kind].radius * 2.2, duration: 320, width: 4 });
+    floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '파편 방출', '#d7c6ff');
+
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count;
+      const [state] = spawnProjectiles(
+        { damage, projectileCount: 1, projectileSpeed: speed },
+        [],
+        { x: enemy.x, y: enemy.y },
+        angle,
+      );
+      this.enemyShots.push({
+        state,
+        view: this.add.circle(state.x, state.y, 8, ENEMY_STATS[enemy.kind].color).setDepth(8),
+        damage,
+      });
     }
   }
 
@@ -1233,7 +1286,7 @@ export class PlayScene extends Phaser.Scene {
     entity.hpBar.width = (radius * 2 * enemy.hp) / enemy.maxHp;
 
     if (enemy.hp <= 0) {
-      if (enemy.kind === 'boss') this.showBossDrop(enemy);
+      if (isBossKind(enemy.kind)) this.showBossDrop(enemy);
       deathBurst(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, radius * 2);
       entity.view.destroy();
       entity.hpBar.destroy();
@@ -1251,7 +1304,8 @@ export class PlayScene extends Phaser.Scene {
     if (lines.length === 0) return;
 
     const x = Phaser.Math.Clamp(enemy.x, this.bounds.minX + 180, this.bounds.maxX - 180);
-    const y = Phaser.Math.Clamp(enemy.y - ENEMY_STATS.boss.radius - 78, this.bounds.minY + 80, this.bounds.maxY - 80);
+    const radius = ENEMY_STATS[enemy.kind].radius;
+    const y = Phaser.Math.Clamp(enemy.y - radius - 78, this.bounds.minY + 80, this.bounds.maxY - 80);
     const text = this.add
       .text(x, y, lines.join('\n'), {
         fontFamily: 'sans-serif',
@@ -1268,7 +1322,7 @@ export class PlayScene extends Phaser.Scene {
       .setStrokeStyle(2, BOSS_PATTERN_COLOR, 0.8)
       .setDepth(16);
 
-    ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: ENEMY_STATS.boss.radius, to: ENEMY_STATS.boss.radius * 2.8, duration: 620, width: 5 });
+    ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: radius, to: radius * 2.8, duration: 620, width: 5 });
     this.tweens.add({
       targets: [text, plate],
       y: y - 18,
@@ -1379,7 +1433,7 @@ export class PlayScene extends Phaser.Scene {
       const point = this.minimapPoint(enemy.state.x, enemy.state.y);
       dot.setPosition(point.x, point.y).setVisible(true);
       // 보스는 크게 찍어 구분한다.
-      dot.setRadius(enemy.state.kind === 'boss' ? 5 : 2.5);
+      dot.setRadius(isBossKind(enemy.state.kind) ? 5 : 2.5);
     }
 
     if (this.exitOpen) {
@@ -1576,8 +1630,8 @@ export class PlayScene extends Phaser.Scene {
     container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 120, '마을', {
-          fontSize: '48px',
+        .text((VIEW_WIDTH / 2), 82, '마을', {
+          fontSize: '42px',
           color: COLORS.text,
           fontStyle: 'bold',
         })
@@ -1585,8 +1639,8 @@ export class PlayScene extends Phaser.Scene {
     );
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 176, '실체화 장비가 새로운 무기 형태를 기억했다', {
-          fontSize: '18px',
+        .text((VIEW_WIDTH / 2), 128, '실체화 장비가 새로운 무기 형태를 기억했다', {
+          fontSize: '17px',
           color: COLORS.textDim,
         })
         .setOrigin(0.5),
@@ -1596,28 +1650,22 @@ export class PlayScene extends Phaser.Scene {
     const reward = ROOMS[this.run.roomIndex]?.reward;
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 270, [...this.rewardLines(reward), `보유 무기: ${unlocked}`, `R키 무기 교체 기능 해금`].join('\n'), {
-          fontSize: '22px',
+        .text((VIEW_WIDTH / 2), 220, [...this.rewardLines(reward), `보유 무기: ${unlocked}`, `R키 무기 교체 기능 해금`].join('\n'), {
+          fontSize: '16px',
           color: COLORS.text,
           align: 'center',
-          lineSpacing: 14,
+          lineSpacing: 4,
           wordWrap: { width: VIEW_WIDTH - 180 },
         })
         .setOrigin(0.5),
     );
 
-    container.add(
-      this.add
-        .text((VIEW_WIDTH / 2), 420, '기본 실체화 세팅이 장착됐다. 세부 편집 UI는 다음 단계에서 열린다', {
-          fontSize: '16px',
-          color: COLORS.textDim,
-        })
-        .setOrigin(0.5),
-    );
+    this.renderManifestationPanel(container);
+    this.renderWheelSetupPanel(container);
 
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), VIEW_HEIGHT - 110, 'R 키를 눌러 다음 전투로 이동', {
+        .text((VIEW_WIDTH / 2), VIEW_HEIGHT - 56, 'R 키를 눌러 다음 전투로 이동', {
           fontSize: '20px',
           color: COLORS.accentText,
           fontStyle: 'bold',
@@ -1627,6 +1675,147 @@ export class PlayScene extends Phaser.Scene {
 
     this.overlay = container;
     this.refreshHud();
+  }
+
+  private renderManifestationPanel(container: Phaser.GameObjects.Container): void {
+    const startX = 98;
+    const startY = 318;
+    const rowHeight = 50;
+    const column = {
+      weapon: startX,
+      combo: startX + 170,
+      primary: startX + 410,
+      synergy: startX + 660,
+    };
+
+    container.add(this.add.text(startX, startY - 36, '실체화 장비 설정', { fontSize: '22px', color: COLORS.text, fontStyle: 'bold' }));
+    container.add(this.add.text(column.weapon, startY - 8, '무기', { fontSize: '14px', color: COLORS.textDim }));
+    container.add(this.add.text(column.combo, startY - 8, '콤보스킬', { fontSize: '14px', color: COLORS.textDim }));
+    container.add(this.add.text(column.primary, startY - 8, '보조1형', { fontSize: '14px', color: COLORS.textDim }));
+    container.add(this.add.text(column.synergy, startY - 8, '보조2형', { fontSize: '14px', color: COLORS.textDim }));
+
+    for (const [index, weaponId] of this.run.progress.unlockedWeapons.entries()) {
+      const weapon = weaponOf(weaponId);
+      const config = this.run.progress.configs[weaponId];
+      const y = startY + 20 + index * rowHeight;
+      const comboName = findSkill(config.comboSkillId)?.name ?? weapon.combo.name;
+      const primary = config.primarySupportId ? findSupport(config.primarySupportId) : undefined;
+      const synergy = config.synergySupportId ? findSupport(config.synergySupportId) : undefined;
+      const primaryCandidates = this.supportCandidates(weapon.combo, 'primary');
+      const synergyCandidates = this.supportCandidates(weapon.combo, 'synergy');
+
+      container.add(this.add.text(column.weapon, y, weapon.name, { fontSize: '18px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0, 0.5));
+      container.add(this.add.text(column.combo, y, comboName, { fontSize: '16px', color: COLORS.text }).setOrigin(0, 0.5));
+      this.addSlotButton(container, column.primary, y, primary?.name ?? '비어 있음', primaryCandidates.length > 0, () => {
+        this.cycleSupport(weaponId, 'primarySupportId', primaryCandidates);
+      });
+      this.addSlotButton(container, column.synergy, y, synergy?.name ?? '비어 있음', synergyCandidates.length > 0, () => {
+        this.cycleSupport(weaponId, 'synergySupportId', synergyCandidates);
+      });
+    }
+  }
+
+  private supportCandidates(skill: Skill, slot: 'primary' | 'synergy'): Support[] {
+    return this.run.progress.ownedSupports.flatMap((id) => {
+      const support = findSupport(id);
+      if (!support) return [];
+      if (supportSlotType(support) !== slot) return [];
+      return canAttach(skill, support).ok ? [support] : [];
+    });
+  }
+
+  private addSlotButton(
+    container: Phaser.GameObjects.Container,
+    x: number,
+    y: number,
+    label: string,
+    enabled: boolean,
+    onClick: () => void,
+  ): void {
+    const width = 220;
+    const height = 36;
+    const fill = enabled ? 0x242a3a : 0x171923;
+    const stroke = enabled ? COLORS.accent : 0x3a4059;
+    const rect = this.add
+      .rectangle(x, y, width, height, fill, 0.92)
+      .setOrigin(0, 0.5)
+      .setStrokeStyle(1, stroke, enabled ? 0.75 : 0.35);
+    const text = this.add
+      .text(x + 14, y, label, {
+        fontSize: '16px',
+        color: enabled ? COLORS.text : COLORS.textDim,
+        wordWrap: { width: width - 28 },
+      })
+      .setOrigin(0, 0.5);
+
+    if (enabled) {
+      rect.setInteractive({ useHandCursor: true });
+      rect.on('pointerover', () => rect.setFillStyle(0x2e3650, 0.96));
+      rect.on('pointerout', () => rect.setFillStyle(fill, 0.92));
+      rect.on('pointerdown', onClick);
+    }
+
+    container.add(rect);
+    container.add(text);
+  }
+
+  private cycleSupport(weapon: WeaponId, slot: 'primarySupportId' | 'synergySupportId', candidates: readonly Support[]): void {
+    const current = this.run.progress.configs[weapon][slot];
+    const ids = [null, ...candidates.map((support) => support.id)] as const;
+    const nextId = ids[(ids.indexOf(current) + 1) % ids.length] ?? null;
+    const progress = configureManifestation(this.run.progress, weapon, { [slot]: nextId });
+
+    this.run = {
+      ...this.run,
+      progress,
+      loadout: loadoutFromProgress(progress, this.run.loadout),
+    };
+    this.refreshHud();
+    this.closeOverlay();
+    this.showTown();
+  }
+
+  private renderWheelSetupPanel(container: Phaser.GameObjects.Container): void {
+    const y = VIEW_HEIGHT - 132;
+    const startX = 98;
+    container.add(this.add.text(startX, y - 38, 'R링 무기 후보', { fontSize: '20px', color: COLORS.text, fontStyle: 'bold' }));
+    container.add(this.add.text(startX, y - 12, '왼손', { fontSize: '14px', color: COLORS.textDim }));
+    container.add(this.add.text(startX + 500, y - 12, '오른손', { fontSize: '14px', color: COLORS.textDim }));
+
+    this.addWheelSlotButton(container, startX, y + 18, '왼손 1', this.run.progress.wheel.left[0], 'left', 0);
+    this.addWheelSlotButton(container, startX + 240, y + 18, '왼손 2', this.run.progress.wheel.left[1], 'left', 1);
+    this.addWheelSlotButton(container, startX + 500, y + 18, '오른손 1', this.run.progress.wheel.right[0], 'right', 0);
+    this.addWheelSlotButton(container, startX + 740, y + 18, '오른손 2', this.run.progress.wheel.right[1], 'right', 1);
+  }
+
+  private addWheelSlotButton(
+    container: Phaser.GameObjects.Container,
+    x: number,
+    y: number,
+    label: string,
+    weapon: WheelSlot,
+    hand: Hand,
+    index: 0 | 1,
+  ): void {
+    this.addSlotButton(container, x, y, `${label}: ${weapon ? weaponOf(weapon).name : '-'}`, true, () => {
+      this.cycleWheelSlot(hand, index);
+    });
+  }
+
+  private cycleWheelSlot(hand: Hand, index: 0 | 1): void {
+    const current = this.run.progress.wheel[hand][index];
+    const candidates: WheelSlot[] = [null, ...this.run.progress.unlockedWeapons];
+    const next = candidates[(candidates.indexOf(current) + 1) % candidates.length] ?? null;
+    const progress = setWheelSlot(this.run.progress, hand, index, next);
+
+    this.run = {
+      ...this.run,
+      progress,
+      loadout: loadoutFromProgress(progress, this.run.loadout),
+    };
+    this.refreshHud();
+    this.closeOverlay();
+    this.showTown();
   }
 
   /**

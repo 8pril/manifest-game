@@ -18,6 +18,13 @@ import {
   BOSS_CHARGE_SPEED,
   BOSS_WALL_STAGGER,
   BOSS_SUMMON_COUNT,
+  BOSS_SHARD_COUNT,
+  BOSS_SHARD_DAMAGE,
+  BOSS_SHARD_SPEED,
+  BOSS_SHOCK_COOLDOWN,
+  BOSS_SHOCK_DAMAGE,
+  BOSS_SHOCK_RADIUS,
+  BOSS_SHOCK_TELEGRAPH,
   staggerBossOnWall,
 } from '@/game/enemy';
 import { beforeEach } from 'vitest';
@@ -123,7 +130,7 @@ describe('적 구성', () => {
 
 describe('boss patterns', () => {
   it('보스는 돌진 예고 뒤 돌진하고 다시 대기한다', () => {
-    const boss = createEnemy('boss', 100, 0);
+    const boss = createEnemy('gatekeeper', 100, 0);
 
     const telegraph = advanceBossPattern(boss, player, BOSS_CHARGE_COOLDOWN);
     expect(telegraph).toEqual([{ kind: 'chargeTelegraph', direction: { x: -1, y: 0 } }]);
@@ -135,14 +142,14 @@ describe('boss patterns', () => {
     expect(boss.boss?.phase).toBe('charging');
     expect(bossMoveDirection(boss, player)).toEqual({ x: -1, y: 0 });
     expect(bossMoveSpeed(boss)).toBe(BOSS_CHARGE_SPEED);
-    expect(bossContactDamage(boss)).toBeGreaterThan(ENEMY_STATS.boss.contactDamage);
+    expect(bossContactDamage(boss)).toBeGreaterThan(ENEMY_STATS.gatekeeper.contactDamage);
 
     advanceBossPattern(boss, player, BOSS_CHARGE_DURATION);
     expect(boss.boss?.phase).toBe('idle');
   });
 
   it('돌진 중 벽에 부딪히면 잠시 멈춘다', () => {
-    const boss = createEnemy('boss', 100, 0);
+    const boss = createEnemy('gatekeeper', 100, 0);
 
     advanceBossPattern(boss, player, BOSS_CHARGE_COOLDOWN);
     advanceBossPattern(boss, player, BOSS_CHARGE_TELEGRAPH);
@@ -157,14 +164,14 @@ describe('boss patterns', () => {
   });
 
   it('돌진 중이 아니면 벽 충돌 멈춤을 걸지 않는다', () => {
-    const boss = createEnemy('boss', 100, 0);
+    const boss = createEnemy('gatekeeper', 100, 0);
 
     expect(staggerBossOnWall(boss)).toBe(false);
     expect(boss.boss?.phase).toBe('idle');
   });
 
   it('체력 구간마다 사냥개 소환 이벤트를 한 번만 낸다', () => {
-    const boss = createEnemy('boss', 0, 0);
+    const boss = createEnemy('gatekeeper', 0, 0);
     boss.hp = boss.maxHp * 0.69;
 
     expect(advanceBossPattern(boss, player, 0)).toEqual([{ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold: 0.7 }]);
@@ -172,6 +179,34 @@ describe('boss patterns', () => {
 
     boss.hp = boss.maxHp * 0.34;
     expect(advanceBossPattern(boss, player, 0)).toEqual([{ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold: 0.35 }]);
+  });
+
+  it('무너진 문은 충격파를 예고한 뒤 발동한다', () => {
+    const boss = createEnemy('collapsedDoor', 100, 0);
+
+    expect(advanceBossPattern(boss, player, BOSS_SHOCK_COOLDOWN)).toEqual([{ kind: 'shockTelegraph', radius: BOSS_SHOCK_RADIUS }]);
+    expect(boss.boss?.phase).toBe('shockTelegraph');
+    expect(bossMoveDirection(boss, player)).toBeNull();
+
+    expect(advanceBossPattern(boss, player, BOSS_SHOCK_TELEGRAPH)).toEqual([
+      { kind: 'shockwave', radius: BOSS_SHOCK_RADIUS, damage: BOSS_SHOCK_DAMAGE },
+    ]);
+    expect(boss.boss?.phase).toBe('idle');
+  });
+
+  it('무너진 문은 체력 구간마다 파편 탄막을 한 번만 낸다', () => {
+    const boss = createEnemy('collapsedDoor', 0, 0);
+    boss.hp = boss.maxHp * 0.74;
+
+    expect(advanceBossPattern(boss, player, 0)).toEqual([
+      { kind: 'shardBurst', count: BOSS_SHARD_COUNT, damage: BOSS_SHARD_DAMAGE, speed: BOSS_SHARD_SPEED, threshold: 0.75 },
+    ]);
+    expect(advanceBossPattern(boss, player, 0)).toEqual([]);
+
+    boss.hp = boss.maxHp * 0.44;
+    expect(advanceBossPattern(boss, player, 0)).toEqual([
+      { kind: 'shardBurst', count: BOSS_SHARD_COUNT, damage: BOSS_SHARD_DAMAGE, speed: BOSS_SHARD_SPEED, threshold: 0.45 },
+    ]);
   });
 
   it('일반 적은 보스 패턴 이벤트를 내지 않는다', () => {

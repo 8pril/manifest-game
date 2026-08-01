@@ -15,7 +15,7 @@ import { createStatusHost, type StatusHost } from '@/engine/status';
  * 때문이다. 거리를 벌리는 행동에 대가를 만든다.
  */
 
-export type EnemyKind = 'chaser' | 'brute' | 'archer' | 'boss';
+export type EnemyKind = 'chaser' | 'brute' | 'archer' | 'gatekeeper' | 'collapsedDoor';
 export type EnemyBehavior = 'chase' | 'ranged';
 
 export interface EnemyStats {
@@ -81,7 +81,7 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
     projectileSpeed: 290,
   },
   // 문지기는 잡몹보다 확연히 커야 한다. 반지름이 사냥개의 3.4배다.
-  boss: {
+  gatekeeper: {
     label: '문지기',
     hp: 1600,
     speed: 74,
@@ -89,6 +89,16 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
     contactDamage: 22,
     contactCooldown: 0.9,
     color: 0xff6b3d,
+    behavior: 'chase',
+  },
+  collapsedDoor: {
+    label: '무너진 문',
+    hp: 2200,
+    speed: 46,
+    radius: 78,
+    contactDamage: 18,
+    contactCooldown: 1.0,
+    color: 0x8f7cff,
     behavior: 'chase',
   },
 };
@@ -110,7 +120,7 @@ export interface Enemy extends StatusHost {
   boss?: BossState;
 }
 
-export type BossPhase = 'idle' | 'telegraph' | 'charging' | 'staggered';
+export type BossPhase = 'idle' | 'telegraph' | 'charging' | 'staggered' | 'shockTelegraph';
 
 export interface BossState {
   phase: BossPhase;
@@ -118,6 +128,7 @@ export interface BossState {
   telegraphRemaining: number;
   chargeRemaining: number;
   staggerRemaining: number;
+  shockRemaining: number;
   chargeDirection: Vec2;
   summonedAt: readonly number[];
 }
@@ -125,7 +136,10 @@ export interface BossState {
 export type BossEvent =
   | { kind: 'chargeTelegraph'; direction: Vec2 }
   | { kind: 'chargeStart'; direction: Vec2 }
-  | { kind: 'summon'; count: number; threshold: number };
+  | { kind: 'summon'; count: number; threshold: number }
+  | { kind: 'shockTelegraph'; radius: number }
+  | { kind: 'shockwave'; radius: number; damage: number }
+  | { kind: 'shardBurst'; count: number; damage: number; speed: number; threshold: number };
 
 export const BOSS_CHARGE_COOLDOWN = 4.2;
 export const BOSS_CHARGE_TELEGRAPH = 0.75;
@@ -135,6 +149,14 @@ export const BOSS_CHARGE_DAMAGE_MULTIPLIER = 1.6;
 export const BOSS_WALL_STAGGER = 1.1;
 export const BOSS_SUMMON_THRESHOLDS = [0.7, 0.35] as const;
 export const BOSS_SUMMON_COUNT = 4;
+export const BOSS_SHOCK_COOLDOWN = 3.4;
+export const BOSS_SHOCK_TELEGRAPH = 0.85;
+export const BOSS_SHOCK_RADIUS = 260;
+export const BOSS_SHOCK_DAMAGE = 18;
+export const BOSS_SHARD_THRESHOLDS = [0.75, 0.45] as const;
+export const BOSS_SHARD_COUNT = 10;
+export const BOSS_SHARD_DAMAGE = 12;
+export const BOSS_SHARD_SPEED = 330;
 
 let nextId = 1;
 export function resetEnemyIds(): void {
@@ -154,17 +176,22 @@ export function createEnemy(kind: EnemyKind, x: number, y: number): Enemy {
     sinceContact: stats.contactCooldown,
     sinceAttack: 0,
     hindered: false,
-    boss: kind === 'boss' ? createBossState() : undefined,
+    boss: isBossKind(kind) ? createBossState(kind) : undefined,
   };
 }
 
-function createBossState(): BossState {
+export function isBossKind(kind: EnemyKind): boolean {
+  return kind === 'gatekeeper' || kind === 'collapsedDoor';
+}
+
+function createBossState(kind: EnemyKind): BossState {
   return {
     phase: 'idle',
-    chargeCooldown: BOSS_CHARGE_COOLDOWN,
+    chargeCooldown: kind === 'collapsedDoor' ? BOSS_SHOCK_COOLDOWN : BOSS_CHARGE_COOLDOWN,
     telegraphRemaining: 0,
     chargeRemaining: 0,
     staggerRemaining: 0,
+    shockRemaining: 0,
     chargeDirection: { x: 1, y: 0 },
     summonedAt: [],
   };
@@ -239,10 +266,15 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
   const boss = enemy.boss;
 
   const hpRatio = enemy.maxHp > 0 ? enemy.hp / enemy.maxHp : 0;
-  for (const threshold of BOSS_SUMMON_THRESHOLDS) {
+  const thresholds = enemy.kind === 'collapsedDoor' ? BOSS_SHARD_THRESHOLDS : BOSS_SUMMON_THRESHOLDS;
+  for (const threshold of thresholds) {
     if (hpRatio <= threshold && !boss.summonedAt.includes(threshold)) {
       boss.summonedAt = [...boss.summonedAt, threshold];
-      events.push({ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold });
+      if (enemy.kind === 'collapsedDoor') {
+        events.push({ kind: 'shardBurst', count: BOSS_SHARD_COUNT, damage: BOSS_SHARD_DAMAGE, speed: BOSS_SHARD_SPEED, threshold });
+      } else {
+        events.push({ kind: 'summon', count: BOSS_SUMMON_COUNT, threshold });
+      }
     }
   }
 
@@ -264,6 +296,16 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
     return events;
   }
 
+  if (boss.phase === 'shockTelegraph') {
+    boss.shockRemaining -= deltaSeconds;
+    if (boss.shockRemaining <= 0) {
+      boss.phase = 'idle';
+      boss.chargeCooldown = BOSS_SHOCK_COOLDOWN;
+      events.push({ kind: 'shockwave', radius: BOSS_SHOCK_RADIUS, damage: BOSS_SHOCK_DAMAGE });
+    }
+    return events;
+  }
+
   if (boss.phase === 'telegraph') {
     boss.telegraphRemaining -= deltaSeconds;
     if (boss.telegraphRemaining <= 0) {
@@ -276,6 +318,12 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
 
   boss.chargeCooldown -= deltaSeconds;
   if (boss.chargeCooldown <= 0) {
+    if (enemy.kind === 'collapsedDoor') {
+      boss.phase = 'shockTelegraph';
+      boss.shockRemaining = BOSS_SHOCK_TELEGRAPH;
+      events.push({ kind: 'shockTelegraph', radius: BOSS_SHOCK_RADIUS });
+      return events;
+    }
     boss.phase = 'telegraph';
     boss.telegraphRemaining = BOSS_CHARGE_TELEGRAPH;
     boss.chargeDirection = directionTo(enemy, target);
@@ -288,6 +336,7 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
 export function bossMoveDirection(enemy: Enemy, target: Vec2): Vec2 | null {
   if (enemy.boss?.phase === 'telegraph') return null;
   if (enemy.boss?.phase === 'staggered') return null;
+  if (enemy.boss?.phase === 'shockTelegraph') return null;
   if (enemy.boss?.phase === 'charging') return enemy.boss.chargeDirection;
   return desiredDirection(enemy, target);
 }
