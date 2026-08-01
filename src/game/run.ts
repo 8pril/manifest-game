@@ -5,6 +5,7 @@ import {
   configureManifestation,
   createInitialProgress,
   setWheelSlot,
+  unlockSupports,
   unlockWeapons,
   unlockWeaponSwitch,
   type PlayerProgress,
@@ -100,7 +101,13 @@ export function clearRoom(run: RunState): RunState {
 }
 
 function configureDefaultTownLoadout(progress: PlayerProgress): PlayerProgress {
-  let next = progress;
+  let next = unlockSupports(progress, [
+    'earthquake',
+    'lasting-composure',
+    'multiple-projectiles',
+    'fork',
+    'dragging-ground',
+  ]);
   if (next.unlockedWeapons.includes('sword')) {
     next = configureManifestation(next, 'sword', { primarySupportId: 'earthquake', synergySupportId: 'lasting-composure' });
   }

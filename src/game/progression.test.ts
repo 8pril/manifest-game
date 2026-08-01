@@ -4,8 +4,11 @@ import {
   configuredSupports,
   createInitialProgress,
   equipFromWheel,
+  hasComboSkill,
+  hasSupport,
   hasWeapon,
   setWheelSlot,
+  unlockSupports,
   unlockWeapons,
   unlockWeaponSwitch,
 } from '@/game/progression';
@@ -15,6 +18,8 @@ describe('createInitialProgress', () => {
     const progress = createInitialProgress();
 
     expect(progress.unlockedWeapons).toEqual(['sword']);
+    expect(progress.ownedComboSkills).toEqual(['annihilation']);
+    expect(progress.ownedSupports).toEqual([]);
     expect(progress.weaponSwitchUnlocked).toBe(false);
     expect(progress.active).toEqual({ left: 'sword', right: null });
     expect(progress.wheel.left).toEqual(['sword', null]);
@@ -38,7 +43,9 @@ describe('weapon unlocks', () => {
     const progress = unlockWeapons(createInitialProgress(), ['bow', 'shield']);
 
     expect(progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
+    expect(progress.ownedComboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
     expect(hasWeapon(progress, 'bow')).toBe(true);
+    expect(hasComboSkill(progress, 'volley')).toBe(true);
     expect(hasWeapon(progress, 'arcane')).toBe(false);
   });
 
@@ -46,6 +53,17 @@ describe('weapon unlocks', () => {
     const progress = unlockWeapons(createInitialProgress(), ['shield', 'bow']);
 
     expect(progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
+    expect(progress.ownedComboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
+  });
+});
+
+describe('owned supports', () => {
+  it('보조형스킬은 id 배열로 보유한다', () => {
+    const progress = unlockSupports(createInitialProgress(), ['fork', 'multiple-projectiles', 'fork']);
+
+    expect(progress.ownedSupports).toEqual(['fork', 'multiple-projectiles']);
+    expect(hasSupport(progress, 'fork')).toBe(true);
+    expect(hasSupport(progress, 'earthquake')).toBe(false);
   });
 });
 
@@ -80,26 +98,49 @@ describe('weapon wheel', () => {
 
 describe('manifestation config', () => {
   it('해금된 무기의 콤보스킬과 보조형스킬 슬롯을 바꾼다', () => {
-    const progress = unlockWeapons(createInitialProgress(), ['bow']);
+    const progress = unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['multiple-projectiles', 'fork']);
     const configured = configureManifestation(progress, 'bow', {
       primarySupportId: 'multi-projectile',
-      synergySupportId: 'wound-seeker',
+      synergySupportId: 'fork',
     });
 
     expect(configured.configs.bow).toMatchObject({
       comboSkillId: 'volley',
-      primarySupportId: 'multi-projectile',
-      synergySupportId: 'wound-seeker',
+      primarySupportId: null,
+      synergySupportId: 'fork',
     });
   });
 
   it('설정 슬롯에서 실제 보조능력 데이터를 읽는다', () => {
-    const progress = configureManifestation(unlockWeapons(createInitialProgress(), ['bow']), 'bow', {
+    const progress = configureManifestation(
+      unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['multiple-projectiles', 'fork']),
+      'bow',
+      {
+        primarySupportId: 'multiple-projectiles',
+        synergySupportId: 'fork',
+      },
+    );
+
+    expect(configuredSupports(progress, 'bow').map((support) => support.id)).toEqual(['multiple-projectiles', 'fork']);
+  });
+
+  it('미보유 보조형스킬은 설정과 읽기 경로에서 적용하지 않는다', () => {
+    const progress = unlockWeapons(createInitialProgress(), ['bow']);
+    const configured = configureManifestation(progress, 'bow', {
       primarySupportId: 'multiple-projectiles',
       synergySupportId: 'fork',
     });
 
-    expect(configuredSupports(progress, 'bow').map((support) => support.id)).toEqual(['multiple-projectiles', 'fork']);
+    expect(configured.configs.bow.primarySupportId).toBeNull();
+    expect(configured.configs.bow.synergySupportId).toBeNull();
+    expect(configuredSupports(configured, 'bow')).toEqual([]);
+  });
+
+  it('미보유 콤보스킬은 설정하지 않는다', () => {
+    const progress = createInitialProgress();
+    const configured = configureManifestation(progress, 'sword', { comboSkillId: 'volley' });
+
+    expect(configured.configs.sword.comboSkillId).toBe('annihilation');
   });
 
   it('아직 해금되지 않은 무기 설정은 바꾸지 않는다', () => {

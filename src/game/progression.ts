@@ -31,6 +31,8 @@ export type ManifestationConfigs = Readonly<Record<WeaponId, ManifestationConfig
 
 export interface PlayerProgress {
   unlockedWeapons: readonly WeaponId[];
+  ownedComboSkills: readonly string[];
+  ownedSupports: readonly string[];
   weaponSwitchUnlocked: boolean;
   active: {
     left: WeaponId;
@@ -43,6 +45,8 @@ export interface PlayerProgress {
 export function createInitialProgress(): PlayerProgress {
   return {
     unlockedWeapons: ['sword'],
+    ownedComboSkills: [weaponOf('sword').combo.id],
+    ownedSupports: [],
     weaponSwitchUnlocked: false,
     active: { left: 'sword', right: null },
     wheel: {
@@ -70,6 +74,14 @@ export function hasWeapon(progress: PlayerProgress, weapon: WeaponId): boolean {
   return progress.unlockedWeapons.includes(weapon);
 }
 
+export function hasComboSkill(progress: PlayerProgress, skillId: string): boolean {
+  return progress.ownedComboSkills.includes(skillId);
+}
+
+export function hasSupport(progress: PlayerProgress, supportId: string): boolean {
+  return progress.ownedSupports.includes(supportId);
+}
+
 export function unlockWeapons(progress: PlayerProgress, weapons: readonly WeaponId[]): PlayerProgress {
   const unlocked = new Set(progress.unlockedWeapons);
   for (const weapon of weapons) unlocked.add(weapon);
@@ -77,6 +89,21 @@ export function unlockWeapons(progress: PlayerProgress, weapons: readonly Weapon
   return {
     ...progress,
     unlockedWeapons: WEAPON_IDS.filter((weapon) => unlocked.has(weapon)),
+    ownedComboSkills: orderedComboSkillIds(progress.ownedComboSkills, [...unlocked].map((weapon) => weaponOf(weapon).combo.id)),
+  };
+}
+
+export function unlockComboSkills(progress: PlayerProgress, skillIds: readonly string[]): PlayerProgress {
+  return {
+    ...progress,
+    ownedComboSkills: orderedComboSkillIds(progress.ownedComboSkills, skillIds),
+  };
+}
+
+export function unlockSupports(progress: PlayerProgress, supportIds: readonly string[]): PlayerProgress {
+  return {
+    ...progress,
+    ownedSupports: orderedIds(progress.ownedSupports, supportIds),
   };
 }
 
@@ -128,6 +155,7 @@ export function configureManifestation(
   patch: Partial<ManifestationConfig>,
 ): PlayerProgress {
   if (!hasWeapon(progress, weapon)) return progress;
+  const accepted = sanitizeManifestationPatch(progress, weapon, patch);
 
   return {
     ...progress,
@@ -135,7 +163,7 @@ export function configureManifestation(
       ...progress.configs,
       [weapon]: {
         ...progress.configs[weapon],
-        ...patch,
+        ...accepted,
       },
     },
   };
@@ -145,7 +173,46 @@ export function configuredSupports(progress: PlayerProgress, weapon: WeaponId): 
   const config = progress.configs[weapon];
   return [config.primarySupportId, config.synergySupportId].flatMap((id) => {
     if (!id) return [];
+    if (!hasSupport(progress, id)) return [];
     const support = findSupport(id);
     return support ? [support] : [];
   });
+}
+
+function sanitizeManifestationPatch(
+  progress: PlayerProgress,
+  weapon: WeaponId,
+  patch: Partial<ManifestationConfig>,
+): Partial<ManifestationConfig> {
+  const accepted: Partial<ManifestationConfig> = {};
+  const current = progress.configs[weapon];
+
+  if (patch.comboSkillId !== undefined && hasComboSkill(progress, patch.comboSkillId)) {
+    accepted.comboSkillId = patch.comboSkillId;
+  }
+  if (patch.primarySupportId !== undefined) {
+    accepted.primarySupportId = patch.primarySupportId === null || hasSupport(progress, patch.primarySupportId)
+      ? patch.primarySupportId
+      : current.primarySupportId;
+  }
+  if (patch.synergySupportId !== undefined) {
+    accepted.synergySupportId = patch.synergySupportId === null || hasSupport(progress, patch.synergySupportId)
+      ? patch.synergySupportId
+      : current.synergySupportId;
+  }
+
+  return accepted;
+}
+
+function orderedComboSkillIds(existing: readonly string[], added: readonly string[]): readonly string[] {
+  const ids = orderedIds(existing, added);
+  const comboOrder = WEAPON_IDS.map((weapon) => weaponOf(weapon).combo.id);
+  return [
+    ...comboOrder.filter((id) => ids.includes(id)),
+    ...ids.filter((id) => !comboOrder.includes(id)),
+  ];
+}
+
+function orderedIds(existing: readonly string[], added: readonly string[]): readonly string[] {
+  return [...new Set([...existing, ...added])];
 }

@@ -1787,6 +1787,19 @@ Pages 빌드에는 검 1종·마을·링 메뉴가 없다.
 - 검증: `npm test` 통과(15 files, 206 passed). `npm run build` 통과. Vite chunk size warning은 기존 번들 크기 경고.
 - 남은 이슈: 플레이 테스트에서 기절 빈도와 가시성을 확인한 뒤, 필요하면 방패의 기절 확률/확정 기절 여부를 조정한다.
 
+### 2026-08-01 - id 배열 기반 보유 상태 추가
+
+- 단계: Stage D / 진행 보유 상태
+- AI 도구: Codex
+- 입력 프롬프트 / 지시: "응 진행해" — 다음 개발 작업인 `PlayerProgress`의 id 배열 기반 `ownedComboSkills`, `ownedSupports` 추가를 진행.
+- AI 출력 요약: 보스 드랍/마을 장착 UI 전에 필요한 보유 상태 모델을 추가하고, 미보유 콤보스킬/보조형스킬이 설정 또는 전투 해석에 적용되지 않게 방어했다.
+- 사람이 검토/수정한 내용: 저장을 고려해 객체 참조가 아니라 id 문자열 배열로 보유 상태를 둔다. 보스 드랍이 아직 없으므로 기존 예선 플레이가 깨지지 않게 첫 마을 기본 세팅은 필요한 보조형스킬을 임시 보유시킨 뒤 장착한다.
+- 반영한 내용: `PlayerProgress`에 `ownedComboSkills`, `ownedSupports`를 추가했다. `unlockWeapons()`는 새 무기의 기본 콤보스킬을 함께 보유시킨다. `unlockComboSkills()`, `unlockSupports()`, `hasComboSkill()`, `hasSupport()`를 추가했다. `configureManifestation()`은 미보유 id를 받아도 기존 설정을 유지하고, `configuredSupports()`는 읽기 경로에서 미보유 보조형스킬을 필터링한다.
+- 게임/문서 반영 여부: 코드와 문서에 반영.
+- 관련 파일: `src/game/progression.ts`, `src/game/progression.test.ts`, `src/game/loadout.test.ts`, `src/game/run.ts`, `docs/action-tracker.md`, `docs/full-concept-implementation-plan.md`, `docs/ai-usage-log.md`
+- 검증: `npm test` 통과(15 files, 213 passed). `npm run build` 통과. Vite chunk size warning은 기존 번들 크기 경고.
+- 남은 이슈: 다음 코드 작업은 보스 드랍/획득 반영과 `configureDefaultTownLoadout` 임시 공짜 세팅 제거.
+
 ### 2026-08-01 - 방패 각성의 정체성 복구 (기절 연출 + 균열 파동 넉백)
 
 - 단계: 대체 발동 후속
@@ -1867,4 +1880,49 @@ DPS 계측기는 "적이 지대 안에 계속 있다"를 가정한다. 넉백을
 - 관련 파일: `src/data/weapons.ts`, `src/scenes/PlayScene.ts`, `src/engine/knockback.test.ts`, `src/debug.ts`
 - 남은 이슈: 넉백 62의 체감은 플레이로 확인이 필요하다. 벽 충돌을 흔하게 만들려면 값을
   올리는 게 아니라 벽 근처 전투를 유도하는 설계가 필요하다
+
+### 2026-08-01 - 보유 상태 추가 (ownedComboSkills, ownedSupports)
+
+- 단계: 기획 원형 구현 플랜 #4
+- 사용 AI 도구: Codex(구현), Claude Code Opus 5(리뷰·검증)
+
+#### 구현
+
+`PlayerProgress`에 보유 개념을 넣었다. 이것이 없으면 "드랍"이라는 말이 성립하지 않는다.
+마을 UI를 만들어도 고를 것이 처음부터 다 있는 상태가 되기 때문이다.
+
+- `ownedComboSkills`, `ownedSupports`를 **id 문자열 배열**로 추가
+- 시작은 검 콤보스킬(`annihilation`) 하나만 보유, 보조형스킬은 빈 배열
+- `unlockWeapons()`가 무기를 해금할 때 그 무기의 기본 콤보스킬도 함께 보유시킨다
+- `unlockComboSkills()`, `unlockSupports()`, `hasComboSkill()`, `hasSupport()` 추가
+
+#### 리뷰 결과
+
+**데이터 형태가 의도대로다.** 리뷰에서 "#8(localStorage)을 생각해 객체 참조가 아니라
+id 문자열 배열로 두라"고 했던 것이 반영됐다. 이대로면 저장이 `JSON.stringify`로 끝나고
+마이그레이션이 생기지 않는다.
+
+**방어가 양쪽에 다 있다.** 어느 경로로 들어와도 미보유가 전투에 새지 않는다.
+- 쓰기: `sanitizeManifestationPatch`가 미보유 항목을 거르고 기존 값을 유지한다
+- 읽기: `configuredSupports`가 미보유를 전투 적용에서 제외한다
+
+**보유 순서를 무기 순으로 정규화**한 것(`orderedComboSkillIds`)도 좋다. 저장·복원 시
+배열 순서가 흔들리지 않고, 마을 UI에서 목록이 매번 다르게 보이는 일도 없다.
+
+#### 리뷰에서 짚은 것 — 지금은 보유가 무력하다
+
+`configureDefaultTownLoadout`이 마을 진입 시 필요한 보조형스킬 5종을 그 자리에서
+보유시킨다(`earthquake`, `lasting-composure`, `multiple-projectiles`, `fork`,
+`dragging-ground`). 그래서 **마을에 들어가는 순간 필요한 것이 다 생긴다.**
+
+임시 조치로는 합리적이다. 이것이 없으면 마을 세팅이 통째로 깨진다. 다만
+**#6(보스 드랍)에서 반드시 지워야 하는 코드**다. 남겨두면 드랍을 만들어도 이미 다 갖고
+있어서 획득이 의미를 잃는다. 플랜의 Stage D 작업 목록에 "공짜 기본 세팅은 보스
+드랍/획득 흐름으로 대체"로 이미 적혀 있다.
+
+- 게임/문서 반영 여부: 코드와 문서 모두에 반영
+- 관련 파일: `src/game/progression.ts`, `src/game/run.ts`
+- 남은 이슈: #5 보조형스킬 1형/2형 분류와 시너지 2~3종. 현재 15종이 전부 자기 강화라
+  2형 슬롯에 넣을 것이 하나도 없다. 마을 UI(#7)보다 먼저 와야 빈 슬롯을 대상으로
+  UI를 만드는 일이 없다
 

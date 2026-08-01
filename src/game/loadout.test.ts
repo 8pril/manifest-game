@@ -13,7 +13,7 @@ import {
   rightWeapon,
 } from '@/game/loadout';
 import { SUPPORTS } from '@/data/supports';
-import { configureManifestation, createInitialProgress, unlockWeapons } from '@/game/progression';
+import { configureManifestation, createInitialProgress, unlockSupports, unlockWeapons } from '@/game/progression';
 import { createRun, clearRoom } from '@/game/run';
 
 const pierce = SUPPORTS.find((s) => s.id === 'pierce')!;
@@ -70,6 +70,7 @@ describe('resolveFor', () => {
 describe('loadoutFromProgress', () => {
   it('마을 설정의 보조1/보조2를 무기 콤보스킬에 반영한다', () => {
     let progress = unlockWeapons(createInitialProgress(), ['bow']);
+    progress = unlockSupports(progress, ['multiple-projectiles', 'fork']);
     progress = { ...progress, active: { left: 'sword', right: 'bow' } };
     progress = configureManifestation(progress, 'bow', {
       primarySupportId: 'multiple-projectiles',
@@ -129,10 +130,26 @@ describe('supportsFromProgress', () => {
   it('태그가 맞지 않는 보조능력은 붙지 않는다', () => {
     // 다중투사체는 투사체 스킬에만 붙는다. 검의 멸검은 지대라 거부돼야 한다.
     const progress = configureManifestation(
-      unlockWeapons(createInitialProgress(), ['sword']),
+      unlockSupports(unlockWeapons(createInitialProgress(), ['sword']), ['multiple-projectiles']),
       'sword',
       { primarySupportId: 'multiple-projectiles', synergySupportId: null },
     );
+    expect(supportsFromProgress(progress)).toEqual({});
+  });
+
+  it('설정에 남아 있어도 미보유 보조능력은 붙지 않는다', () => {
+    const progress = {
+      ...unlockWeapons(createInitialProgress(), ['bow']),
+      configs: {
+        ...createInitialProgress().configs,
+        bow: {
+          comboSkillId: 'volley',
+          primarySupportId: 'multiple-projectiles',
+          synergySupportId: 'fork',
+        },
+      },
+    };
+
     expect(supportsFromProgress(progress)).toEqual({});
   });
 });
