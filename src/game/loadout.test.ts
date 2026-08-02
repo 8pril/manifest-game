@@ -111,13 +111,13 @@ describe('handOf', () => {
 });
 
 describe('supportsFromProgress', () => {
-  it('첫 보스 뒤에는 보유만 늘고 장착은 마을 UI 선택을 기다린다', () => {
+  it('첫 보스 뒤에는 보조형스킬이 아직 없다', () => {
     let run = createRun('sword', null);
     run = clearRoom(run); // 흐린 입구
     run = clearRoom(run); // 첫 문지기 → 마을
 
     expect(run.phase).toBe('town');
-    expect(run.progress.ownedSupports.length).toBeGreaterThan(0);
+    expect(run.progress.ownedSupports).toEqual([]);
     expect(run.loadout.supports).toEqual({});
   });
 

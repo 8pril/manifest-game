@@ -2178,8 +2178,12 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private supportSlotLabel(skill: Skill, current: Support | undefined, candidates: readonly Support[]): string {
+    // 보유한 보조형스킬이 하나도 없으면 슬롯 8칸이 전부 `비어 있음`으로만 남는다.
+    // 왜 비었는지 말해주지 않으면 기능이 고장 난 것처럼 읽힌다.
+    if (candidates.length === 0) return '아직 없음\n보스 드랍으로 얻는다';
+
     const currentIndex = current ? candidates.findIndex((support) => support.id === current.id) : -1;
-    const counter = candidates.length > 0 ? ` (${currentIndex >= 0 ? currentIndex + 1 : 0}/${candidates.length})` : '';
+    const counter = ` (${currentIndex >= 0 ? currentIndex + 1 : 0}/${candidates.length})`;
     if (!current) return `비어 있음${counter}`;
     const preview = this.supportPreview(skill, current);
     return `${current.name}${counter}\n${preview || this.shortSupportSummary(current)}`;

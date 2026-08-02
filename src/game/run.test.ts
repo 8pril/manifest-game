@@ -81,14 +81,7 @@ describe('clearRoom', () => {
     expect(town.roomIndex).toBe(1);
     expect(town.progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
     expect(town.progress.ownedComboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
-    expect(town.progress.ownedSupports).toEqual([
-      'earthquake',
-      'wound-resonance',
-      'multiple-projectiles',
-      'wound-seeker',
-      'dragging-ground',
-      'fracture-resonance',
-    ]);
+    expect(town.progress.ownedSupports).toEqual([]);
     expect(town.progress.weaponSwitchUnlocked).toBe(true);
     expect(town.progress.wheel.left).toEqual(['sword', 'shield']);
     expect(town.progress.wheel.right).toEqual(['bow', null]);
@@ -108,16 +101,7 @@ describe('clearRoom', () => {
     expect(run.phase).toBe('won');
     expect(run.progress.unlockedWeapons).toContain('arcane');
     expect(run.progress.ownedComboSkills).toContain('arcane-daggers');
-    expect(run.progress.ownedSupports).toEqual([
-      'earthquake',
-      'wound-resonance',
-      'multiple-projectiles',
-      'wound-seeker',
-      'dragging-ground',
-      'fracture-resonance',
-      'chain',
-      'crackling-ground',
-    ]);
+    expect(run.progress.ownedSupports).toEqual(['chain', 'crackling-ground']);
   });
 
   it('전투 중이 아니면 아무 일도 하지 않는다', () => {
@@ -350,15 +334,13 @@ describe('이미 가진 보상은 다시 획득으로 세지 않는다', () => {
     const run = clearRoom(atFirstBoss(createInitialProgress()));
 
     expect(run.gained?.weapons).toEqual(['bow', 'shield']);
-    expect(run.gained?.supports).toContain('earthquake');
+    expect(run.gained?.comboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
+    expect(run.gained?.supports).toEqual([]);
   });
 
   it('이미 다 가지고 있으면 새로 얻은 것이 없다', () => {
     // 저장이 있는 두 번째 판. 같은 보상을 또 받지만 실제로 늘어나는 것은 없다.
-    const owned = unlockSupports(
-      unlockComboSkills(unlockWeapons(createInitialProgress(), ['bow', 'shield']), ['annihilation', 'volley', 'fracture-wave']),
-      ['earthquake', 'wound-resonance', 'multiple-projectiles', 'wound-seeker', 'dragging-ground', 'fracture-resonance'],
-    );
+    const owned = unlockComboSkills(unlockWeapons(createInitialProgress(), ['bow', 'shield']), ['annihilation', 'volley', 'fracture-wave']);
 
     const run = clearRoom(atFirstBoss(owned));
 

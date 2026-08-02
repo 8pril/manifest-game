@@ -36,8 +36,8 @@ describe('방 보상', () => {
   it('첫 문지기 보상 문구', () => {
     const r = ROOMS[1].reward!;
     expect(r.weapons?.map((id) => weaponOf(id).name).join(' / ')).toBe('활 / 방패');
-    expect(r.supports?.map((id) => findSupport(id)!.name).join(' / '))
-      .toBe('지진 / 상처 공명 / 다중투사체 / 상처 추적 / 끌어내리는 지대 / 균열 공명');
+    expect(r.comboSkills?.map((id) => findSkill(id)!.name).join(' / ')).toBe('멸검 / 연사 / 균열 파동');
+    expect(r.supports ?? []).toEqual([]);
   });
 
   it('최종 보스 보상 문구', () => {

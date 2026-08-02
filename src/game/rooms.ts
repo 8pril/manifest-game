@@ -53,14 +53,6 @@ export const ROOMS: readonly RoomDef[] = [
     reward: {
       weapons: ['bow', 'shield'],
       comboSkills: ['annihilation', 'volley', 'fracture-wave'],
-      supports: [
-        'earthquake',
-        'wound-resonance',
-        'multiple-projectiles',
-        'wound-seeker',
-        'dragging-ground',
-        'fracture-resonance',
-      ],
     },
     width: 2000,
     height: 1250,
