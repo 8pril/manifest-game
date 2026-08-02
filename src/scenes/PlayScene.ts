@@ -119,6 +119,7 @@ const WHEEL_INNER_RADIUS = 24;
 const REWARD_PICKUP_RADIUS = 78;
 const REWARD_HINT_RADIUS = 170;
 const REWARD_PICKUP_DELAY_MS = 500;
+const REWARD_DROP_SPREAD = 124;
 const TOWN_WIDTH = 1600;
 const TOWN_HEIGHT = 900;
 const TOWN_NPC_RADIUS = 92;
@@ -1576,7 +1577,7 @@ export class PlayScene extends Phaser.Scene {
     const items = this.rewardItems(reward);
     if (!items.length) return false;
 
-    const spread = items.length === 1 ? 0 : Math.max(54, items.length * 18);
+    const spread = REWARD_DROP_SPREAD;
     const angleStep = (Math.PI * 2) / items.length;
     const startAngle = -Math.PI / 2;
 
