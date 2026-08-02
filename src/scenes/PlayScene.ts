@@ -117,6 +117,7 @@ const WHEEL_OPEN_MS = 150;
 const WHEEL_RADIUS = 122;
 const WHEEL_INNER_RADIUS = 24;
 const REWARD_PICKUP_RADIUS = 78;
+const REWARD_HINT_RADIUS = 170;
 const TOWN_WIDTH = 1600;
 const TOWN_HEIGHT = 900;
 const TOWN_NPC_RADIUS = 92;
@@ -152,6 +153,8 @@ interface WheelSegment {
   weapon: WeaponId | null;
   wedge: Phaser.GameObjects.Arc;
   label: Phaser.GameObjects.Text;
+  meta: Phaser.GameObjects.Text;
+  activeMark: Phaser.GameObjects.Text;
 }
 
 interface WeaponWheelMenu {
@@ -368,10 +371,7 @@ export class PlayScene extends Phaser.Scene {
       }
       this.openWeaponWheel();
     });
-    keyboard.on('keydown-F', () => {
-      if (this.tryCollectRewardDrop()) return;
-      this.tryTalkTownNpc();
-    });
+    keyboard.on('keydown-F', () => this.tryTalkTownNpc());
     keyboard.on('keyup-R', () => {
       if (this.weaponWheel) this.closeWeaponWheel(true);
     });
@@ -1558,7 +1558,7 @@ export class PlayScene extends Phaser.Scene {
     const glow = this.add.circle(x, y, 34, BOSS_PATTERN_COLOR, 0.2).setDepth(8);
     const marker = this.add.rectangle(x, y, 32, 32, BOSS_PATTERN_COLOR, 0.95).setAngle(45).setDepth(9);
     const prompt = this.add
-      .text(this.player.x - 54, this.player.y + PLAYER_RADIUS + 18, 'F 획득', {
+      .text(this.player.x - 74, this.player.y + PLAYER_RADIUS + 18, '가까이 가면 획득', {
         fontSize: '15px',
         color: COLORS.accentText,
         fontStyle: 'bold',
@@ -1585,15 +1585,19 @@ export class PlayScene extends Phaser.Scene {
   private updateRewardDropPrompt(): void {
     const drop = this.rewardDrop;
     if (!drop || drop.collected) return;
-    const near = Math.hypot(this.player.x - drop.x, this.player.y - drop.y) <= REWARD_PICKUP_RADIUS;
+    const distance = Math.hypot(this.player.x - drop.x, this.player.y - drop.y);
+    if (distance <= REWARD_PICKUP_RADIUS) {
+      this.collectRewardDrop(drop);
+      return;
+    }
+
+    const near = distance <= REWARD_HINT_RADIUS;
     drop.prompt.setVisible(near);
-    if (near) drop.prompt.setPosition(this.player.x - 54, this.player.y + PLAYER_RADIUS + 18);
+    if (near) drop.prompt.setPosition(this.player.x - 74, this.player.y + PLAYER_RADIUS + 18);
   }
 
-  private tryCollectRewardDrop(): boolean {
-    const drop = this.rewardDrop;
-    if (!drop || drop.collected || this.run.phase !== 'combat') return false;
-    if (Math.hypot(this.player.x - drop.x, this.player.y - drop.y) > REWARD_PICKUP_RADIUS) return false;
+  private collectRewardDrop(drop: RewardDrop): void {
+    if (drop.collected || this.run.phase !== 'combat') return;
 
     drop.collected = true;
     this.run = collectRoomReward(this.run, drop.reward);
@@ -1608,7 +1612,6 @@ export class PlayScene extends Phaser.Scene {
     this.rewardDrop = null;
     this.refreshHud();
     if (DEBUG_ENABLED) this.publishDebug();
-    return true;
   }
 
   private updateTownNpcPrompt(): void {
@@ -1848,7 +1851,34 @@ export class PlayScene extends Phaser.Scene {
     pinContainer(this, container);
 
     container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x1d1f28, 0.62));
+    const leftZone = this.add
+      .arc(center.x, center.y, WHEEL_RADIUS + 10, 90, 270, false, 0x4f8cff, 0.16)
+      .setStrokeStyle(3, 0x8fb8ff, 0.65);
+    const rightZone = this.add
+      .arc(center.x, center.y, WHEEL_RADIUS + 10, 270, 90, false, 0xffc55c, 0.16)
+      .setStrokeStyle(3, 0xffd38a, 0.65);
+    container.add(leftZone);
+    container.add(rightZone);
     const segments = this.createWheelSegments(container, center);
+    container.add(this.add.rectangle(center.x, center.y, 4, WHEEL_RADIUS * 2 - 14, 0x0a0b0f, 0.82));
+    container.add(
+      this.add
+        .text(center.x - WHEEL_RADIUS - 30, center.y, '왼손', {
+          fontSize: '22px',
+          color: '#cfe0ff',
+          fontStyle: 'bold',
+        })
+        .setOrigin(1, 0.5),
+    );
+    container.add(
+      this.add
+        .text(center.x + WHEEL_RADIUS + 30, center.y, '오른손', {
+          fontSize: '22px',
+          color: '#ffe0a8',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5),
+    );
     const core = this.add.circle(center.x, center.y, WHEEL_INNER_RADIUS, 0x0a0b0f, 0.92);
     container.add(core);
     container.add(
@@ -1856,21 +1886,37 @@ export class PlayScene extends Phaser.Scene {
         .text(center.x, center.y, 'R', { fontSize: '18px', color: COLORS.text, fontStyle: 'bold' })
         .setOrigin(0.5),
     );
+    container.add(
+      this.add
+        .text(center.x, center.y + WHEEL_RADIUS + 26, '포인터 선택 · R 떼기', {
+          fontSize: '13px',
+          color: COLORS.textDim,
+        })
+        .setOrigin(0.5),
+    );
 
     container.setAlpha(0.4);
     for (const segment of segments) {
       segment.wedge.setScale(0.2);
       segment.label.setAlpha(0);
+      segment.meta.setAlpha(0);
+      segment.activeMark.setAlpha(0);
     }
+    leftZone.setScale(0.2);
+    rightZone.setScale(0.2);
     core.setScale(0.2);
     this.tweens.add({ targets: container, alpha: 1, duration: WHEEL_OPEN_MS, ease: 'Quad.easeOut' });
     this.tweens.add({
-      targets: [...segments.map((segment) => segment.wedge), core],
+      targets: [leftZone, rightZone, ...segments.map((segment) => segment.wedge), core],
       scale: 1,
       duration: WHEEL_OPEN_MS,
       ease: 'Back.easeOut',
     });
-    this.tweens.add({ targets: segments.map((segment) => segment.label), alpha: 1, duration: WHEEL_OPEN_MS });
+    this.tweens.add({
+      targets: segments.flatMap((segment) => [segment.label, segment.meta, segment.activeMark]),
+      alpha: 1,
+      duration: WHEEL_OPEN_MS,
+    });
 
     this.weaponWheel = {
       container,
@@ -1883,29 +1929,49 @@ export class PlayScene extends Phaser.Scene {
 
   private createWheelSegments(container: Phaser.GameObjects.Container, center: { x: number; y: number }): WheelSegment[] {
     const slots = [
-      { hand: 'left' as const, index: 0 as const, start: 180, end: 270, labelDx: -54, labelDy: -54 },
-      { hand: 'left' as const, index: 1 as const, start: 90, end: 180, labelDx: -54, labelDy: 54 },
-      { hand: 'right' as const, index: 0 as const, start: 270, end: 360, labelDx: 54, labelDy: -54 },
-      { hand: 'right' as const, index: 1 as const, start: 0, end: 90, labelDx: 54, labelDy: 54 },
+      { hand: 'left' as const, index: 0 as const, start: 180, end: 270, labelDx: -62, labelDy: -54 },
+      { hand: 'left' as const, index: 1 as const, start: 90, end: 180, labelDx: -62, labelDy: 54 },
+      { hand: 'right' as const, index: 0 as const, start: 270, end: 360, labelDx: 62, labelDy: -54 },
+      { hand: 'right' as const, index: 1 as const, start: 0, end: 90, labelDx: 62, labelDy: 54 },
     ];
 
     return slots.map((slot) => {
       const weapon = this.run.progress.wheel[slot.hand][slot.index];
       const color = weapon ? weaponOf(weapon).color : 0x2a2f42;
+      const active = weapon && this.run.progress.active[slot.hand] === weapon;
+      const weaponLabel = weapon ? weaponOf(weapon).name : '-';
+      const metaLabel = `${slot.hand === 'left' ? 'L' : 'R'}${slot.index + 1}`;
       const wedge = this.add
         .arc(center.x, center.y, WHEEL_RADIUS, slot.start, slot.end, false, color, weapon ? 0.58 : 0.28)
         .setStrokeStyle(2, 0x0a0b0f, 0.9);
       const label = this.add
-        .text(center.x + slot.labelDx, center.y + slot.labelDy, weapon ? weaponOf(weapon).name : '-', {
-          fontSize: '16px',
+        .text(center.x + slot.labelDx, center.y + slot.labelDy + 8, weaponLabel, {
+          fontSize: '20px',
           color: weapon ? COLORS.text : COLORS.textDim,
           fontStyle: weapon ? 'bold' : undefined,
+          align: 'center',
+        })
+        .setOrigin(0.5);
+      const meta = this.add
+        .text(center.x + slot.labelDx, center.y + slot.labelDy - 18, metaLabel, {
+          fontSize: '12px',
+          color: slot.hand === 'left' ? '#cfe0ff' : '#ffe0a8',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0.5);
+      const activeMark = this.add
+        .text(center.x + slot.labelDx + (slot.hand === 'left' ? -36 : 36), center.y + slot.labelDy - 18, active ? '✓' : '', {
+          fontSize: '16px',
+          color: COLORS.accentText,
+          fontStyle: 'bold',
         })
         .setOrigin(0.5);
 
       container.add(wedge);
+      container.add(meta);
       container.add(label);
-      return { hand: slot.hand, index: slot.index, weapon, wedge, label };
+      container.add(activeMark);
+      return { hand: slot.hand, index: slot.index, weapon, wedge, label, meta, activeMark };
     });
   }
 
@@ -1920,9 +1986,13 @@ export class PlayScene extends Phaser.Scene {
 
     for (const segment of wheel.segments) {
       const isSelected = ready && selected?.hand === segment.hand && selected.index === segment.index && segment.weapon;
-      segment.wedge.setAlpha(isSelected ? 0.9 : segment.weapon ? 0.58 : 0.24);
+      segment.wedge.setAlpha(isSelected ? 0.95 : segment.weapon ? 0.58 : 0.24);
+      segment.wedge.setStrokeStyle(isSelected ? 4 : 2, isSelected ? COLORS.accent : 0x0a0b0f, isSelected ? 1 : 0.9);
       segment.label.setColor(isSelected ? COLORS.accentText : segment.weapon ? COLORS.text : COLORS.textDim);
-      segment.label.setScale(isSelected ? 1.12 : 1);
+      segment.label.setScale(isSelected ? 1.14 : 1);
+      segment.meta.setScale(isSelected ? 1.12 : 1);
+      segment.meta.setColor(isSelected ? COLORS.accentText : segment.hand === 'left' ? '#cfe0ff' : '#ffe0a8');
+      segment.activeMark.setScale(isSelected ? 1.16 : 1);
     }
   }
 
@@ -2016,7 +2086,7 @@ export class PlayScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
 
-    // 획득 내역은 적지 않는다. 바닥 드랍을 F로 주울 때 이미 알렸고,
+    // 획득 내역은 적지 않는다. 바닥 드랍에 가까이 갔을 때 이미 알렸고,
     // 여기서 또 띄우면 이미 받은 것을 시스템이 다시 알리는 표시가 된다.
     const unlocked = this.run.progress.unlockedWeapons.map((id) => weaponOf(id).name).join(' / ');
     container.add(
