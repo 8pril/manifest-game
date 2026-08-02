@@ -176,6 +176,8 @@ interface ComboBadge {
 
 interface RewardDrop {
   reward: RoomReward;
+  label: string;
+  color: number;
   x: number;
   y: number;
   pickupEnabledAt: number;
@@ -218,7 +220,7 @@ export class PlayScene extends Phaser.Scene {
   private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
   private transientOverlays: Phaser.GameObjects.GameObject[] = [];
-  private rewardDrop: RewardDrop | null = null;
+  private rewardDrops: RewardDrop[] = [];
   private townNpc: TownNpc | null = null;
   private weaponWheel: WeaponWheelMenu | null = null;
   /**
@@ -307,7 +309,7 @@ export class PlayScene extends Phaser.Scene {
     this.areas = [];
     this.overlay = null;
     this.transientOverlays = [];
-    this.rewardDrop = null;
+    this.rewardDrops = [];
     this.resultScheduled = false;
     this.arcaneFlowUntil = 0;
     this.shieldGuardUntil = 0;
@@ -744,7 +746,7 @@ export class PlayScene extends Phaser.Scene {
     if (!room) return;
 
     this.clearTransientOverlays();
-    this.rewardDrop = null;
+    this.rewardDrops = [];
     this.townNpc = null;
     for (const object of this.roomFloor) object.destroy();
     this.roomFloor = [];
@@ -807,7 +809,7 @@ export class PlayScene extends Phaser.Scene {
   /** 마을은 전투를 멈추는 전체 화면 모달이 아니라 직접 걸어 다니는 비전투 방이다. */
   private enterTownRoom(): void {
     this.clearTransientOverlays();
-    this.rewardDrop = null;
+    this.rewardDrops = [];
     for (const object of this.roomFloor) object.destroy();
     this.roomFloor = [];
     for (const projectile of this.projectiles) projectile.view.destroy();
@@ -954,7 +956,7 @@ export class PlayScene extends Phaser.Scene {
   private checkRoomCleared(): void {
     if (this.run.phase !== 'combat' || this.exitOpen || this.resultScheduled) return;
     if (this.enemies.some((e) => isAlive(e.state))) return;
-    if (this.rewardDrop && !this.rewardDrop.collected) return;
+    if (this.rewardDrops.some((drop) => !drop.collected)) return;
 
     if (this.run.roomIndex >= TOTAL_ROOMS - 1) {
       this.resultScheduled = true;
@@ -1093,7 +1095,7 @@ export class PlayScene extends Phaser.Scene {
         required: COMBO_REQUIRED,
       },
       exit: this.exitOpen ? { x: this.exit.x, y: this.exit.y } : null,
-      drop: this.rewardDrop && !this.rewardDrop.collected ? { x: this.rewardDrop.x, y: this.rewardDrop.y } : null,
+      drop: this.debugRewardDrop(),
       events: { ...this.ruleEvents },
       projectiles: this.projectiles.length,
       room: { width: this.bounds.maxX + WALL, height: this.bounds.maxY + WALL },
@@ -1545,7 +1547,7 @@ export class PlayScene extends Phaser.Scene {
 
     if (enemy.hp <= 0) {
       playSfx('death');
-      if (isBossKind(enemy.kind)) this.spawnBossDrop(enemy);
+      if (isBossKind(enemy.kind) || this.isLastEnemy(entity)) this.spawnRewardDropsForEnemy(enemy);
       deathBurst(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, radius * 2);
       entity.view.destroy();
       entity.hpBar.destroy();
@@ -1555,64 +1557,111 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
-  private spawnBossDrop(enemy: Enemy): void {
+  private isLastEnemy(entity: EnemyEntity): boolean {
+    return !this.enemies.some((other) => other !== entity && isAlive(other.state));
+  }
+
+  private spawnRewardDropsForEnemy(enemy: Enemy): void {
+    this.spawnRewardDrops(enemy.x, enemy.y, ENEMY_STATS[enemy.kind].radius);
+  }
+
+  private spawnRewardDrops(sourceX: number, sourceY: number, sourceRadius: number): boolean {
+    if (this.rewardDrops.length > 0) return false;
+
     // 이 시점에는 아직 clearRoom이 보상을 적용하지 않았으므로 현재 보유와 비교할 수 있다.
     // 이미 가진 것을 다시 `획득`이라고 띄우면 두 번째 판에서 거짓말이 된다.
     const reward = newPartsOfReward(this.run.progress, ROOMS[this.run.roomIndex]?.reward);
-    if (!reward) return;
+    if (!reward) return false;
 
-    const x = Phaser.Math.Clamp(enemy.x, this.bounds.minX + 60, this.bounds.maxX - 60);
-    const radius = ENEMY_STATS[enemy.kind].radius;
-    const y = Phaser.Math.Clamp(enemy.y, this.bounds.minY + 60, this.bounds.maxY - 60);
-    const glow = this.add.circle(x, y, 34, BOSS_PATTERN_COLOR, 0.2).setDepth(8);
-    const marker = this.add.rectangle(x, y, 32, 32, BOSS_PATTERN_COLOR, 0.95).setAngle(45).setDepth(9);
-    const prompt = this.add
-      .text(this.player.x - 74, this.player.y + PLAYER_RADIUS + 18, '가까이 가면 획득', {
-        fontSize: '15px',
-        color: COLORS.accentText,
-        fontStyle: 'bold',
-      })
-      .setOrigin(0, 0.5)
-      .setDepth(22)
-      .setVisible(false);
+    const items = this.rewardItems(reward);
+    if (!items.length) return false;
 
-    this.rewardDrop = {
-      reward,
-      x,
-      y,
-      pickupEnabledAt: this.time.now + REWARD_PICKUP_DELAY_MS,
-      collected: false,
-      marker,
-      glow,
-      prompt,
-    };
-    this.roomFloor.push(glow, marker, prompt);
+    const spread = items.length === 1 ? 0 : Math.max(54, items.length * 18);
+    const angleStep = (Math.PI * 2) / items.length;
+    const startAngle = -Math.PI / 2;
 
-    ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: radius, to: radius * 2.8, duration: 620, width: 5 });
-    this.tweens.add({
-      targets: glow,
-      alpha: 0.45,
-      scale: 1.18,
-      duration: 520,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
+    for (const [index, item] of items.entries()) {
+      const angle = startAngle + angleStep * index;
+      const x = Phaser.Math.Clamp(sourceX + Math.cos(angle) * spread, this.bounds.minX + 60, this.bounds.maxX - 60);
+      const y = Phaser.Math.Clamp(sourceY + Math.sin(angle) * spread, this.bounds.minY + 60, this.bounds.maxY - 60);
+      const glow = this.add.circle(x, y, 28, item.color, 0.2).setDepth(8);
+      const marker = this.add.rectangle(x, y, 28, 28, item.color, 0.95).setAngle(45).setDepth(9);
+      const prompt = this.add
+        .text(this.player.x - 74, this.player.y + PLAYER_RADIUS + 18, `가까이 가면 ${item.label} 획득`, {
+          fontSize: '15px',
+          color: COLORS.accentText,
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(22)
+        .setVisible(false);
+
+      const drop = {
+        ...item,
+        x,
+        y,
+        pickupEnabledAt: this.time.now + REWARD_PICKUP_DELAY_MS,
+        collected: false,
+        marker,
+        glow,
+        prompt,
+      };
+      this.rewardDrops.push(drop);
+      this.roomFloor.push(glow, marker, prompt);
+      this.tweens.add({
+        targets: glow,
+        alpha: 0.45,
+        scale: 1.18,
+        duration: 520,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
+
+    ring(this, sourceX, sourceY, BOSS_PATTERN_COLOR, { from: sourceRadius, to: Math.max(sourceRadius * 2.8, 86), duration: 620, width: 5 });
+    return true;
+  }
+
+  private rewardItems(reward: RoomReward): Array<Pick<RewardDrop, 'reward' | 'label' | 'color'>> {
+    return [
+      ...(reward.weapons ?? []).map((id) => {
+        const weapon = weaponOf(id);
+        return { reward: { weapons: [id] }, label: weapon.name, color: weapon.color };
+      }),
+      ...(reward.comboSkills ?? []).map((id) => {
+        const skill = findSkill(id);
+        return { reward: { comboSkills: [id] }, label: skill?.name ?? id, color: BOSS_PATTERN_COLOR };
+      }),
+      ...(reward.supports ?? []).flatMap((id) => {
+        const support = findSupport(id);
+        return support ? [{ reward: { supports: [id] }, label: support.name, color: COLORS.accent }] : [];
+      }),
+    ];
   }
 
   private updateRewardDropPrompt(): void {
-    const drop = this.rewardDrop;
-    if (!drop || drop.collected) return;
-    const distance = Math.hypot(this.player.x - drop.x, this.player.y - drop.y);
-    const pickupEnabled = this.time.now >= drop.pickupEnabledAt;
-    if (pickupEnabled && distance <= REWARD_PICKUP_RADIUS) {
-      this.collectRewardDrop(drop);
-      return;
+    let closest: { drop: RewardDrop; distance: number } | null = null;
+    for (const drop of this.rewardDrops) {
+      if (drop.collected) continue;
+      drop.prompt.setVisible(false);
+      const pickupEnabled = this.time.now >= drop.pickupEnabledAt;
+      if (!pickupEnabled) continue;
+
+      const distance = Math.hypot(this.player.x - drop.x, this.player.y - drop.y);
+      if (distance <= REWARD_PICKUP_RADIUS) {
+        this.collectRewardDrop(drop);
+        continue;
+      }
+      if (distance <= REWARD_HINT_RADIUS && (!closest || distance < closest.distance)) {
+        closest = { drop, distance };
+      }
     }
 
-    const near = pickupEnabled && distance <= REWARD_HINT_RADIUS;
-    drop.prompt.setVisible(near);
-    if (near) drop.prompt.setPosition(this.player.x - 74, this.player.y + PLAYER_RADIUS + 18);
+    if (closest) {
+      closest.drop.prompt.setVisible(true);
+      closest.drop.prompt.setPosition(this.player.x - 74, this.player.y + PLAYER_RADIUS + 18);
+    }
   }
 
   private collectRewardDrop(drop: RewardDrop): void {
@@ -1622,15 +1671,20 @@ export class PlayScene extends Phaser.Scene {
     this.run = collectRoomReward(this.run, drop.reward);
     this.saveCurrentProgress();
     playSfx('reward');
-    ring(this, drop.x, drop.y, BOSS_PATTERN_COLOR, { from: 18, to: 86, duration: 420, width: 4 });
-    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 12, '획득', COLORS.accentText);
+    ring(this, drop.x, drop.y, drop.color, { from: 18, to: 86, duration: 420, width: 4 });
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 12, `${drop.label} 획득`, COLORS.accentText);
 
     drop.marker.destroy();
     drop.glow.destroy();
     drop.prompt.destroy();
-    this.rewardDrop = null;
+    this.rewardDrops = this.rewardDrops.filter((item) => item !== drop);
     this.refreshHud();
     if (DEBUG_ENABLED) this.publishDebug();
+  }
+
+  private debugRewardDrop(): { x: number; y: number } | null {
+    const drop = this.rewardDrops.find((item) => !item.collected);
+    return drop ? { x: drop.x, y: drop.y } : null;
   }
 
   private updateTownNpcPrompt(): void {

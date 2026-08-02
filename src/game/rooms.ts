@@ -39,6 +39,9 @@ export const ROOMS: readonly RoomDef[] = [
     // 첫 방은 조금 작게 잡아 조작을 익히게 한다.
     label: '흐린 입구',
     spawns: [{ kind: 'chaser', count: 6 }],
+    reward: {
+      comboSkills: ['annihilation'],
+    },
     width: 1900,
     height: 1150,
   },
@@ -52,7 +55,7 @@ export const ROOMS: readonly RoomDef[] = [
     entersTown: true,
     reward: {
       weapons: ['bow', 'shield'],
-      comboSkills: ['annihilation', 'volley', 'fracture-wave'],
+      comboSkills: ['volley', 'fracture-wave'],
     },
     width: 2000,
     height: 1250,

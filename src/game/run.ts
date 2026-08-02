@@ -145,7 +145,7 @@ export function clearRoom(run: RunState): RunState {
 /** 전투 방 안에서 바닥 드랍을 주웠을 때 보상만 먼저 적용한다. */
 export function collectRoomReward(run: RunState, reward?: RoomReward): RunState {
   if (run.phase !== 'combat') return run;
-  const gained = newPartsOfReward(run.progress, reward);
+  const gained = mergeRoomRewards(run.gained, newPartsOfReward(run.progress, reward));
   const rewarded = applyRoomReward(run.progress, reward);
   return {
     ...run,
@@ -153,6 +153,21 @@ export function collectRoomReward(run: RunState, reward?: RoomReward): RunState 
     loadout: loadoutFromProgress(rewarded, run.loadout),
     gained,
   };
+}
+
+function mergeRoomRewards(a?: RoomReward, b?: RoomReward): RoomReward | undefined {
+  if (!a) return b;
+  if (!b) return a;
+
+  return {
+    weapons: orderedUnique([...(a.weapons ?? []), ...(b.weapons ?? [])]),
+    comboSkills: orderedUnique([...(a.comboSkills ?? []), ...(b.comboSkills ?? [])]),
+    supports: orderedUnique([...(a.supports ?? []), ...(b.supports ?? [])]),
+  };
+}
+
+function orderedUnique<T extends string>(items: readonly T[]): readonly T[] {
+  return [...new Set(items)];
 }
 
 /**

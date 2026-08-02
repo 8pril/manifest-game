@@ -15,7 +15,7 @@ describe('방 보상', () => {
   const rewards = ROOMS.flatMap((room) => (room.reward ? [{ label: room.label, reward: room.reward }] : []));
 
   it('보상이 있는 방이 존재한다', () => {
-    expect(rewards.map((r) => r.label)).toEqual(['첫 문지기', '무너진 문']);
+    expect(rewards.map((r) => r.label)).toEqual(['흐린 입구', '첫 문지기', '무너진 문']);
   });
 
   for (const { label, reward } of rewards) {
@@ -33,10 +33,15 @@ describe('방 보상', () => {
     });
   }
 
+  it('흐린 입구 보상 문구', () => {
+    const r = ROOMS[0].reward!;
+    expect(r.comboSkills?.map((id) => findSkill(id)!.name).join(' / ')).toBe('멸검');
+  });
+
   it('첫 문지기 보상 문구', () => {
     const r = ROOMS[1].reward!;
     expect(r.weapons?.map((id) => weaponOf(id).name).join(' / ')).toBe('활 / 방패');
-    expect(r.comboSkills?.map((id) => findSkill(id)!.name).join(' / ')).toBe('멸검 / 연사 / 균열 파동');
+    expect(r.comboSkills?.map((id) => findSkill(id)!.name).join(' / ')).toBe('연사 / 균열 파동');
     expect(r.supports ?? []).toEqual([]);
   });
 
