@@ -452,6 +452,7 @@ export class PlayScene extends Phaser.Scene {
   private useWeapon(runtime: WeaponRuntime, angle = this.aimAngle()): void {
     if (this.time.now < runtime.readyAt) return;
 
+    this.openShieldProtection(runtime);
     if (this.canUseComboSkill(runtime)) {
       runtime.readyAt = this.time.now + awakenedAttackInterval(runtime.weapon);
       this.useSkill(runtime, runtime.weapon.combo, angle, false);
@@ -460,6 +461,11 @@ export class PlayScene extends Phaser.Scene {
       this.useSkill(runtime, runtime.weapon.basic, angle, true);
     }
     this.refreshHud();
+  }
+
+  private openShieldProtection(runtime: WeaponRuntime): void {
+    if (runtime.weapon.id !== 'shield') return;
+    this.shieldGuardUntil = Math.max(this.shieldGuardUntil, this.time.now + (runtime.weapon.swingDuration || 140));
   }
 
   private canUseComboSkill(runtime: WeaponRuntime): boolean {
@@ -514,10 +520,6 @@ export class PlayScene extends Phaser.Scene {
     const range = stats.meleeRange ?? 90;
     const arc = stats.meleeArc ?? 1.7;
     const duration = runtime.weapon.swingDuration || 140;
-    if (runtime.weapon.id === 'shield') {
-      this.shieldGuardUntil = Math.max(this.shieldGuardUntil, this.time.now + duration);
-    }
-
     // 무기 성격을 연출로 드러낸다.
     // 검은 짧고 빠르게 스쳐 지나가고, 방패는 느리게 밀고 나간다.
     const wedge = this.add
@@ -1406,9 +1408,10 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private hitPlayer(amount: number): void {
+    const shieldActive = this.shieldProtectionActive();
     const damage = this.guardedPlayerDamage(amount);
     const before = this.run;
-    this.run = applyPlayerDamage(this.run, damage);
+    this.run = applyPlayerDamage(this.run, damage, shieldActive);
     if (this.run === before) return;
 
     if (damage < amount) this.showShieldGuardFeedback(amount - damage);
@@ -1418,8 +1421,12 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private guardedPlayerDamage(amount: number): number {
-    if (!hasActiveShield(this.run) || this.time.now > this.shieldGuardUntil) return amount;
+    if (!this.shieldProtectionActive()) return amount;
     return amount * SHIELD_GUARD_DAMAGE_TAKEN;
+  }
+
+  private shieldProtectionActive(): boolean {
+    return hasActiveShield(this.run) && this.time.now <= this.shieldGuardUntil;
   }
 
   private showShieldGuardFeedback(blocked: number): void {
@@ -1786,16 +1793,18 @@ export class PlayScene extends Phaser.Scene {
     const wave = ROOMS[this.run.roomIndex];
     const remaining = this.enemies.filter((e) => isAlive(e.state)).length;
     const inTown = this.run.phase === 'town';
+    const shieldVisible = hasActiveShield(this.run);
+    const shieldActive = this.shieldProtectionActive();
     this.hpBarFill.width = (240 * this.run.hp) / this.run.maxHp;
-    this.shieldBarBack.setVisible(hasActiveShield(this.run));
+    this.shieldBarBack.setVisible(shieldVisible).setAlpha(shieldActive ? 0.95 : 0.35);
     this.shieldBarFill.width = (240 * this.run.shieldEnergy) / SHIELD_ENERGY_MAX;
-    this.shieldBarFill.setVisible(hasActiveShield(this.run));
+    this.shieldBarFill.setVisible(shieldVisible).setAlpha(shieldActive ? 1 : 0.45);
 
     const hands = describeByHand(this.run.loadout);
     this.hud.setText(
       [
         `체력 ${Math.ceil(this.run.hp)} / ${this.run.maxHp}`,
-        ...(hasActiveShield(this.run) ? [`보호막 ${Math.ceil(this.run.shieldEnergy)} / ${SHIELD_ENERGY_MAX}`] : []),
+        ...(shieldVisible ? [`보호막 ${Math.ceil(this.run.shieldEnergy)} / ${SHIELD_ENERGY_MAX}`] : []),
         inTown ? `마을   NPC 근처 F 대화   오른쪽 출구로 이동` : `${wave?.label ?? '-'} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   남은 적 ${remaining}   처치 ${this.run.kills}`,
         ...hands.map(
           (h) => `${h.hand} ${h.weapon}` + (h.lines.length ? `   ${h.lines.join('  ·  ')}` : ''),

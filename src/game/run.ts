@@ -48,7 +48,7 @@ export interface RunState {
   roomIndex: number;
   hp: number;
   maxHp: number;
-  /** 방패를 들고 있을 때 체력보다 먼저 소모되는 방별 보호막. */
+  /** 방패 공격으로 보호가 활성화됐을 때 체력보다 먼저 소모되는 방별 보호막. */
   shieldEnergy: number;
   /** 무기 2종과 스킬별 보조능력. */
   loadout: Loadout;
@@ -201,11 +201,11 @@ export function leaveTown(run: RunState): RunState {
  * 접촉 피해를 적용한다.
  * 무적 시간이 남아 있으면 무시되고, 피해를 받으면 무적이 다시 걸린다.
  */
-export function damagePlayer(run: RunState, amount: number): RunState {
+export function damagePlayer(run: RunState, amount: number, shieldActive = false): RunState {
   if (run.phase !== 'combat') return run;
   if (run.invulnerable > 0) return run;
 
-  const absorbed = hasActiveShield(run) ? Math.min(run.shieldEnergy, amount) : 0;
+  const absorbed = shieldActive ? Math.min(run.shieldEnergy, amount) : 0;
   const shieldEnergy = run.shieldEnergy - absorbed;
   const hp = Math.max(0, run.hp - (amount - absorbed));
   return {

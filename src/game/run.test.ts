@@ -188,40 +188,47 @@ describe('damagePlayer', () => {
     expect(damagePlayer(lost, 10)).toBe(lost);
   });
 
-  it('방패를 들고 있으면 보호막이 체력보다 먼저 소모된다', () => {
-    const run = damagePlayer(createRun('shield', null), 30);
+  it('방패 보호가 활성화되어 있으면 보호막이 체력보다 먼저 소모된다', () => {
+    const run = damagePlayer(createRun('shield', null), 30, true);
 
     expect(run.hp).toBe(PLAYER_MAX_HP);
     expect(run.shieldEnergy).toBe(SHIELD_ENERGY_MAX - 30);
   });
 
+  it('방패를 들고 있어도 보호가 활성화되지 않았으면 체력으로 피해를 받는다', () => {
+    const run = damagePlayer(createRun('shield', null), 30);
+
+    expect(run.hp).toBe(PLAYER_MAX_HP - 30);
+    expect(run.shieldEnergy).toBe(SHIELD_ENERGY_MAX);
+  });
+
   it('방패 보호막이 부족하면 남은 피해만 체력에 들어간다', () => {
-    let run = damagePlayer(createRun('shield', null), SHIELD_ENERGY_MAX - 5);
+    let run = damagePlayer(createRun('shield', null), SHIELD_ENERGY_MAX - 5, true);
     run = advanceTime(run, INVULNERABLE_SECONDS);
-    run = damagePlayer(run, 20);
+    run = damagePlayer(run, 20, true);
 
     expect(run.shieldEnergy).toBe(0);
     expect(run.hp).toBe(PLAYER_MAX_HP - 15);
   });
 
   it('방패를 내려놓으면 남은 보호막이 있어도 체력으로 피해를 받는다', () => {
-    let run = damagePlayer(createRun('shield', null), 20);
+    let run = damagePlayer(createRun('shield', null), 20, true);
     run = advanceTime(run, INVULNERABLE_SECONDS);
     run = { ...run, loadout: createLoadout('sword', 'bow') };
-    const withoutShield = damagePlayer(run, 10);
+    const withoutShield = damagePlayer(run, 10, false);
 
     expect(withoutShield.hp).toBe(PLAYER_MAX_HP - 10);
     expect(withoutShield.shieldEnergy).toBe(SHIELD_ENERGY_MAX - 20);
   });
 
   it('방패를 다시 들어도 보호막은 자동으로 차지 않는다', () => {
-    let run = damagePlayer(createRun('shield', null), 20);
+    let run = damagePlayer(createRun('shield', null), 20, true);
     run = advanceTime(run, INVULNERABLE_SECONDS);
     run = { ...run, loadout: createLoadout('sword', 'bow') };
     run = damagePlayer(run, 10);
     run = advanceTime(run, INVULNERABLE_SECONDS);
     run = { ...run, loadout: createLoadout('shield', 'bow') };
-    const backToShield = damagePlayer(run, 10);
+    const backToShield = damagePlayer(run, 10, true);
 
     expect(backToShield.hp).toBe(PLAYER_MAX_HP - 10);
     expect(backToShield.shieldEnergy).toBe(SHIELD_ENERGY_MAX - 30);
