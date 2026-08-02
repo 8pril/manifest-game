@@ -118,6 +118,7 @@ const WHEEL_RADIUS = 122;
 const WHEEL_INNER_RADIUS = 24;
 const REWARD_PICKUP_RADIUS = 78;
 const REWARD_HINT_RADIUS = 170;
+const REWARD_PICKUP_DELAY_MS = 500;
 const TOWN_WIDTH = 1600;
 const TOWN_HEIGHT = 900;
 const TOWN_NPC_RADIUS = 92;
@@ -177,6 +178,7 @@ interface RewardDrop {
   reward: RoomReward;
   x: number;
   y: number;
+  pickupEnabledAt: number;
   collected: boolean;
   marker: Phaser.GameObjects.Rectangle;
   glow: Phaser.GameObjects.Arc;
@@ -1574,7 +1576,16 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(22)
       .setVisible(false);
 
-    this.rewardDrop = { reward, x, y, collected: false, marker, glow, prompt };
+    this.rewardDrop = {
+      reward,
+      x,
+      y,
+      pickupEnabledAt: this.time.now + REWARD_PICKUP_DELAY_MS,
+      collected: false,
+      marker,
+      glow,
+      prompt,
+    };
     this.roomFloor.push(glow, marker, prompt);
 
     ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: radius, to: radius * 2.8, duration: 620, width: 5 });
@@ -1593,12 +1604,13 @@ export class PlayScene extends Phaser.Scene {
     const drop = this.rewardDrop;
     if (!drop || drop.collected) return;
     const distance = Math.hypot(this.player.x - drop.x, this.player.y - drop.y);
-    if (distance <= REWARD_PICKUP_RADIUS) {
+    const pickupEnabled = this.time.now >= drop.pickupEnabledAt;
+    if (pickupEnabled && distance <= REWARD_PICKUP_RADIUS) {
       this.collectRewardDrop(drop);
       return;
     }
 
-    const near = distance <= REWARD_HINT_RADIUS;
+    const near = pickupEnabled && distance <= REWARD_HINT_RADIUS;
     drop.prompt.setVisible(near);
     if (near) drop.prompt.setPosition(this.player.x - 74, this.player.y + PLAYER_RADIUS + 18);
   }
