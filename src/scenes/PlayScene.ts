@@ -120,6 +120,8 @@ const REWARD_PICKUP_RADIUS = 78;
 const REWARD_HINT_RADIUS = 170;
 const REWARD_PICKUP_DELAY_MS = 500;
 const REWARD_DROP_SPREAD = 124;
+const REWARD_DROP_MIN_DISTANCE = REWARD_PICKUP_RADIUS + 12;
+const REWARD_DROP_MIN_SEPARATION = 56;
 const TOWN_WIDTH = 1600;
 const TOWN_HEIGHT = 900;
 const TOWN_NPC_RADIUS = 92;
@@ -1577,14 +1579,14 @@ export class PlayScene extends Phaser.Scene {
     const items = this.rewardItems(reward);
     if (!items.length) return false;
 
-    const spread = REWARD_DROP_SPREAD;
     const angleStep = (Math.PI * 2) / items.length;
     const startAngle = -Math.PI / 2;
+    const placed: Array<{ x: number; y: number }> = [];
 
     for (const [index, item] of items.entries()) {
       const angle = startAngle + angleStep * index;
-      const x = Phaser.Math.Clamp(sourceX + Math.cos(angle) * spread, this.bounds.minX + 60, this.bounds.maxX - 60);
-      const y = Phaser.Math.Clamp(sourceY + Math.sin(angle) * spread, this.bounds.minY + 60, this.bounds.maxY - 60);
+      const { x, y } = this.rewardDropPosition(sourceX, sourceY, angle, placed);
+      placed.push({ x, y });
       const glow = this.add.circle(x, y, 28, item.color, 0.2).setDepth(8);
       const marker = this.add.rectangle(x, y, 28, 28, item.color, 0.95).setAngle(45).setDepth(9);
       const prompt = this.add
@@ -1622,6 +1624,38 @@ export class PlayScene extends Phaser.Scene {
 
     ring(this, sourceX, sourceY, BOSS_PATTERN_COLOR, { from: sourceRadius, to: Math.max(sourceRadius * 2.8, 86), duration: 620, width: 5 });
     return true;
+  }
+
+  private rewardDropPosition(
+    sourceX: number,
+    sourceY: number,
+    baseAngle: number,
+    placed: readonly { x: number; y: number }[],
+  ): { x: number; y: number } {
+    const candidates = [
+      baseAngle,
+      baseAngle + Math.PI,
+      baseAngle + Math.PI / 2,
+      baseAngle - Math.PI / 2,
+      baseAngle + Math.PI / 4,
+      baseAngle - Math.PI / 4,
+      baseAngle + (Math.PI * 3) / 4,
+      baseAngle - (Math.PI * 3) / 4,
+    ].map((angle) => this.clampedRewardDropPosition(sourceX, sourceY, angle));
+
+    return candidates.find((point) => (
+      Math.hypot(point.x - sourceX, point.y - sourceY) >= REWARD_DROP_MIN_DISTANCE
+      && placed.every((other) => Math.hypot(point.x - other.x, point.y - other.y) >= REWARD_DROP_MIN_SEPARATION)
+    )) ?? candidates
+      .map((point) => ({ point, distance: Math.hypot(point.x - sourceX, point.y - sourceY) }))
+      .sort((a, b) => b.distance - a.distance)[0].point;
+  }
+
+  private clampedRewardDropPosition(sourceX: number, sourceY: number, angle: number): { x: number; y: number } {
+    return {
+      x: Phaser.Math.Clamp(sourceX + Math.cos(angle) * REWARD_DROP_SPREAD, this.bounds.minX + 60, this.bounds.maxX - 60),
+      y: Phaser.Math.Clamp(sourceY + Math.sin(angle) * REWARD_DROP_SPREAD, this.bounds.minY + 60, this.bounds.maxY - 60),
+    };
   }
 
   private rewardItems(reward: RoomReward): Array<Pick<RewardDrop, 'reward' | 'label' | 'color'>> {
