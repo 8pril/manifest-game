@@ -152,6 +152,19 @@ function tintView(view: ShapeOrSprite, color: number): void {
  */
 const SPRITE_SCALE = 1.4;
 
+/**
+ * 플레이어만 더 크게 그린다.
+ *
+ * 플레이어와 사냥개는 판정 반지름이 똑같이 20이라, 같은 배율을 쓰면 화면에서도 같은 크기가 된다.
+ * 도형일 때는 안 보이던 문제인데 그림이 되니 주인공이 잡몹에 묻힌다.
+ * 게다가 개는 가로로 긴 동물이라 긴 변을 기준으로 맞추면 사람 키만큼 길어진다.
+ *
+ * 판정은 그대로다. 그림이 판정보다 커지는 방향은 **플레이어에게 관대한 쪽**이라
+ * (겹쳐 보여도 안 맞음) 체감을 해치지 않는다. 반대로 적은 이 방향이 헛스윙으로 느껴지므로
+ * 적에게는 같은 값을 쓰지 않는다.
+ */
+const PLAYER_SPRITE_SCALE = 1.7;
+
 const ENEMY_SPRITE: Record<EnemyKind, string> = {
   chaser: 'enemy-chaser',
   archer: 'enemy-archer',
@@ -363,20 +376,28 @@ export class PlayScene extends Phaser.Scene {
     this.player = this.textures.exists('player')
       ? (() => {
           const sprite = this.add.sprite(0, 0, 'player').setDepth(10);
-          sprite.setScale((PLAYER_RADIUS * 2 * SPRITE_SCALE) / Math.max(sprite.width, sprite.height));
+          sprite.setScale((PLAYER_RADIUS * 2 * PLAYER_SPRITE_SCALE) / Math.max(sprite.width, sprite.height));
           return sprite;
         })()
       : this.add.circle(0, 0, PLAYER_RADIUS, COLORS.player).setDepth(10);
     this.aimLine = this.add.line(0, 0, 0, 0, 0, 0, COLORS.accent).setOrigin(0, 0).setLineWidth(2).setDepth(9);
 
+    // 링과 오라는 **판정 반지름이 아니라 실제로 그려진 크기**를 따라가야 한다.
+    // 32/40 같은 고정값은 반지름 20짜리 원 시절의 값이라, 스프라이트로 바꾸자마자
+    // 링이 주인공 안쪽에 묻혔다. 도형으로 되돌아가도 같은 식으로 계산된다.
+    const playerViewRadius = this.player instanceof Phaser.GameObjects.Sprite
+      ? Math.max(this.player.displayWidth, this.player.displayHeight) / 2
+      : PLAYER_RADIUS;
+
     // 콤보가 차면 숫자를 읽지 않아도 알 수 있게 플레이어에 링을 띄운다.
+    // 손마다 반지름을 달리해 어느 쪽이 찼는지 구분한다.
     this.comboRings = {
-      left: this.add.circle(0, 0, 32).setStrokeStyle(3, this.left.weapon.color).setDepth(11).setVisible(false),
-      right: this.add.circle(0, 0, 40).setStrokeStyle(3, right?.color ?? 0x2a2f42).setDepth(11).setVisible(false),
+      left: this.add.circle(0, 0, playerViewRadius + 12).setStrokeStyle(3, this.left.weapon.color).setDepth(11).setVisible(false),
+      right: this.add.circle(0, 0, playerViewRadius + 22).setStrokeStyle(3, right?.color ?? 0x2a2f42).setDepth(11).setVisible(false),
     };
 
     this.arcaneAura = this.add
-      .circle(0, 0, PLAYER_RADIUS + 9, BRAND_COLOR, 0.22)
+      .circle(0, 0, playerViewRadius + 9, BRAND_COLOR, 0.22)
       .setDepth(9)
       .setVisible(false);
 
