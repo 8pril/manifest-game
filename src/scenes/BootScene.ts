@@ -7,9 +7,31 @@ import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@/config';
  *
  * 새 기획의 시작점은 무기 선택이 아니라 검 1종 고정이다.
  */
+/** 스프라이트 키 = 파일명. `public/sprites/`에 있고 base는 상대 경로다. */
+export const SPRITE_KEYS = [
+  'player',
+  'enemy-chaser',
+  'enemy-archer',
+  'enemy-brute',
+  'enemy-boss',
+  'enemy-boss2',
+  'npc-keeper',
+  'drop-item',
+] as const;
+
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
+  }
+
+  preload(): void {
+    // 이미지가 없어도 게임은 도형으로 돌아가야 한다. 로딩 실패가 진행을 막지 않도록
+    // 타이틀에서 미리 받아두기만 하고, PlayScene은 있으면 쓰고 없으면 도형을 쓴다.
+    this.load.setPath(`${import.meta.env.BASE_URL}sprites/`);
+    for (const key of SPRITE_KEYS) this.load.image(key, `${key}.png`);
+    this.load.on('loaderror', (file: Phaser.Loader.File) => {
+      console.warn(`스프라이트 로딩 실패: ${file.key}. 도형으로 대체한다.`);
+    });
   }
 
   create(): void {

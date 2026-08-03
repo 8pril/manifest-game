@@ -68,6 +68,7 @@ import {
   staggerBossOnWall,
   type BossEvent,
   type Enemy,
+  type EnemyKind,
 } from '@/game/enemy';
 import { ROOMS, TOTAL_ROOMS, type RoomReward } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
@@ -128,9 +129,40 @@ const TOWN_NPC_RADIUS = 92;
 /** 방패 스윙 중에는 보스 CC가 안 통해도 버티는 역할을 갖는다. */
 const SHIELD_GUARD_DAMAGE_TAKEN = 0.45;
 
+/**
+ * 스프라이트가 있으면 스프라이트, 없으면 도형.
+ *
+ * 이미지 로딩이 실패해도 게임이 돌아가야 한다. 둘 다 위치·알파·깊이는 같은 방식으로
+ * 다루고, 색만 방식이 다르다(도형은 채우기, 스프라이트는 틴트). `tintView`가 그 차이를 흡수한다.
+ */
+type ShapeOrSprite = Phaser.GameObjects.Rectangle | Phaser.GameObjects.Arc | Phaser.GameObjects.Sprite;
+
+function tintView(view: ShapeOrSprite, color: number): void {
+  if (view instanceof Phaser.GameObjects.Sprite) view.setTint(color);
+  else view.setFillStyle(color);
+}
+
+/**
+ * 스프라이트를 히트박스보다 크게 그리는 배율.
+ *
+ * 도형일 때는 그리는 크기가 곧 판정 범위였다. 그림은 다르다. 판정 크기 그대로 그리면
+ * 후드도 마후라도 안 보이는 색덩어리가 된다(사냥개가 화면 세로의 5.6%였다).
+ * **이 값은 보이는 크기만 바꾼다.** `ENEMY_STATS.radius`는 그대로이므로 근접 사거리,
+ * 투사체 명중, 넉백, DPS 벤치 수치가 전부 영향을 받지 않는다.
+ */
+const SPRITE_SCALE = 1.4;
+
+const ENEMY_SPRITE: Record<EnemyKind, string> = {
+  chaser: 'enemy-chaser',
+  archer: 'enemy-archer',
+  brute: 'enemy-brute',
+  gatekeeper: 'enemy-boss',
+  collapsedDoor: 'enemy-boss2',
+};
+
 interface EnemyEntity {
   state: Enemy;
-  view: Phaser.GameObjects.Rectangle;
+  view: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
   hpBar: Phaser.GameObjects.Rectangle;
   statusDots: Phaser.GameObjects.Rectangle[];
 }
@@ -169,6 +201,8 @@ interface WeaponWheelMenu {
   segments: WheelSegment[];
 }
 
+type OverlayKind = 'town-dialogue' | 'town-config' | 'pause' | 'result';
+
 interface ComboBadge {
   back: Phaser.GameObjects.Rectangle;
   title: Phaser.GameObjects.Text;
@@ -203,7 +237,7 @@ export class PlayScene extends Phaser.Scene {
   private left!: WeaponRuntime;
   private right: WeaponRuntime | null = null;
 
-  private player!: Phaser.GameObjects.Arc;
+  private player!: Phaser.GameObjects.Arc | Phaser.GameObjects.Sprite;
   private aimLine!: Phaser.GameObjects.Line;
   private enemies: EnemyEntity[] = [];
   private projectiles: ProjectileEntity[] = [];
@@ -222,6 +256,7 @@ export class PlayScene extends Phaser.Scene {
   /** 비전 흐름이 걸린 동안 플레이어를 감싸는 오라. 버프가 살아 있다는 유일한 표시다. */
   private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
+  private overlayKind: OverlayKind | null = null;
   private transientOverlays: Phaser.GameObjects.GameObject[] = [];
   private rewardDrops: RewardDrop[] = [];
   private townNpc: TownNpc | null = null;
@@ -282,6 +317,7 @@ export class PlayScene extends Phaser.Scene {
     // 일시정지 중에 R로 재시작하면 새 판이 멈춘 채로 시작한다.
     this.paused = false;
     this.overlay = null;
+    this.overlayKind = null;
     this.weaponWheel = null;
 
     // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
@@ -311,6 +347,7 @@ export class PlayScene extends Phaser.Scene {
     this.enemyShots = [];
     this.areas = [];
     this.overlay = null;
+    this.overlayKind = null;
     this.transientOverlays = [];
     this.rewardDrops = [];
     this.resultScheduled = false;
@@ -323,7 +360,13 @@ export class PlayScene extends Phaser.Scene {
     this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0 } : null;
 
 
-    this.player = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.player).setDepth(10);
+    this.player = this.textures.exists('player')
+      ? (() => {
+          const sprite = this.add.sprite(0, 0, 'player').setDepth(10);
+          sprite.setScale((PLAYER_RADIUS * 2 * SPRITE_SCALE) / Math.max(sprite.width, sprite.height));
+          return sprite;
+        })()
+      : this.add.circle(0, 0, PLAYER_RADIUS, COLORS.player).setDepth(10);
     this.aimLine = this.add.line(0, 0, 0, 0, 0, 0, COLORS.accent).setOrigin(0, 0).setLineWidth(2).setDepth(9);
 
     // 콤보가 차면 숫자를 읽지 않아도 알 수 있게 플레이어에 링을 띄운다.
@@ -369,6 +412,7 @@ export class PlayScene extends Phaser.Scene {
       }
       if (this.run.phase === 'town') {
         if (this.overlay) this.closeOverlay();
+        else if (this.run.progress.weaponSwitchUnlocked) this.openWeaponWheel();
         return;
       }
       if (this.run.phase !== 'combat') return;
@@ -378,7 +422,13 @@ export class PlayScene extends Phaser.Scene {
       }
       this.openWeaponWheel();
     });
-    keyboard.on('keydown-F', () => this.tryTalkTownNpc());
+    keyboard.on('keydown-F', () => {
+      if (this.overlayKind === 'town-dialogue') {
+        this.showTown();
+        return;
+      }
+      this.tryTalkTownNpc();
+    });
     keyboard.on('keyup-R', () => {
       if (this.weaponWheel) this.closeWeaponWheel(true);
     });
@@ -870,13 +920,35 @@ export class PlayScene extends Phaser.Scene {
     this.refreshHud();
   }
 
+  /**
+   * 텍스처가 로딩됐으면 스프라이트, 아니면 같은 크기의 사각형.
+   *
+   * 이미지 로딩 실패가 게임을 막으면 안 된다. 배포 경로가 어긋나도 도형으로 계속 돌아간다.
+   */
+  private spriteOrShape(
+    key: string,
+    x: number,
+    y: number,
+    size: number,
+    fallbackColor: number,
+  ): Phaser.GameObjects.Sprite | Phaser.GameObjects.Rectangle {
+    if (!this.textures.exists(key)) {
+      return this.add.rectangle(x, y, size, size, fallbackColor).setDepth(5);
+    }
+
+    const sprite = this.add.sprite(x, y, key).setDepth(5);
+    // 원본 비율을 유지한 채 긴 변을 size에 맞춘다. 찌그러지면 화풍이 무너진다.
+    sprite.setScale((size * SPRITE_SCALE) / Math.max(sprite.width, sprite.height));
+    return sprite;
+  }
+
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
     const enemy = createEnemy(kind, x, y);
     const stats = ENEMY_STATS[enemy.kind];
 
     return {
       state: enemy,
-      view: this.add.rectangle(enemy.x, enemy.y, stats.radius * 2, stats.radius * 2, stats.color).setDepth(5),
+      view: this.spriteOrShape(ENEMY_SPRITE[enemy.kind], enemy.x, enemy.y, stats.radius * 2, stats.color),
       hpBar: this.add.rectangle(enemy.x, enemy.y - stats.radius - 9, stats.radius * 2, 4, 0x6ee7a8).setDepth(6),
       statusDots: STATUS_ORDER.map((status, index) =>
         this.add
@@ -1202,6 +1274,8 @@ export class PlayScene extends Phaser.Scene {
   private updateAim(): void {
     const angle = this.aimAngle();
     this.aimLine.setTo(this.player.x, this.player.y, this.player.x + Math.cos(angle) * 44, this.player.y + Math.sin(angle) * 44);
+    // 스프라이트는 오른쪽을 보고 그려져 있다. 조준 방향이 왼쪽이면 뒤집어야 등을 보이지 않는다.
+    if (this.player instanceof Phaser.GameObjects.Sprite) this.player.setFlipX(Math.cos(angle) < 0);
   }
 
   private updateEnemies(dt: number): void {
@@ -1447,7 +1521,16 @@ export class PlayScene extends Phaser.Scene {
 
     entity.view.setPosition(enemy.x, enemy.y);
     entity.view.setAlpha(isStunned(enemy) ? 0.5 : 1);
-    entity.view.setFillStyle(this.enemyFillColor(enemy));
+    // 스프라이트는 원본 색을 살려야 하므로, 상태에 따른 강조가 없을 때는 틴트를 걸지 않는다.
+    const highlight = this.enemyHighlightColor(enemy);
+    if (entity.view instanceof Phaser.GameObjects.Sprite) {
+      if (highlight === null) entity.view.clearTint();
+      else entity.view.setTint(highlight);
+      // 스프라이트는 오른쪽을 보고 그려져 있다. 적은 플레이어를 쫓으므로 플레이어 쪽을 보게 뒤집는다.
+      entity.view.setFlipX(this.player.x < enemy.x);
+    } else {
+      entity.view.setFillStyle(highlight ?? ENEMY_STATS[enemy.kind].color);
+    }
     entity.hpBar.setPosition(enemy.x, enemy.y - radius - 9);
 
     for (const [index, kind] of STATUS_ORDER.entries()) {
@@ -1457,11 +1540,12 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
-  private enemyFillColor(enemy: Enemy): number {
+  /** 보스 패턴 단계를 색으로 알린다. 강조할 것이 없으면 null이라 스프라이트가 원래 색을 유지한다. */
+  private enemyHighlightColor(enemy: Enemy): number | null {
     if (enemy.boss?.phase === 'telegraph') return BOSS_PATTERN_COLOR;
     if (enemy.boss?.phase === 'charging') return 0xff6b3d;
     if (enemy.boss?.phase === 'staggered') return STUN_COLOR;
-    return ENEMY_STATS[enemy.kind].color;
+    return null;
   }
 
   private updateAreas(dt: number): void {
@@ -1735,7 +1819,7 @@ export class PlayScene extends Phaser.Scene {
     const npc = this.townNpc;
     if (!npc || this.run.phase !== 'town' || this.overlay) return;
     if (Math.hypot(this.player.x - npc.x, this.player.y - npc.y) > TOWN_NPC_RADIUS) return;
-    this.showTown();
+    this.showTownDialogue();
   }
 
   private clearTransientOverlays(): void {
@@ -1746,8 +1830,11 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private flashPlayer(): void {
-    this.player.setFillStyle(0xff6b6b);
-    this.time.delayedCall(110, () => this.player.setFillStyle(COLORS.player));
+    tintView(this.player, 0xff6b6b);
+    this.time.delayedCall(110, () => {
+      if (this.player instanceof Phaser.GameObjects.Sprite) this.player.clearTint();
+      else this.player.setFillStyle(COLORS.player);
+    });
   }
 
   // ───────────────────────── HUD와 오버레이
@@ -1944,6 +2031,51 @@ export class PlayScene extends Phaser.Scene {
     const ratio = unlocked && runtime.combo.value > 0 ? Phaser.Math.Clamp(runtime.combo.remaining / duration, 0, 1) : 0;
     badge.timer.width = 224 * ratio;
     badge.timer.setFillStyle(color, ready ? 0.9 : 0.65);
+  }
+
+  private showTownDialogue(): void {
+    const container = this.add.container(0, 0).setDepth(30);
+    this.clearTransientOverlays();
+    pinContainer(this, container);
+
+    container.add(this.add.rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, VIEW_WIDTH, VIEW_HEIGHT, 0x05060a, 0.68));
+    const panel = this.add
+      .rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT - 156, VIEW_WIDTH - 150, 154, 0x0a0b0f, 0.96)
+      .setStrokeStyle(2, 0x3a4059, 0.95);
+    container.add(panel);
+    container.add(
+      this.add
+        .text(104, VIEW_HEIGHT - 212, '마을 관리인', {
+          fontSize: '22px',
+          color: COLORS.text,
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5),
+    );
+    container.add(
+      this.add
+        .text(104, VIEW_HEIGHT - 162, '그 장갑은 네가 지나온 싸움을 기억한다.\n나가기 전에, 어떤 형태를 손에 남길지 정해 두어라.', {
+          fontSize: '18px',
+          color: COLORS.text,
+          lineSpacing: 8,
+          wordWrap: { width: VIEW_WIDTH - 240 },
+        })
+        .setOrigin(0, 0.5),
+    );
+    container.add(
+      this.add
+        .text(VIEW_WIDTH - 104, VIEW_HEIGHT - 98, 'F 장비 설정', {
+          fontSize: '17px',
+          color: COLORS.accentText,
+          fontStyle: 'bold',
+        })
+        .setOrigin(1, 0.5),
+    );
+
+    panel.setInteractive({ useHandCursor: true });
+    panel.on('pointerdown', () => this.showTown());
+    this.overlay = container;
+    this.overlayKind = 'town-dialogue';
   }
 
   private openWeaponWheel(): void {
@@ -2167,6 +2299,8 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private showTown(): void {
+    if (this.overlay) this.closeOverlay();
+
     const container = this.add.container(0, 0).setDepth(30);
     this.clearTransientOverlays();
     pinContainer(this, container);
@@ -2225,6 +2359,7 @@ export class PlayScene extends Phaser.Scene {
     );
 
     this.overlay = container;
+    this.overlayKind = 'town-config';
     this.refreshHud();
   }
 
@@ -2389,8 +2524,6 @@ export class PlayScene extends Phaser.Scene {
     const y = VIEW_HEIGHT - 132;
     const startX = 98;
     container.add(this.add.text(startX, y - 38, 'R링 무기 후보', { fontSize: '20px', color: COLORS.text, fontStyle: 'bold' }));
-    container.add(this.add.text(startX, y - 12, '왼손', { fontSize: '14px', color: COLORS.textDim }));
-    container.add(this.add.text(startX + 500, y - 12, '오른손', { fontSize: '14px', color: COLORS.textDim }));
 
     this.addWheelSlotButton(container, startX, y + 18, '왼손 1', this.run.progress.wheel.left[0], 'left', 0);
     this.addWheelSlotButton(container, startX + 240, y + 18, '왼손 2', this.run.progress.wheel.left[1], 'left', 1);
@@ -2448,6 +2581,7 @@ export class PlayScene extends Phaser.Scene {
   private closeOverlay(): void {
     const overlay = this.overlay;
     this.overlay = null;
+    this.overlayKind = null;
     if (!overlay) return;
 
     overlay.setVisible(false);
@@ -2495,6 +2629,7 @@ export class PlayScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
     this.overlay = container;
+    this.overlayKind = 'pause';
   }
 
   private closePause(): void {
@@ -2547,6 +2682,7 @@ export class PlayScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
     this.overlay = container;
+    this.overlayKind = 'result';
   }
 
   private rewardLines(reward: RoomReward | undefined, title = '획득'): string[] {
