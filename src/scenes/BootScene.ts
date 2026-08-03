@@ -17,6 +17,11 @@ export const SPRITE_KEYS = [
   'enemy-boss2',
   'npc-keeper',
   'drop-item',
+  'bolt-sword',
+  'bolt-bow',
+  'bolt-arcane',
+  'bolt-enemy',
+  'tile-floor',
 ] as const;
 
 export class BootScene extends Phaser.Scene {

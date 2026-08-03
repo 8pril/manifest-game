@@ -9,7 +9,7 @@ export interface ToneStep {
   slideTo?: number;
 }
 
-const MASTER_GAIN = 0.28;
+const MASTER_GAIN = 9;
 
 export function sfxPattern(kind: SfxKind): readonly ToneStep[] {
   switch (kind) {

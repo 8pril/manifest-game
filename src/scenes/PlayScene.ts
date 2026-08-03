@@ -165,6 +165,14 @@ const SPRITE_SCALE = 1.4;
  */
 const PLAYER_SPRITE_SCALE = 1.7;
 
+/** 무기별 투사체 이미지. 방패는 투사체를 쓰지 않아 검 이미지를 공유한다. */
+const BOLT_SPRITE: Record<WeaponId, string> = {
+  sword: 'bolt-sword',
+  bow: 'bolt-bow',
+  arcane: 'bolt-arcane',
+  shield: 'bolt-sword',
+};
+
 const ENEMY_SPRITE: Record<EnemyKind, string> = {
   chaser: 'enemy-chaser',
   archer: 'enemy-archer',
@@ -182,7 +190,7 @@ interface EnemyEntity {
 
 interface ProjectileEntity {
   state: Projectile;
-  view: Phaser.GameObjects.Arc;
+  view: Phaser.GameObjects.Arc | Phaser.GameObjects.Sprite;
   /** 이 투사체를 쏜 무기. 명중 시 콤보와 상태이상을 누구에게 귀속할지 결정한다. */
   weapon: Weapon;
   /** 기본 공격인지. 기본 공격만 콤보 게이지를 올린다. */
@@ -232,7 +240,7 @@ interface RewardDrop {
   y: number;
   pickupEnabledAt: number;
   collected: boolean;
-  marker: Phaser.GameObjects.Rectangle;
+  marker: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
   glow: Phaser.GameObjects.Arc;
   prompt: Phaser.GameObjects.Text;
 }
@@ -240,7 +248,7 @@ interface RewardDrop {
 interface TownNpc {
   x: number;
   y: number;
-  body: Phaser.GameObjects.Rectangle;
+  body: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
   prompt: Phaser.GameObjects.Text;
 }
 
@@ -257,7 +265,7 @@ export class PlayScene extends Phaser.Scene {
   /** 지대는 어느 무기가 만들었는지 함께 들고 있는다. 지속피해로도 콤보가 유지되게 하기 위함이다. */
   private areas: { state: Area; view: Phaser.GameObjects.Arc; owner: WeaponRuntime | null; behaviors: readonly Behavior[] }[] = [];
   /** 적이 쏜 투사체. 플레이어 투사체와 충돌 대상이 반대라 따로 관리한다. */
-  private enemyShots: { state: Projectile; view: Phaser.GameObjects.Arc; damage: number }[] = [];
+  private enemyShots: { state: Projectile; view: Phaser.GameObjects.Arc | Phaser.GameObjects.Sprite; damage: number }[] = [];
 
   private hud!: Phaser.GameObjects.Text;
   private hpBarFill!: Phaser.GameObjects.Rectangle;
@@ -579,7 +587,7 @@ export class PlayScene extends Phaser.Scene {
     for (const state of spawnProjectiles(stats, behaviors, { x: this.player.x, y: this.player.y }, angle)) {
       this.projectiles.push({
         state,
-        view: this.add.circle(state.x, state.y, 7, weapon.color).setDepth(8),
+        view: this.createBoltView(BOLT_SPRITE[weapon.id], state.x, state.y, 22, state.angle, weapon.color),
         weapon,
         basic,
         behaviors,
@@ -850,7 +858,7 @@ export class PlayScene extends Phaser.Scene {
     const cx = room.width / 2;
     const cy = room.height / 2;
     this.roomFloor.push(
-      this.add.grid(cx, cy, room.width, room.height, 64, 64, COLORS.background, 1, 0x1b1e2b, 1).setDepth(0),
+      this.floorView(cx, cy, room.width, room.height, COLORS.background, 0x1b1e2b),
       this.add
         .rectangle(cx, cy, room.width - WALL * 2, room.height - WALL * 2)
         .setStrokeStyle(3, 0x2a2f42)
@@ -906,7 +914,7 @@ export class PlayScene extends Phaser.Scene {
     const cx = TOWN_WIDTH / 2;
     const cy = TOWN_HEIGHT / 2;
     this.roomFloor.push(
-      this.add.grid(cx, cy, TOWN_WIDTH, TOWN_HEIGHT, 64, 64, 0x11131c, 1, 0x24283a, 1).setDepth(0),
+      this.floorView(cx, cy, TOWN_WIDTH, TOWN_HEIGHT, 0x11131c, 0x24283a),
       this.add
         .rectangle(cx, cy, TOWN_WIDTH - WALL * 2, TOWN_HEIGHT - WALL * 2)
         .setStrokeStyle(3, 0x3a4059)
@@ -922,7 +930,13 @@ export class PlayScene extends Phaser.Scene {
 
     const npcX = cx - 120;
     const npcY = cy;
-    const npcBody = this.add.rectangle(npcX, npcY, 38, 58, 0x8ea4ff, 0.95).setDepth(5);
+    const npcBody = this.textures.exists('npc-keeper')
+      ? (() => {
+          const sprite = this.add.sprite(npcX, npcY, 'npc-keeper').setDepth(5);
+          sprite.setScale(80 / Math.max(sprite.width, sprite.height));
+          return sprite;
+        })()
+      : this.add.rectangle(npcX, npcY, 38, 58, 0x8ea4ff, 0.95).setDepth(5);
     const npcStand = this.add.circle(npcX, npcY + 26, 32, 0x29304a, 0.75).setDepth(4);
     const npcPrompt = this.add
       .text(this.player.x - 78, this.player.y + PLAYER_RADIUS + 18, 'F 대화', {
@@ -961,6 +975,34 @@ export class PlayScene extends Phaser.Scene {
     // 원본 비율을 유지한 채 긴 변을 size에 맞춘다. 찌그러지면 화풍이 무너진다.
     sprite.setScale((size * SPRITE_SCALE) / Math.max(sprite.width, sprite.height));
     return sprite;
+  }
+
+  /**
+   * 투사체 하나의 표시체.
+   *
+   * 이미지는 오른쪽을 향해 그려져 있으므로 진행 각도만큼 돌린다.
+   * 적 크기 스프라이트와 달리 여기서는 회전이 맞다 — 총알은 날아가는 방향이 곧 자세다.
+   */
+  private createBoltView(key: string, x: number, y: number, size: number, angle: number, fallbackColor: number) {
+    if (!this.textures.exists(key)) return this.add.circle(x, y, size / 2, fallbackColor).setDepth(8);
+
+    const sprite = this.add.sprite(x, y, key).setDepth(8);
+    sprite.setScale(size / Math.max(sprite.width, sprite.height));
+    sprite.setRotation(angle);
+    return sprite;
+  }
+
+  /**
+   * 방 바닥.
+   *
+   * 타일 이미지가 있으면 `TileSprite`로 반복해 깔고, 없으면 예전처럼 격자를 그린다.
+   * 타일은 여백을 잘라내지 않고 내보냈다. 잘라내면 상하좌우 이음매가 어긋난다.
+   */
+  private floorView(cx: number, cy: number, width: number, height: number, background: number, line: number) {
+    if (!this.textures.exists('tile-floor')) {
+      return this.add.grid(cx, cy, width, height, 64, 64, background, 1, line, 1).setDepth(0);
+    }
+    return this.add.tileSprite(cx, cy, width, height, 'tile-floor').setDepth(0);
   }
 
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
@@ -1451,7 +1493,7 @@ export class PlayScene extends Phaser.Scene {
       );
       this.enemyShots.push({
         state,
-        view: this.add.circle(state.x, state.y, 8, ENEMY_STATS[enemy.kind].color).setDepth(8),
+        view: this.createBoltView('bolt-enemy', state.x, state.y, 24, state.angle, ENEMY_STATS[enemy.kind].color),
         damage,
       });
     }
@@ -1472,7 +1514,7 @@ export class PlayScene extends Phaser.Scene {
 
     this.enemyShots.push({
       state,
-      view: this.add.circle(state.x, state.y, 8, stats.color).setDepth(8),
+      view: this.createBoltView('bolt-enemy', state.x, state.y, 24, state.angle, stats.color),
       damage: stats.projectileDamage ?? 10,
     });
   }
@@ -1626,7 +1668,7 @@ export class PlayScene extends Phaser.Scene {
           for (const spawned of outcome.spawned) {
             this.projectiles.push({
               state: spawned,
-              view: this.add.circle(spawned.x, spawned.y, 7, entity.weapon.color).setDepth(8),
+              view: this.createBoltView(BOLT_SPRITE[entity.weapon.id], spawned.x, spawned.y, 22, spawned.angle, entity.weapon.color),
               weapon: entity.weapon,
               basic: entity.basic,
               behaviors: entity.behaviors,
@@ -1693,7 +1735,14 @@ export class PlayScene extends Phaser.Scene {
       const { x, y } = this.rewardDropPosition(sourceX, sourceY, angle, placed);
       placed.push({ x, y });
       const glow = this.add.circle(x, y, 28, item.color, 0.2).setDepth(8);
-      const marker = this.add.rectangle(x, y, 28, 28, item.color, 0.95).setAngle(45).setDepth(9);
+      const marker = this.textures.exists('drop-item')
+        ? (() => {
+            const sprite = this.add.sprite(x, y, 'drop-item').setDepth(9);
+            sprite.setScale(40 / Math.max(sprite.width, sprite.height));
+            sprite.setTint(item.color);
+            return sprite;
+          })()
+        : this.add.rectangle(x, y, 28, 28, item.color, 0.95).setAngle(45).setDepth(9);
       const prompt = this.add
         .text(this.player.x - 74, this.player.y + PLAYER_RADIUS + 18, `가까이 가면 ${item.label} 획득`, {
           fontSize: '15px',
@@ -1832,7 +1881,13 @@ export class PlayScene extends Phaser.Scene {
     if (!npc) return;
     const near = Math.hypot(this.player.x - npc.x, this.player.y - npc.y) <= TOWN_NPC_RADIUS;
     npc.prompt.setVisible(near && !this.overlay);
-    npc.body.setFillStyle(near ? COLORS.accent : 0x8ea4ff, 0.95);
+    // 가까워지면 강조한다. 스프라이트는 평소에 원래 색을 유지해야 하므로 틴트를 걷어낸다.
+    if (npc.body instanceof Phaser.GameObjects.Sprite) {
+      if (near) npc.body.setTint(COLORS.accent);
+      else npc.body.clearTint();
+    } else {
+      npc.body.setFillStyle(near ? COLORS.accent : 0x8ea4ff, 0.95);
+    }
     if (near) npc.prompt.setPosition(this.player.x - 64, this.player.y + PLAYER_RADIUS + 18);
   }
 
