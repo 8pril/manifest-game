@@ -2655,7 +2655,7 @@ export class PlayScene extends Phaser.Scene {
     label: string,
     enabled: boolean,
     onClick: () => void,
-  ): void {
+  ): { rect: Phaser.GameObjects.Rectangle; width: number; height: number } {
     const width = 220;
     const height = 48;
     const fill = enabled ? 0x242a3a : 0x171923;
@@ -2686,6 +2686,7 @@ export class PlayScene extends Phaser.Scene {
 
     container.add(rect);
     container.add(text);
+    return { rect, width, height };
   }
 
   private cycleSupport(weapon: WeaponId, slot: 'primarySupportId' | 'synergySupportId', candidates: readonly Support[]): void {
@@ -2724,10 +2725,34 @@ export class PlayScene extends Phaser.Scene {
     hand: Hand,
     index: 0 | 1,
   ): void {
-    const active = weapon && this.run.progress.active[hand] === weapon ? ' 장착 중' : '';
-    this.addSlotButton(container, x, y, `${label}: ${weapon ? weaponOf(weapon).name : '-'}${active}`, true, () => {
-      this.cycleWheelSlot(hand, index);
-    });
+    const equipped = Boolean(weapon) && this.run.progress.active[hand] === weapon;
+    const { rect, width } = this.addSlotButton(
+      container,
+      x,
+      y,
+      `${label}\n${weapon ? weaponOf(weapon).name : '비어 있음'}`,
+      true,
+      () => this.cycleWheelSlot(hand, index),
+    );
+
+    // 지금 손에 들려 있는 후보는 테두리와 배경으로 구분한다.
+    // `장착 중`이라는 글자만으로는 눈에 들어오지 않는다.
+    if (equipped) {
+      rect.setStrokeStyle(3, COLORS.accent, 1);
+      rect.setFillStyle(0x2b3350, 0.96);
+      container.add(
+        this.add
+          .text(x + width - 12, y - 15, '장착 중', { fontSize: '12px', color: COLORS.accentText, fontStyle: 'bold' })
+          .setOrigin(1, 0.5),
+      );
+    }
+
+    // 무기 그림을 슬롯 안에 넣는다. 이름만 바뀌면 클릭이 먹혔는지 알기 어렵다.
+    if (weapon && this.textures.exists(WEAPON_SPRITE[weapon])) {
+      const icon = this.add.image(x + width - 34, y + 6, WEAPON_SPRITE[weapon]).setOrigin(0.5);
+      icon.setScale(38 / Math.max(icon.width, icon.height));
+      container.add(icon);
+    }
   }
 
   private cycleWheelSlot(hand: Hand, index: 0 | 1): void {
