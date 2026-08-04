@@ -88,7 +88,7 @@ import {
   SHIELD_ENERGY_MAX,
   type RunState,
 } from '@/game/run';
-import { configureManifestation, createInitialProgress, equipFromWheel, hasComboSkill, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
+import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, hasComboSkill, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
@@ -193,6 +193,27 @@ const WEAPON_HAND_OFFSET = {
   left: { x: 0.27, y: 0.05 },
   right: { x: -0.28, y: 0.27 },
 } as const;
+
+/**
+ * 무기를 눕히는 각도(라디안). **조준 방향이 아니라 무기별 자세다.**
+ *
+ * 캐릭터는 회전하지 않고 좌우 반전만 한다. 무기만 조준 방향으로 돌리면 고정된 몸에서
+ * 손에 든 것만 빙빙 돌아 붙어 있지 않게 보인다. 겨누는 방향은 조준선과 공격 이펙트가
+ * 이미 알려주므로, 무기는 자기 자세를 지킨다.
+ *
+ * 값이 음수면 위쪽이다(화면 y축은 아래로 자란다). 무기마다 잡는 법이 다르므로
+ * 손 기준이 아니라 무기 기준으로 잡는다. 팔과 일직선(0)으로 두면 팔이 자루처럼 보인다.
+ */
+const WEAPON_POSE_ANGLE: Record<WeaponId, number> = {
+  /** 날을 위로 세운다. */
+  sword: -0.7,
+  /** 활대는 팔과 수직에 가깝고 화살이 앞을 본다. 원본 그림의 화살이 우상단을 향해 있어 그만큼 되돌린다. */
+  bow: 0.72,
+  /** 결정이 손 위에 떠 있는 정도. 거의 눕힌다. */
+  arcane: -0.2,
+  /** 몸 앞을 막는 자세라 가장 세운다. */
+  shield: -1.15,
+};
 
 const ENEMY_SPRITE: Record<EnemyKind, string> = {
   chaser: 'enemy-chaser',
@@ -1074,14 +1095,17 @@ export class PlayScene extends Phaser.Scene {
       const view = this.weaponViews[hand];
       if (!view?.visible) continue;
 
-      // 캐릭터는 회전하지 않고 좌우만 뒤집히므로, 손 위치도 같이 뒤집는다.
+      // 캐릭터가 좌우로 뒤집히면 손 위치도 같이 뒤집힌다.
       const offset = WEAPON_HAND_OFFSET[hand];
       view.setPosition(
         this.player.x + offset.x * width * (flipped ? -1 : 1),
         this.player.y + offset.y * height,
       );
-      // 무기는 겨누는 방향으로 돌린다. 손에서 뻗어 나가는 인상은 회전 중심을 손잡이에 둬서 만든다.
-      view.setRotation(angle);
+
+      // 좌우 반전은 각도를 거울에 비추는 것과 같다. 위아래도 같이 뒤집어야 자세가 선다.
+      const runtime = hand === 'left' ? this.left : this.right;
+      const pose = WEAPON_POSE_ANGLE[runtime?.weapon.id ?? 'sword'];
+      view.setRotation(flipped ? Math.PI - pose : pose);
       view.setFlipY(flipped);
     }
   }
@@ -2710,7 +2734,9 @@ export class PlayScene extends Phaser.Scene {
     const current = this.run.progress.wheel[hand][index];
     const candidates: WheelSlot[] = [null, ...this.run.progress.unlockedWeapons];
     const next = candidates[(candidates.indexOf(current) + 1) % candidates.length] ?? null;
-    const progress = setWheelSlot(this.run.progress, hand, index, next);
+    // 1번 칸을 바꾸면 손에 드는 무기가 바뀐다. 마을을 나갈 때까지 미루면 패널에는
+    // `왼손 1: 방패`라고 떠 있는데 캐릭터는 검을 든 채로 남아 설정과 화면이 어긋난다.
+    const progress = equipFirstWheelSlots(setWheelSlot(this.run.progress, hand, index, next));
 
     this.run = {
       ...this.run,
@@ -2718,6 +2744,7 @@ export class PlayScene extends Phaser.Scene {
       loadout: loadoutFromProgress(progress, this.run.loadout),
     };
     this.saveCurrentProgress();
+    this.syncWeaponRuntimes();
     this.refreshHud();
     this.reopenTownOverlay();
   }

@@ -175,3 +175,34 @@ describe('manifestation config', () => {
     expect(configureManifestation(progress, 'bow', { primarySupportId: 'multi-projectile' })).toBe(progress);
   });
 });
+
+describe('마을에서 R링 1번 칸을 바꿨을 때', () => {
+  const townProgress = () =>
+    unlockWeaponSwitch(unlockWeapons(createInitialProgress(), ['bow', 'shield']));
+
+  it('1번 칸을 바꾸면 손에 드는 무기도 같이 바뀐다', () => {
+    // 마을 패널에는 `왼손 1: 방패`라고 떠 있는데 캐릭터는 검을 든 채로 남으면
+    // 설정과 화면이 어긋난다. 설정하는 순간 손에 들려야 한다.
+    const before = townProgress();
+    const after = equipFirstWheelSlots(setWheelSlot(before, 'left', 0, 'shield'));
+
+    expect(after.wheel.left[0]).toBe('shield');
+    expect(after.active.left).toBe('shield');
+  });
+
+  it('2번 칸은 후보일 뿐이라 손에 든 무기를 바꾸지 않는다', () => {
+    const before = equipFirstWheelSlots(setWheelSlot(townProgress(), 'left', 0, 'sword'));
+    const after = equipFirstWheelSlots(setWheelSlot(before, 'left', 1, 'shield'));
+
+    expect(after.wheel.left[1]).toBe('shield');
+    expect(after.active.left).toBe('sword');
+  });
+
+  it('오른손 1번 칸을 비우면 오른손이 빈손이 된다', () => {
+    const before = equipFirstWheelSlots(setWheelSlot(townProgress(), 'right', 0, 'bow'));
+    expect(before.active.right).toBe('bow');
+
+    const after = equipFirstWheelSlots(setWheelSlot(before, 'right', 0, null));
+    expect(after.active.right).toBeNull();
+  });
+});
