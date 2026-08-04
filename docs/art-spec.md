@@ -54,6 +54,21 @@
 | `npc-keeper.png` | 마을 관리인 NPC | 38×58px (세로형) | 128×192 | `#8ea4ff` 연보라 |
 | `drop-item.png` | 보스 바닥 드랍 | 32px | 96×96 | `#ffd166` 금색 |
 
+### 손에 든 무기
+
+캐릭터가 어느 무기를 들었는지 그림으로 보여준다. HUD 글자와 공격 이펙트 색만으로는
+`양손에 서로 다른 무기를 실체화한다`는 정체성이 화면에 드러나지 않았다.
+
+| 파일명 | 대상 | 표시 크기 | 권장 캔버스 | 기준 색 |
+| --- | --- | --- | --- | --- |
+| `weapon-sword.png` | 검 | 34px | 128×128 | `#c9d1e8` |
+| `weapon-bow.png` | 활 | 34px | 128×128 | `#9ae6a0` |
+| `weapon-arcane.png` | 비전 | 34px | 128×128 | `#b08bff` |
+| `weapon-shield.png` | 방패 | 34px | 128×128 | `#ffc55c` |
+
+**손·팔·사람이 함께 그려지면 못 쓴다.** 코드가 캐릭터의 손 위치에 얹고 조준 방향으로
+돌리기 때문에, 무기만 단독으로 오른쪽을 향해 누워 있어야 한다.
+
 표시 크기가 작으므로 **디테일보다 실루엣이 중요하다.** 축소했을 때 뭉개지지 않는 단순한 형태로.
 
 표시 크기는 캐릭터가 화면에서 차지하는 지름이다. 권장 캔버스는 그보다 크게 잡아 여유를 두었으니, 캔버스를 꽉 채우지 말고 가장자리에 여백을 남기면 된다.
@@ -171,16 +186,21 @@ no shadow, centered
 
 **껍데기** — 속이 빈 갑옷
 
+첫 시도는 그냥 갑옷 기사로 나왔다. **아래가 실제로 채택된 재생성 프롬프트다.**
+`속이 비어 있다`를 한 번만 말하면 무시되므로 세 군데(투구·목·겨드랑이)를 따로 지정했고,
+받침 그림자가 딸려 오길래 `no ground, no pedestal`도 넣었다.
+
 ```
-a game sprite of a suit of heavy plate armor standing upright holding a
-spear, broad and bulky, HOLLOW AND EMPTY INSIDE with nothing but darkness
-where a body would be, visible through the neck gap and helmet slit,
-dark red plating (#b0453d),
+a game sprite of an EMPTY suit of heavy plate armor holding a spear. THERE
+IS NO PERSON INSIDE. The helmet visor is a black void, the neck gorget opens
+onto pure darkness, and a gap between the breastplate and pauldron shows
+there is nothing but shadow within. The armor stands by itself, hollow and
+animated. Broad and bulky, dark red plating (#b0453d),
 three-quarter overhead view: the floor is seen from above but the figure is
 drawn at a slight tilt so clothing and gear stay readable, facing right,
 thick dark hand-drawn outline, chalky grimy texture, muted desaturated
 palette, bold silhouette readable at 40 pixels, transparent background,
-no shadow, centered
+no shadow, no ground, no pedestal, centered
 ```
 
 **"갑옷 안에 아무것도 없다"가 이 적의 정체다.** 사람이 입고 있는 것처럼 보이면
@@ -254,18 +274,45 @@ texture, bold silhouette readable at 32 pixels, transparent background,
 no shadow, centered
 ```
 
-**투사체 (색만 바꿔 반복)**
+**손에 든 무기 4종**
+
 ```
-top-down view of a small glowing projectile, pointing right, elongated
-teardrop shape, bright core with soft outer glow, color #9ae6a0,
-transparent background, centered, 64x64
+<무기 설명>,
+the weapon lies flat pointing to the right, seen from a three-quarter
+overhead angle, thick dark hand-drawn outline, chalky grimy texture, muted
+desaturated palette, bold silhouette readable at 30 pixels, transparent
+background, no shadow, no hand, no arm, no person, just the weapon, centered
+```
+
+`<무기 설명>`에 넣은 것:
+
+| 무기 | 설명 |
+| --- | --- |
+| 검 | `a short heavy sword blade with a plain crossguard, pale steel (#c9d1e8), conjured look with a faint glow along the edge` |
+| 활 | `a simple recurve bow with the string drawn, pale green energy (#9ae6a0), conjured look` |
+| 비전 | `a floating arcane focus: a jagged violet crystal shard wrapped in faint runes (#b08bff), conjured look` |
+| 방패 | `a broad round shield seen edge-on tilted forward, amber metal with a heavy rim (#ffc55c), conjured look` |
+
+`no hand, no arm, no person, just the weapon`이 핵심이다. 이게 없으면 손이 딸려 와서
+캐릭터의 손 위에 또 손이 얹힌다.
+
+**투사체 (색만 바꿔 반복)**
+색 부분만 바꿔 4번 돌린다. 검 `#c9d1e8 pale steel` / 활 `#9ae6a0 pale green` /
+비전 `#b08bff violet` / 적 `#e0b055 ochre yellow`.
+
+```
+a small glowing projectile for a top-down game, seen from directly above,
+pointing right, elongated teardrop shape, bright core with soft outer glow,
+color <색>, hand-drawn chalky texture, transparent background, no shadow,
+centered
 ```
 
 **지대 (색만 바꿔 반복)**
 ```
-top-down circular ground effect, seen from directly above, soft ring of
-energy, translucent center, brighter toward the edge, color #ff6b3d,
-transparent background, centered, 256x256
+a circular ground effect seen from directly above, a soft ring of energy
+lying flat on the floor, translucent and mostly empty in the middle,
+brighter toward the outer edge, color <색>, hand-drawn chalky texture,
+transparent background, no shadow, centered, perfectly circular
 ```
 
 **바닥 타일**
@@ -274,10 +321,11 @@ transparent background, centered, 256x256
 금속 패널 같은 현대적·SF적 재질은 쓰지 않는다.
 
 ```
-seamless tileable dark dungeon floor texture, top-down view, very dark
-blue-grey base (#0a0b0f), worn cracked stone slabs with grime in the seams,
-hand-drawn texture, low contrast, no strong focal features, seamless on all
-four edges, 128x128
+a seamless tileable dark dungeon floor texture seen from directly above,
+very dark blue-grey base (#0a0b0f), worn cracked stone slabs with grime
+settled in the seams, hand-drawn chalky texture, low contrast, no strong
+focal features, no objects, the pattern must tile seamlessly on all four
+edges
 ```
 
 바닥은 **캐릭터를 받쳐주는 배경이지 주인공이 아니다.** 무늬가 눈에 띄면 다시 뽑는다.
@@ -313,8 +361,22 @@ four edges, 128x128
 
 **제출물 4번(AI 활용 기술 문서)에 생성 출처를 반드시 적어야 한다.** 만들면서 아래를 같이 남겨 두면 나중에 찾아 헤매지 않는다.
 
-아래 8종은 모두 **OpenAI `gpt-image-1`** 로 2026-08-03에 생성했다. API를 직접 호출했고
-프롬프트는 이 문서의 `## 프롬프트` 절에 있는 것을 그대로 썼다. 손으로 그린 부분은 없다.
+모두 **OpenAI `gpt-image-1`** 로 API를 직접 호출해 생성했다. 손으로 그린 부분은 없다.
+
+**아래 표의 `최종 프롬프트`가 가리키는 것은 이 문서 `## 프롬프트` 절의 문구이고,
+그 문구는 실제로 API에 보낸 것과 글자까지 같다.** 생성하면서 즉석에서 고친 부분이
+있었는데(껍데기 재생성, 투사체·지대·바닥, 무기 4종) 2026-08-04에 전부 문서로 옮겼다.
+문서와 실제가 다르면 제출물의 출처 기록이 틀린 기록이 된다.
+
+호출 설정:
+
+```
+POST https://api.openai.com/v1/images/generations
+model=gpt-image-1  size=1024x1024  background=transparent  output_format=png  n=1
+```
+
+`background=transparent`가 핵심이다. `gpt-image-2`는 이 옵션을 지원하지 않아 쓰지 못했다.
+생성 결과는 1024px 원본을 `assets-raw/`에 두고, 게임용 축소본만 `public/sprites/`에 넣는다.
 
 | 파일 | 사용 도구 | 생성일 | 최종 프롬프트 | 사람이 수정한 부분 |
 | --- | --- | --- | --- | --- |
@@ -332,6 +394,10 @@ four edges, 128x128
 | `bolt-enemy.png` | gpt-image-1 | 2026-08-03 | 이 문서 `투사체` 항목, 색 `#e0b055` | 없음 |
 | `tile-floor.png` | gpt-image-1 | 2026-08-03 | 이 문서 `바닥 타일` 항목 | 없음 |
 | `area-*.png` 4종 | gpt-image-1 | 2026-08-03 | 이 문서 `지대` 항목 | **게임에 반영하지 않음** (아래 참고) |
+| `weapon-sword.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
+| `weapon-bow.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
+| `weapon-arcane.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
+| `weapon-shield.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
 
 게임에 넣기 전 처리(코드로만, 그림은 건드리지 않음):
 

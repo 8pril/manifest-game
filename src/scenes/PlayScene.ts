@@ -173,6 +173,27 @@ const BOLT_SPRITE: Record<WeaponId, string> = {
   shield: 'bolt-sword',
 };
 
+/** 손에 든 무기를 캐릭터 옆에 그린다. 어느 무기를 들었는지 HUD를 안 봐도 알 수 있게 한다. */
+const WEAPON_SPRITE: Record<WeaponId, string> = {
+  sword: 'weapon-sword',
+  bow: 'weapon-bow',
+  arcane: 'weapon-arcane',
+  shield: 'weapon-shield',
+};
+const WEAPON_VIEW_SIZE = 34;
+
+/**
+ * 그림 속 실제 손 위치. `player.png`에서 청록 에너지(#6ea8ff) 픽셀을 찾아 잰 값이고,
+ * 스프라이트 크기 대비 비율이라 배율을 바꿔도 따라온다.
+ *
+ * **양손이 대칭이 아니다.** 한 손은 앞쪽 오른쪽, 다른 손은 뒤쪽 왼쪽 아래에 있다.
+ * 좌우 대칭으로 놓으면 무기가 손이 아니라 몸 옆 허공에 뜬다.
+ */
+const WEAPON_HAND_OFFSET = {
+  left: { x: 0.27, y: 0.05 },
+  right: { x: -0.28, y: 0.27 },
+} as const;
+
 const ENEMY_SPRITE: Record<EnemyKind, string> = {
   chaser: 'enemy-chaser',
   archer: 'enemy-archer',
@@ -274,6 +295,11 @@ export class PlayScene extends Phaser.Scene {
   private comboBadges!: { left: ComboBadge; right: ComboBadge };
   /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
   private comboRings!: { left: Phaser.GameObjects.Arc; right: Phaser.GameObjects.Arc };
+  /** 양손에 든 무기 그림. 스프라이트가 없으면 null이고 그때는 아무것도 그리지 않는다. */
+  private weaponViews: { left: Phaser.GameObjects.Sprite | null; right: Phaser.GameObjects.Sprite | null } = {
+    left: null,
+    right: null,
+  };
   /** 비전 흐름이 걸린 동안 플레이어를 감싸는 오라. 버프가 살아 있다는 유일한 표시다. */
   private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
@@ -408,6 +434,11 @@ export class PlayScene extends Phaser.Scene {
       .circle(0, 0, playerViewRadius + 9, BRAND_COLOR, 0.22)
       .setDepth(9)
       .setVisible(false);
+
+    // 손에 든 무기를 캐릭터 옆에 그린다. 무기 이미지가 없으면 만들지 않고,
+    // 그때는 예전처럼 HUD 글자와 공격 이펙트 색으로만 구분된다.
+    this.weaponViews = { left: this.createWeaponView(), right: this.createWeaponView() };
+    this.refreshWeaponViews();
 
     this.buildHud();
     this.bindInput();
@@ -757,6 +788,7 @@ export class PlayScene extends Phaser.Scene {
         const bonus = stacks * WOUND_CONSUME_PER_STACK;
         damage += bonus;
         this.ruleEvents.woundConsume++;
+        playSfx('statusBurst');
 
         const radius = ENEMY_STATS[enemy.kind].radius;
         ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 2.4, duration: 280 });
@@ -781,6 +813,7 @@ export class PlayScene extends Phaser.Scene {
     if (result.burst) {
       damage += WOUND_BURST_DAMAGE;
       this.ruleEvents.burst++;
+      playSfx('statusBurst');
       // 규칙상으로만 터지고 화면에는 아무것도 안 나오던 지점.
       const radius = ENEMY_STATS[enemy.kind].radius;
       ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 3.2 });
@@ -1003,6 +1036,54 @@ export class PlayScene extends Phaser.Scene {
       return this.add.grid(cx, cy, width, height, 64, 64, background, 1, line, 1).setDepth(0);
     }
     return this.add.tileSprite(cx, cy, width, height, 'tile-floor').setDepth(0);
+  }
+
+  private createWeaponView(): Phaser.GameObjects.Sprite | null {
+    if (!this.textures.exists('weapon-sword')) return null;
+    // 손잡이 쪽을 회전 중심으로 둔다. 가운데를 중심으로 돌리면 무기가 손에서 떨어져 나간다.
+    return this.add.sprite(0, 0, 'weapon-sword').setOrigin(0.2, 0.5).setDepth(11).setVisible(false);
+  }
+
+  /** 손에 든 무기가 바뀌면 그림도 바꾼다. R링 교체와 마을 설정 뒤에 불린다. */
+  private refreshWeaponViews(): void {
+    for (const [hand, runtime] of [['left', this.left], ['right', this.right]] as const) {
+      const view = this.weaponViews[hand];
+      if (!view) continue;
+      if (!runtime) {
+        view.setVisible(false);
+        continue;
+      }
+      view.setTexture(WEAPON_SPRITE[runtime.weapon.id]);
+      view.setScale(WEAPON_VIEW_SIZE / Math.max(view.width, view.height));
+      view.setVisible(true);
+    }
+  }
+
+  /**
+   * 무기를 조준 방향 기준으로 배치한다.
+   *
+   * 캐릭터는 좌우 반전만 하지만 무기는 회전시킨다. 어느 쪽을 겨누는지가 무기 각도로
+   * 드러나야 손에 들고 겨눈다는 인상이 생긴다. 왼손은 조준선 왼쪽, 오른손은 오른쪽에 둔다.
+   */
+  private updateWeaponViews(angle: number): void {
+    const flipped = Math.cos(angle) < 0;
+    const width = this.player instanceof Phaser.GameObjects.Sprite ? this.player.displayWidth : PLAYER_RADIUS * 2;
+    const height = this.player instanceof Phaser.GameObjects.Sprite ? this.player.displayHeight : PLAYER_RADIUS * 2;
+
+    for (const hand of ['left', 'right'] as const) {
+      const view = this.weaponViews[hand];
+      if (!view?.visible) continue;
+
+      // 캐릭터는 회전하지 않고 좌우만 뒤집히므로, 손 위치도 같이 뒤집는다.
+      const offset = WEAPON_HAND_OFFSET[hand];
+      view.setPosition(
+        this.player.x + offset.x * width * (flipped ? -1 : 1),
+        this.player.y + offset.y * height,
+      );
+      // 무기는 겨누는 방향으로 돌린다. 손에서 뻗어 나가는 인상은 회전 중심을 손잡이에 둬서 만든다.
+      view.setRotation(angle);
+      view.setFlipY(flipped);
+    }
   }
 
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
@@ -1339,6 +1420,7 @@ export class PlayScene extends Phaser.Scene {
     this.aimLine.setTo(this.player.x, this.player.y, this.player.x + Math.cos(angle) * 44, this.player.y + Math.sin(angle) * 44);
     // 스프라이트는 오른쪽을 보고 그려져 있다. 조준 방향이 왼쪽이면 뒤집어야 등을 보이지 않는다.
     if (this.player instanceof Phaser.GameObjects.Sprite) this.player.setFlipX(Math.cos(angle) < 0);
+    this.updateWeaponViews(angle);
   }
 
   private updateEnemies(dt: number): void {
@@ -1407,11 +1489,12 @@ export class PlayScene extends Phaser.Scene {
         this.showBossChargeTelegraph(enemy, event.direction);
         break;
       case 'chargeStart':
-        playSfx('bossImpact');
+        playSfx('bossCharge');
         ring(this, enemy.x, enemy.y, BOSS_PATTERN_COLOR, { from: 18, to: ENEMY_STATS[enemy.kind].radius * 1.8, duration: 260, width: 4 });
         floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '돌진', '#ffd166');
         break;
       case 'summon':
+        playSfx('summon');
         this.summonBossAdds(enemy, event.count);
         break;
       case 'shockTelegraph':
@@ -1696,7 +1779,7 @@ export class PlayScene extends Phaser.Scene {
     entity.hpBar.width = (radius * 2 * enemy.hp) / enemy.maxHp;
 
     if (enemy.hp <= 0) {
-      playSfx('death');
+      playSfx(isBossKind(enemy.kind) ? 'bossDeath' : 'enemyDeath');
       if (isBossKind(enemy.kind) || this.isLastEnemy(entity)) this.spawnRewardDropsForEnemy(enemy);
       deathBurst(this, enemy.x, enemy.y, ENEMY_STATS[enemy.kind].color, radius * 2);
       entity.view.destroy();
@@ -2372,6 +2455,7 @@ export class PlayScene extends Phaser.Scene {
 
     this.comboRings.left.setStrokeStyle(3, left.color);
     this.comboRings.right.setStrokeStyle(3, right?.color ?? 0x2a2f42);
+    this.refreshWeaponViews();
   }
 
   private showTown(): void {

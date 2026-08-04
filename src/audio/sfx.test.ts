@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { playSfx, sfxPattern, type SfxKind } from './sfx';
 
-const KINDS: SfxKind[] = ['attack', 'hit', 'death', 'playerHit', 'combo', 'bossWarning', 'bossImpact', 'reward'];
+const KINDS: SfxKind[] = [
+  'attack',
+  'hit',
+  'enemyDeath',
+  'bossDeath',
+  'playerHit',
+  'combo',
+  'bossWarning',
+  'bossCharge',
+  'bossImpact',
+  'summon',
+  'statusBurst',
+  'reward',
+];
 
 describe('sfxPattern', () => {
   it('defines a playable pattern for every game event sound', () => {

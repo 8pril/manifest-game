@@ -1,4 +1,16 @@
-export type SfxKind = 'attack' | 'hit' | 'death' | 'playerHit' | 'combo' | 'bossWarning' | 'bossImpact' | 'reward';
+export type SfxKind =
+  | 'attack'
+  | 'hit'
+  | 'enemyDeath'
+  | 'bossDeath'
+  | 'playerHit'
+  | 'combo'
+  | 'bossWarning'
+  | 'bossCharge'
+  | 'bossImpact'
+  | 'summon'
+  | 'statusBurst'
+  | 'reward';
 
 export interface ToneStep {
   frequency: number;
@@ -17,10 +29,16 @@ export function sfxPattern(kind: SfxKind): readonly ToneStep[] {
       return [{ frequency: 240, slideTo: 360, duration: 0.045, delay: 0, gain: 0.045, type: 'triangle' }];
     case 'hit':
       return [{ frequency: 118, slideTo: 72, duration: 0.04, delay: 0, gain: 0.035, type: 'square' }];
-    case 'death':
+    case 'enemyDeath':
       return [
-        { frequency: 330, slideTo: 165, duration: 0.08, delay: 0, gain: 0.04, type: 'triangle' },
-        { frequency: 92, slideTo: 46, duration: 0.12, delay: 0.055, gain: 0.035, type: 'square' },
+        { frequency: 370, slideTo: 145, duration: 0.075, delay: 0, gain: 0.04, type: 'triangle' },
+        { frequency: 118, slideTo: 52, duration: 0.11, delay: 0.045, gain: 0.035, type: 'square' },
+      ];
+    case 'bossDeath':
+      return [
+        { frequency: 155, slideTo: 48, duration: 0.24, delay: 0, gain: 0.06, type: 'sawtooth' },
+        { frequency: 82, slideTo: 31, duration: 0.28, delay: 0.055, gain: 0.055, type: 'square' },
+        { frequency: 311, slideTo: 98, duration: 0.18, delay: 0.12, gain: 0.035, type: 'triangle' },
       ];
     case 'playerHit':
       return [
@@ -35,13 +53,28 @@ export function sfxPattern(kind: SfxKind): readonly ToneStep[] {
       ];
     case 'bossWarning':
       return [
-        { frequency: 196, slideTo: 156, duration: 0.18, delay: 0, gain: 0.045, type: 'sawtooth' },
-        { frequency: 196, slideTo: 130, duration: 0.2, delay: 0.22, gain: 0.04, type: 'sawtooth' },
+        { frequency: 196, slideTo: 156, duration: 0.18, delay: 0, gain: 0.04, type: 'sawtooth' },
+        { frequency: 196, slideTo: 130, duration: 0.2, delay: 0.22, gain: 0.038, type: 'sawtooth' },
+      ];
+    case 'bossCharge':
+      return [
+        { frequency: 130, slideTo: 330, duration: 0.18, delay: 0, gain: 0.055, type: 'sawtooth' },
+        { frequency: 65, slideTo: 98, duration: 0.16, delay: 0.035, gain: 0.045, type: 'square' },
       ];
     case 'bossImpact':
       return [
         { frequency: 82, slideTo: 44, duration: 0.13, delay: 0, gain: 0.06, type: 'square' },
         { frequency: 123, slideTo: 61, duration: 0.09, delay: 0.018, gain: 0.035, type: 'sawtooth' },
+      ];
+    case 'summon':
+      return [
+        { frequency: 220, slideTo: 440, duration: 0.16, delay: 0, gain: 0.04, type: 'triangle' },
+        { frequency: 110, slideTo: 165, duration: 0.2, delay: 0.06, gain: 0.035, type: 'sawtooth' },
+      ];
+    case 'statusBurst':
+      return [
+        { frequency: 620, slideTo: 210, duration: 0.075, delay: 0, gain: 0.05, type: 'square' },
+        { frequency: 155, slideTo: 62, duration: 0.13, delay: 0.03, gain: 0.045, type: 'sawtooth' },
       ];
     case 'reward':
       return [
