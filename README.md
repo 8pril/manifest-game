@@ -54,10 +54,12 @@ Node 20.19 이상이 필요합니다.
 ```
 http://localhost:5173/?wave=2                  첫 문지기 방부터 시작
 http://localhost:5173/?left=bow&right=arcane   무기를 지정해서 시작
+http://localhost:5173/?town=1                  첫 마을부터 시작
 http://localhost:5173/?scene=Play              타이틀을 건너뛴다
 ```
 
-`left`나 `right`를 지정하면 저장된 진행을 무시합니다.
+`left`, `right`, `wave`, `town`을 지정하면 저장된 진행을 무시합니다. `town`은 첫 마을 진입을
+우선하므로 `wave`와 함께 쓰면 `wave`는 무시됩니다.
 
 ## 기술 스택
 

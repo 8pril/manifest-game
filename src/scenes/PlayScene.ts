@@ -250,7 +250,10 @@ interface WheelSegment {
   hand: Hand;
   index: 0 | 1;
   weapon: WeaponId | null;
+  /** 링을 열었을 때 이미 그 손에 들려 있던 후보인지. 포인터 강조와 별개로 계속 표시한다. */
+  equipped: boolean;
   wedge: Phaser.GameObjects.Arc;
+  icon: Phaser.GameObjects.Image | null;
   label: Phaser.GameObjects.Text;
   meta: Phaser.GameObjects.Text;
   activeMark: Phaser.GameObjects.Text;
@@ -374,6 +377,8 @@ export class PlayScene extends Phaser.Scene {
     text: Phaser.GameObjects.Text;
   }[] = [];
   private startRoomIndex = 0;
+  /** 개발용 `?town=1`. 마을 도착 상태로 시작한다. */
+  private startInTown = false;
   private initialProgress: PlayerProgress | null = null;
 
   constructor() {
@@ -391,7 +396,7 @@ export class PlayScene extends Phaser.Scene {
     // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
     const debugStart = parseDebugStart(location.search, TOTAL_ROOMS);
     const hasDebugWeapons = debugStart.left !== undefined || debugStart.right !== undefined;
-    const progress = data?.progress ?? (hasDebugWeapons || debugStart.roomIndex !== undefined ? null : loadProgress()) ?? createInitialProgress();
+    const progress = data?.progress ?? (hasDebugWeapons || debugStart.roomIndex !== undefined || debugStart.town ? null : loadProgress()) ?? createInitialProgress();
     this.initialProgress = hasDebugWeapons ? null : progress;
     // 저장된 진행이 있어도 손에 든 무기는 이어받지 않는다. 항상 초기값으로 시작한다.
     // 자세한 이유는 createRun 참고.
@@ -403,6 +408,7 @@ export class PlayScene extends Phaser.Scene {
 
     // 개발용: ?left=bow&right=arcane&wave=4 로 특정 무기/방에서 시작한다.
     this.startRoomIndex = debugStart.roomIndex ?? 0;
+    this.startInTown = debugStart.town === true;
   }
 
   create(): void {
@@ -423,6 +429,7 @@ export class PlayScene extends Phaser.Scene {
     this.shieldGuardUntil = 0;
 
     this.run = { ...createRun(this.weapons.left, this.weapons.right, this.initialProgress ?? undefined), roomIndex: this.startRoomIndex };
+    if (this.startInTown) this.run = this.fastForwardToTown(this.run);
     this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
     const right = rightWeapon(this.run.loadout);
     this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0 } : null;
@@ -463,7 +470,10 @@ export class PlayScene extends Phaser.Scene {
 
     this.buildHud();
     this.bindInput();
-    this.enterRoom();
+    // `?town=1`로 시작하면 첫 진입부터 마을이다. 무조건 enterRoom을 부르면
+    // 상태는 마을인데 화면은 전투 방이 되어, 적이 스폰되고 NPC는 없는 잡탕이 된다.
+    if (this.run.phase === 'town') this.enterTownRoom();
+    else this.enterRoom();
   }
 
   // ───────────────────────── 입력
@@ -533,7 +543,8 @@ export class PlayScene extends Phaser.Scene {
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.weaponWheel || this.paused) return;
+      if (this.weaponWheel) return;
+      if (this.paused) return;
       if (this.run.phase !== 'combat') return;
       // 트랙패드에서는 두 손가락 탭이 꺼져 있거나 브라우저가 다르게 넘겨줄 수 있어
       // 눌린 버튼 상태와 이벤트의 버튼 번호를 모두 본다.
@@ -988,6 +999,8 @@ export class PlayScene extends Phaser.Scene {
       ? (() => {
           const sprite = this.add.sprite(npcX, npcY, 'npc-keeper').setDepth(5);
           sprite.setScale(80 / Math.max(sprite.width, sprite.height));
+          // 원본 NPC 스프라이트는 오른쪽을 본다. 마을에 들어온 플레이어를 먼저 바라보게 둔다.
+          sprite.setFlipX(true);
           return sprite;
         })()
       : this.add.rectangle(npcX, npcY, 38, 58, 0x8ea4ff, 0.95).setDepth(5);
@@ -1108,6 +1121,22 @@ export class PlayScene extends Phaser.Scene {
       view.setRotation(flipped ? Math.PI - pose : pose);
       view.setFlipY(flipped);
     }
+  }
+
+  /**
+   * 개발용: 마을 도착 상태까지 밀어 놓는다.
+   *
+   * 마을 UI와 R링을 확인하려면 첫 보스를 넘어야 해서, 자동 검증도 손 검증도 그 앞에서 막혔다.
+   * 수치를 따로 심지 않고 **실제 방 클리어 전이(`clearRoom`)를 그대로 태운다.** 그래야
+   * 보상·해금·R링 후보가 실제로 마을에 도착했을 때와 같은 상태가 된다.
+   */
+  private fastForwardToTown(run: RunState): RunState {
+    let next = run;
+    for (let i = 0; i < TOTAL_ROOMS && next.phase === 'combat'; i++) {
+      next = clearRoom(next);
+      if (next.phase === 'town') break;
+    }
+    return next;
   }
 
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
@@ -1990,6 +2019,7 @@ export class PlayScene extends Phaser.Scene {
     npc.prompt.setVisible(near && !this.overlay);
     // 가까워지면 강조한다. 스프라이트는 평소에 원래 색을 유지해야 하므로 틴트를 걷어낸다.
     if (npc.body instanceof Phaser.GameObjects.Sprite) {
+      npc.body.setFlipX(this.player.x < npc.x);
       if (near) npc.body.setTint(COLORS.accent);
       else npc.body.clearTint();
     } else {
@@ -2323,6 +2353,7 @@ export class PlayScene extends Phaser.Scene {
     container.setAlpha(0.4);
     for (const segment of segments) {
       segment.wedge.setScale(0.2);
+      segment.icon?.setAlpha(0);
       segment.label.setAlpha(0);
       segment.meta.setAlpha(0);
       segment.activeMark.setAlpha(0);
@@ -2338,7 +2369,7 @@ export class PlayScene extends Phaser.Scene {
       ease: 'Back.easeOut',
     });
     this.tweens.add({
-      targets: segments.flatMap((segment) => [segment.label, segment.meta, segment.activeMark]),
+      targets: segments.flatMap((segment) => [segment.icon, segment.label, segment.meta, segment.activeMark].filter(Boolean)),
       alpha: 1,
       duration: WHEEL_OPEN_MS,
     });
@@ -2363,15 +2394,23 @@ export class PlayScene extends Phaser.Scene {
     return slots.map((slot) => {
       const weapon = this.run.progress.wheel[slot.hand][slot.index];
       const color = weapon ? weaponOf(weapon).color : 0x2a2f42;
-      const active = weapon && this.run.progress.active[slot.hand] === weapon;
+      const active = Boolean(weapon) && this.run.progress.active[slot.hand] === weapon;
       const weaponLabel = weapon ? weaponOf(weapon).name : '-';
       const metaLabel = `${slot.hand === 'left' ? 'L' : 'R'}${slot.index + 1}`;
+      const iconKey = weapon ? WEAPON_SPRITE[weapon] : null;
       const wedge = this.add
         .arc(center.x, center.y, WHEEL_RADIUS, slot.start, slot.end, false, color, weapon ? 0.58 : 0.28)
         .setStrokeStyle(2, 0x0a0b0f, 0.9);
+      const icon = iconKey && this.textures.exists(iconKey)
+        ? this.add.image(center.x + slot.labelDx, center.y + slot.labelDy + 4, iconKey).setOrigin(0.5)
+        : null;
+      if (icon) {
+        icon.setScale(48 / Math.max(icon.width, icon.height));
+        icon.setAlpha(weapon ? 0.95 : 0.3);
+      }
       const label = this.add
-        .text(center.x + slot.labelDx, center.y + slot.labelDy + 8, weaponLabel, {
-          fontSize: '20px',
+        .text(center.x + slot.labelDx, center.y + slot.labelDy + (icon ? 39 : 8), weaponLabel, {
+          fontSize: icon ? '12px' : '20px',
           color: weapon ? COLORS.text : COLORS.textDim,
           fontStyle: weapon ? 'bold' : undefined,
           align: 'center',
@@ -2385,8 +2424,8 @@ export class PlayScene extends Phaser.Scene {
         })
         .setOrigin(0.5);
       const activeMark = this.add
-        .text(center.x + slot.labelDx + (slot.hand === 'left' ? -36 : 36), center.y + slot.labelDy - 18, active ? '✓' : '', {
-          fontSize: '16px',
+        .text(center.x + slot.labelDx, center.y + slot.labelDy + (icon ? 54 : 30), active ? '장착 중' : '', {
+          fontSize: icon ? '11px' : '13px',
           color: COLORS.accentText,
           fontStyle: 'bold',
         })
@@ -2394,9 +2433,10 @@ export class PlayScene extends Phaser.Scene {
 
       container.add(wedge);
       container.add(meta);
+      if (icon) container.add(icon);
       container.add(label);
       container.add(activeMark);
-      return { hand: slot.hand, index: slot.index, weapon, wedge, label, meta, activeMark };
+      return { hand: slot.hand, index: slot.index, weapon, equipped: Boolean(active), wedge, icon, label, meta, activeMark };
     });
   }
 
@@ -2409,15 +2449,35 @@ export class PlayScene extends Phaser.Scene {
     wheel.selected = selected;
     const ready = this.time.now >= wheel.readyAt;
 
+    if (ready && selected) this.equipWheelSelection(selected.hand, selected.index);
+
+    // R링에서는 포인터가 올라간 후보가 곧바로 장착된다.
+    // 그래서 `장착 중` 표시는 현재 진행 상태의 active를 기준으로 매 프레임 다시 계산한다.
     for (const segment of wheel.segments) {
-      const isSelected = ready && selected?.hand === segment.hand && selected.index === segment.index && segment.weapon;
-      segment.wedge.setAlpha(isSelected ? 0.95 : segment.weapon ? 0.58 : 0.24);
-      segment.wedge.setStrokeStyle(isSelected ? 4 : 2, isSelected ? COLORS.accent : 0x0a0b0f, isSelected ? 1 : 0.9);
-      segment.label.setColor(isSelected ? COLORS.accentText : segment.weapon ? COLORS.text : COLORS.textDim);
-      segment.label.setScale(isSelected ? 1.14 : 1);
-      segment.meta.setScale(isSelected ? 1.12 : 1);
-      segment.meta.setColor(isSelected ? COLORS.accentText : segment.hand === 'left' ? '#cfe0ff' : '#ffe0a8');
-      segment.activeMark.setScale(isSelected ? 1.16 : 1);
+      const hovered = Boolean(
+        ready &&
+        selected?.hand === segment.hand &&
+        selected.index === segment.index &&
+        segment.weapon,
+      );
+      const equipped = Boolean(segment.weapon) && this.run.progress.active[segment.hand] === segment.weapon;
+      segment.equipped = equipped;
+      const marked = equipped || hovered;
+
+      segment.wedge.setAlpha(hovered ? 0.95 : equipped ? 0.78 : segment.weapon ? 0.5 : 0.22);
+      segment.wedge.setStrokeStyle(
+        hovered ? 5 : equipped ? 3 : 2,
+        marked ? COLORS.accent : 0x0a0b0f,
+        hovered ? 1 : equipped ? 0.75 : 0.9,
+      );
+      segment.label.setColor(marked ? COLORS.accentText : segment.weapon ? COLORS.text : COLORS.textDim);
+      segment.label.setScale(hovered ? 1.16 : 1);
+      segment.icon?.setScale((hovered ? 56 : equipped ? 52 : 48) / Math.max(segment.icon.width, segment.icon.height));
+      segment.icon?.setAlpha(hovered ? 1 : equipped ? 0.95 : segment.weapon ? 0.72 : 0.25);
+      segment.meta.setScale(hovered ? 1.12 : 1);
+      segment.meta.setColor(marked ? COLORS.accentText : segment.hand === 'left' ? '#cfe0ff' : '#ffe0a8');
+      segment.activeMark.setText(marked ? '장착 중' : '');
+      segment.activeMark.setAlpha(hovered || marked ? 1 : 0);
     }
   }
 
@@ -2444,10 +2504,10 @@ export class PlayScene extends Phaser.Scene {
     wheel.container.destroy(true);
   }
 
-  private equipWheelSelection(hand: Hand, index: 0 | 1): void {
+  private equipWheelSelection(hand: Hand, index: 0 | 1): boolean {
     const before = this.run.progress;
     const progress = equipFromWheel(before, hand, index);
-    if (progress === before) return;
+    if (progress === before) return false;
 
     this.run = {
       ...this.run,
@@ -2457,6 +2517,7 @@ export class PlayScene extends Phaser.Scene {
     this.saveCurrentProgress();
     this.syncWeaponRuntimes();
     this.refreshHud();
+    return true;
   }
 
   /**

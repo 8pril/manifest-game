@@ -154,10 +154,12 @@ npm run dev
 # http://localhost:5173/?wave=2                     첫 문지기 방부터
 # http://localhost:5173/?left=bow&right=arcane       무기를 지정해서 시작
 # http://localhost:5173/?wave=4&left=shield          둘 다 지정
+# http://localhost:5173/?town=1                      첫 마을부터
 ```
 
-`left`나 `right`를 지정하면 저장된 진행을 무시하고 그 무기로 시작한다.
-대신 저장된 R링 후보도 같이 버려지므로, 링 교체를 볼 때는 파라미터 없이 들어가는 쪽이 맞다.
+`left`, `right`, `wave`, `town`을 지정하면 저장된 진행을 무시한다. `town`은 실제 방 클리어
+전이를 태워 첫 마을 도착 상태를 만들기 때문에, 마을 UI와 R링을 바로 확인할 때 쓴다. `town`과
+`wave`를 같이 쓰면 `town`이 우선한다.
 
 ## 아트 작업
 
