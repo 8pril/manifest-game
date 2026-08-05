@@ -407,8 +407,11 @@ export class PlayScene extends Phaser.Scene {
     };
 
     // 개발용: ?left=bow&right=arcane&wave=4 로 특정 무기/방에서 시작한다.
-    this.startRoomIndex = debugStart.roomIndex ?? 0;
     this.startInTown = debugStart.town === true;
+    // `?town=1`은 0번 방부터 실제 클리어 전이를 태워 마을에 도달한다. 마을은 1번 방을
+    // 클리어할 때만 열리므로, 시작 방이 그 뒤면 마을 전이를 만나지 못하고 마지막 방까지
+    // 밀려 `won` 상태로 시작한다. 그래서 둘이 겹칠 때는 방 지정을 버린다.
+    this.startRoomIndex = this.startInTown ? 0 : debugStart.roomIndex ?? 0;
   }
 
   create(): void {
