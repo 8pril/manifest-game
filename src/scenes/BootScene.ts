@@ -22,6 +22,7 @@ export const SPRITE_KEYS = [
   'bolt-arcane',
   'bolt-enemy',
   'tile-floor',
+  'tile-wall',
   'weapon-sword',
   'weapon-bow',
   'weapon-arcane',

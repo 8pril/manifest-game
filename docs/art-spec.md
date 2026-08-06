@@ -102,6 +102,11 @@
 | 파일명 | 용도 | 캔버스 |
 | --- | --- | --- |
 | `tile-floor.png` | 바닥 타일 (반복) | 128×128 |
+| `tile-wall.png` | 벽 타일 (반복) | 96×96 |
+
+벽은 **판정 경계 안쪽 24px 띠**에만 그린다. 카메라가 방 밖으로 나가지 않으므로
+그보다 두껍게 그릴 자리가 없다. 타일은 좌우로 이어져야 하고, 바닥보다 밝고 구조가
+분명해야 경계가 읽힌다.
 
 **상하좌우가 이어지는 타일링 패턴**이어야 한다. 이음매가 보이면 못 쓴다. 어둡고 차분하게 — 캐릭터가 묻히면 안 된다.
 
@@ -315,6 +320,30 @@ brighter toward the outer edge, color <색>, hand-drawn chalky texture,
 transparent background, no shadow, centered, perfectly circular
 ```
 
+**콤보 링**
+
+```
+a circular halo band seen from directly above, lying flat, perfectly circular,
+a soft thick gradient: faint at the inner edge and bright at the outer edge,
+like a ring of light on the floor, no hard outline, the inside is completely
+empty and fully transparent, PURE WHITE only with no colour at all so it can
+be tinted, transparent background, no shadow, centered, fills the canvas
+```
+
+무기 색으로 틴트해서 쓰므로 **반드시 무채색**이어야 한다. 색이 섞여 있으면 틴트가 탁해진다.
+
+**벽 타일**
+
+```
+a seamless horizontally tileable stone dungeon wall texture seen from directly
+above, a narrow band of stacked heavy stone blocks with deep dark mortar gaps,
+lighter and more structured than the floor so the room edge is obvious,
+cool grey-blue stone, hand-drawn chalky texture, the pattern must tile
+seamlessly on the left and right edges, no objects, no perspective, flat
+```
+
+따뜻한 갈색 계열로 나오면 다시 뽑는다. 게임 팔레트가 차가운 어두운 색이라 따로 논다.
+
 **바닥 타일**
 
 장소는 "현대인이 끌려온 이세계"이고 인상은 던전 쪽이다.
@@ -394,6 +423,8 @@ model=gpt-image-1  size=1024x1024  background=transparent  output_format=png  n=
 | `bolt-enemy.png` | gpt-image-1 | 2026-08-03 | 이 문서 `투사체` 항목, 색 `#e0b055` | 없음 |
 | `tile-floor.png` | gpt-image-1 | 2026-08-03 | 이 문서 `바닥 타일` 항목 | 없음 |
 | `area-*.png` 4종 | gpt-image-1 | 2026-08-03 | 이 문서 `지대` 항목 | **게임에 반영하지 않음** (아래 참고) |
+| `combo-ring.png` | gpt-image-1 | 2026-08-06 | 아래 `콤보 링` 항목 | 없음 |
+| `tile-wall.png` | gpt-image-1 | 2026-08-06 | 아래 `벽 타일` 항목 | 밝기를 0.72배로 낮춤 |
 | `weapon-sword.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
 | `weapon-bow.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
 | `weapon-arcane.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |

@@ -16,7 +16,7 @@ import {
 import { TOTAL_ROOMS } from '@/game/rooms';
 import { totalSupports, supportsFor } from '@/game/loadout';
 import { createLoadout } from '@/game/loadout';
-import { configureManifestation, createInitialProgress, unlockComboSkills, unlockSupports, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
+import { configureManifestation, createInitialProgress, setWheelSlot, unlockComboSkills, unlockSupports, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
 
 const newRun = () => createRun('sword', 'bow');
 
@@ -75,7 +75,7 @@ describe('clearRoom', () => {
   });
 
   it('첫 보스를 정리하면 활/방패와 무기 교체를 해금하고 마을로 들어간다', () => {
-    const atFirstBoss = clearRoom(newRun());
+    const atFirstBoss = clearRoom(createRun('sword', null));
     const town = clearRoom(atFirstBoss);
 
     expect(town.phase).toBe('town');
@@ -85,7 +85,8 @@ describe('clearRoom', () => {
     expect(town.progress.ownedSupports).toEqual([]);
     expect(town.progress.weaponSwitchUnlocked).toBe(true);
     expect(town.progress.wheel.left).toEqual(['sword', 'shield']);
-    expect(town.progress.wheel.right).toEqual(['bow', null]);
+    expect(town.progress.wheel.right).toEqual([null, null]);
+    expect(town.progress.active).toEqual({ left: 'sword', right: null });
     expect(supportsFor(town.loadout, 'volley')).toEqual([]);
     expect(supportsFor(town.loadout, 'annihilation')).toEqual([]);
     expect(supportsFor(town.loadout, 'fracture-wave')).toEqual([]);
@@ -145,13 +146,22 @@ describe('collectRoomReward', () => {
 
 describe('leaveTown', () => {
   it('마을을 나와 다음 전투 방으로 간다', () => {
-    const town = clearRoom(clearRoom(newRun()));
+    const town = clearRoom(clearRoom(createRun('sword', null)));
     const next = leaveTown(town);
 
     expect(next.phase).toBe('combat');
     expect(next.roomIndex).toBe(2);
-    expect(next.progress.active).toEqual({ left: 'sword', right: 'bow' });
+    expect(next.progress.active).toEqual({ left: 'sword', right: null });
     expect(next.loadout.left).toBe('sword');
+    expect(next.loadout.right).toBeNull();
+  });
+
+  it('마을에서 오른손 1번 후보를 고르면 다음 전투에서 오른손에 든다', () => {
+    const town = clearRoom(clearRoom(createRun('sword', null)));
+    const configured = { ...town, progress: setWheelSlot(town.progress, 'right', 0, 'bow') };
+    const next = leaveTown(configured);
+
+    expect(next.progress.active).toEqual({ left: 'sword', right: 'bow' });
     expect(next.loadout.right).toBe('bow');
   });
 

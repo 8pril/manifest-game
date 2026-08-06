@@ -942,13 +942,8 @@ export class PlayScene extends Phaser.Scene {
 
     const cx = room.width / 2;
     const cy = room.height / 2;
-    this.roomFloor.push(
-      this.floorView(cx, cy, room.width, room.height, COLORS.background, 0x1b1e2b),
-      this.add
-        .rectangle(cx, cy, room.width - WALL * 2, room.height - WALL * 2)
-        .setStrokeStyle(3, 0x2a2f42)
-        .setDepth(0),
-    );
+    this.roomFloor.push(this.floorView(cx, cy, room.width, room.height, COLORS.background, 0x1b1e2b));
+    this.roomFloor.push(...this.wallViews(room.width, room.height, 0x2a2f42));
 
     // 출구는 오른쪽 벽 가운데. 방을 정리하기 전에는 닫혀 있다.
     this.exit = this.add.rectangle(room.width - WALL / 2, cy, WALL, EXIT_SIZE, 0x2a2f42).setDepth(1);
@@ -1000,11 +995,8 @@ export class PlayScene extends Phaser.Scene {
     const cy = TOWN_HEIGHT / 2;
     this.roomFloor.push(
       this.floorView(cx, cy, TOWN_WIDTH, TOWN_HEIGHT, 0x11131c, 0x24283a),
-      this.add
-        .rectangle(cx, cy, TOWN_WIDTH - WALL * 2, TOWN_HEIGHT - WALL * 2)
-        .setStrokeStyle(3, 0x3a4059)
-        .setDepth(0),
     );
+    this.roomFloor.push(...this.wallViews(TOWN_WIDTH, TOWN_HEIGHT, 0x3a4059));
 
     this.exit = this.add.rectangle(TOWN_WIDTH - WALL / 2, cy, WALL, EXIT_SIZE, COLORS.accent, 0.75).setDepth(1);
     this.exitLabel = this.add
@@ -1173,6 +1165,43 @@ export class PlayScene extends Phaser.Scene {
     sprite.setDisplaySize(diameter, diameter);
     sprite.setTint(color);
     return sprite;
+  }
+
+  /**
+   * 방 가장자리의 벽.
+   *
+   * 카메라가 방 안으로 제한되므로 벽은 판정 경계(`WALL`) 안쪽 24px 띠에만 그릴 수 있다.
+   * 타일 이미지가 없으면 예전처럼 선 테두리 하나로 대체한다.
+   */
+  private wallViews(width: number, height: number, lineColor: number): Phaser.GameObjects.GameObject[] {
+    if (!this.textures.exists('tile-wall')) {
+      return [
+        this.add
+          .rectangle(width / 2, height / 2, width - WALL * 2, height - WALL * 2)
+          .setStrokeStyle(3, lineColor)
+          .setDepth(0),
+      ];
+    }
+
+    // TileSprite는 텍스처를 원본 크기로 반복한다. 띠 두께에 맞춰 타일을 줄여야
+    // 한 칸이 벽 두께와 같아진다.
+    const bands: Phaser.GameObjects.TileSprite[] = [
+      this.add.tileSprite(width / 2, WALL / 2, width, WALL, 'tile-wall'),
+      this.add.tileSprite(width / 2, height - WALL / 2, width, WALL, 'tile-wall'),
+      this.add.tileSprite(WALL / 2, height / 2, WALL, height, 'tile-wall'),
+      this.add.tileSprite(width - WALL / 2, height / 2, WALL, height, 'tile-wall'),
+    ];
+    // `band.width`는 표시 크기라 기준이 될 수 없다. 텍스처 원본 크기로 나눠야
+    // 타일 한 칸이 벽 두께와 같아진다.
+    // 타일 한 칸이 벽 두께의 두 배가 되게 한다. 두께에 딱 맞추면 24px 안에 무늬가
+    // 전부 들어가 잘게 뭉개진다. 크게 잡아야 돌 하나가 돌로 보인다.
+    const texture = this.textures.get('tile-wall').getSourceImage() as { width: number };
+    const tileScale = (WALL * 2) / (texture.width || WALL);
+    for (const band of bands) {
+      band.setTileScale(tileScale);
+      band.setDepth(0);
+    }
+    return bands;
   }
 
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
@@ -2860,7 +2889,7 @@ export class PlayScene extends Phaser.Scene {
 
   private cycleWheelSlot(hand: Hand, index: 0 | 1): void {
     const current = this.run.progress.wheel[hand][index];
-    const candidates: WheelSlot[] = [null, ...this.run.progress.unlockedWeapons];
+    const candidates: WheelSlot[] = [null, ...this.wheelCandidatesForHand(hand)];
     const next = candidates[(candidates.indexOf(current) + 1) % candidates.length] ?? null;
     // 1번 칸을 바꾸면 손에 드는 무기가 바뀐다. 마을을 나갈 때까지 미루면 패널에는
     // `왼손 1: 방패`라고 떠 있는데 캐릭터는 검을 든 채로 남아 설정과 화면이 어긋난다.
@@ -2875,6 +2904,13 @@ export class PlayScene extends Phaser.Scene {
     this.syncWeaponRuntimes();
     this.refreshHud();
     this.reopenTownOverlay();
+  }
+
+  private wheelCandidatesForHand(hand: Hand): WeaponId[] {
+    const preferred: readonly WeaponId[] = hand === 'left'
+      ? ['sword', 'shield', 'bow', 'arcane']
+      : ['bow', 'arcane', 'shield', 'sword'];
+    return preferred.filter((weapon) => this.run.progress.unlockedWeapons.includes(weapon));
   }
 
   private saveCurrentProgress(): void {
