@@ -1183,20 +1183,18 @@ export class PlayScene extends Phaser.Scene {
       ];
     }
 
-    // TileSprite는 텍스처를 원본 크기로 반복한다. 띠 두께에 맞춰 타일을 줄여야
-    // 한 칸이 벽 두께와 같아진다.
+    // 텍스처는 **가로로 긴 벽 띠**다. 정사각형을 쓰면 가로 벽과 세로 벽이 타일의 서로 다른
+    // 부분을 잘라 쓰게 되어 돌 크기와 무늬가 서로 달라진다.
+    // 세로 벽은 같은 띠를 90도 돌려 쓴다. 그래야 네 면의 돌이 같은 크기로 보인다.
+    const texture = this.textures.get('tile-wall').getSourceImage() as { height: number };
+    const tileScale = WALL / (texture.height || WALL);
+
     const bands: Phaser.GameObjects.TileSprite[] = [
       this.add.tileSprite(width / 2, WALL / 2, width, WALL, 'tile-wall'),
-      this.add.tileSprite(width / 2, height - WALL / 2, width, WALL, 'tile-wall'),
-      this.add.tileSprite(WALL / 2, height / 2, WALL, height, 'tile-wall'),
-      this.add.tileSprite(width - WALL / 2, height / 2, WALL, height, 'tile-wall'),
+      this.add.tileSprite(width / 2, height - WALL / 2, width, WALL, 'tile-wall').setFlipY(true),
+      this.add.tileSprite(WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90).setFlipY(true),
+      this.add.tileSprite(width - WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90),
     ];
-    // `band.width`는 표시 크기라 기준이 될 수 없다. 텍스처 원본 크기로 나눠야
-    // 타일 한 칸이 벽 두께와 같아진다.
-    // 타일 한 칸이 벽 두께의 두 배가 되게 한다. 두께에 딱 맞추면 24px 안에 무늬가
-    // 전부 들어가 잘게 뭉개진다. 크게 잡아야 돌 하나가 돌로 보인다.
-    const texture = this.textures.get('tile-wall').getSourceImage() as { width: number };
-    const tileScale = (WALL * 2) / (texture.width || WALL);
     for (const band of bands) {
       band.setTileScale(tileScale);
       band.setDepth(0);
