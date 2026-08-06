@@ -318,7 +318,9 @@ export class PlayScene extends Phaser.Scene {
   private shieldBarFill!: Phaser.GameObjects.Rectangle;
   private comboBadges!: { left: ComboBadge; right: ComboBadge };
   /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
-  private comboRings!: { left: Phaser.GameObjects.Arc; right: Phaser.GameObjects.Arc };
+  private comboRings!: { left: ShapeOrSprite; right: ShapeOrSprite };
+  /** 링의 기준 지름. 맥동은 이 값에 배율을 곱해 만든다. */
+  private comboRingSize = { left: 0, right: 0 };
   /** 양손에 든 무기 그림. 스프라이트가 없으면 null이고 그때는 아무것도 그리지 않는다. */
   private weaponViews: { left: Phaser.GameObjects.Sprite | null; right: Phaser.GameObjects.Sprite | null } = {
     left: null,
@@ -379,6 +381,14 @@ export class PlayScene extends Phaser.Scene {
   private startRoomIndex = 0;
   /** 개발용 `?town=1`. 마을 도착 상태로 시작한다. */
   private startInTown = false;
+  /**
+   * 진행을 localStorage에 저장할지.
+   *
+   * 개발 파라미터(`?town`, `?wave`, `?left`, `?right`)는 저장된 진행을 **읽지 않고**
+   * 임시 상태를 만든다. 그런데 저장은 그대로 일어나서, 개발용으로 한 번 열면
+   * 플레이어가 쌓아온 진행이 임시 상태로 덮어써졌다. 읽지 않았으면 쓰지도 않는다.
+   */
+  private persistProgress = true;
   private initialProgress: PlayerProgress | null = null;
 
   constructor() {
@@ -396,7 +406,10 @@ export class PlayScene extends Phaser.Scene {
     // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
     const debugStart = parseDebugStart(location.search, TOTAL_ROOMS);
     const hasDebugWeapons = debugStart.left !== undefined || debugStart.right !== undefined;
-    const progress = data?.progress ?? (hasDebugWeapons || debugStart.roomIndex !== undefined || debugStart.town ? null : loadProgress()) ?? createInitialProgress();
+    const ignoresSavedProgress = hasDebugWeapons || debugStart.roomIndex !== undefined || debugStart.town === true;
+    // 저장을 안 읽는 개발 진입은 저장도 하지 않는다. 안 그러면 실제 진행을 덮어쓴다.
+    this.persistProgress = !ignoresSavedProgress;
+    const progress = data?.progress ?? (ignoresSavedProgress ? null : loadProgress()) ?? createInitialProgress();
     this.initialProgress = hasDebugWeapons ? null : progress;
     // 저장된 진행이 있어도 손에 든 무기는 이어받지 않는다. 항상 초기값으로 시작한다.
     // 자세한 이유는 createRun 참고.
@@ -456,9 +469,13 @@ export class PlayScene extends Phaser.Scene {
 
     // 콤보가 차면 숫자를 읽지 않아도 알 수 있게 플레이어에 링을 띄운다.
     // 손마다 반지름을 달리해 어느 쪽이 찼는지 구분한다.
+    // 두 링은 같은 중심에 반지름만 다르다. 위치가 아니라 크기로 손을 구분한다.
+    // 그림 링은 띠가 8~9px이라 예전 3px 선보다 두껍다. 간격을 그대로 두면 둘이 붙어
+    // 한 덩어리로 보이므로, 안팎 여유를 넓혔다.
+    this.comboRingSize = { left: (playerViewRadius + 10) * 2, right: (playerViewRadius + 26) * 2 };
     this.comboRings = {
-      left: this.add.circle(0, 0, playerViewRadius + 12).setStrokeStyle(3, this.left.weapon.color).setDepth(11).setVisible(false),
-      right: this.add.circle(0, 0, playerViewRadius + 22).setStrokeStyle(3, right?.color ?? 0x2a2f42).setDepth(11).setVisible(false),
+      left: this.createComboRing(this.comboRingSize.left, this.left.weapon.color),
+      right: this.createComboRing(this.comboRingSize.right, right?.color ?? 0x2a2f42),
     };
 
     this.arcaneAura = this.add
@@ -1142,6 +1159,22 @@ export class PlayScene extends Phaser.Scene {
     return next;
   }
 
+  /**
+   * 콤보 링. 이미지가 있으면 스프라이트, 없으면 예전처럼 선으로 그린 원.
+   *
+   * 틴트는 WebGL 렌더러에서만 동작한다. Canvas로 떨어진 환경에서는 링이 흰색으로 남지만
+   * 반지름 차이로 좌/우손은 여전히 구분된다.
+   */
+  private createComboRing(diameter: number, color: number): ShapeOrSprite {
+    if (!this.textures.exists('combo-ring')) {
+      return this.add.circle(0, 0, diameter / 2).setStrokeStyle(3, color).setDepth(11).setVisible(false);
+    }
+    const sprite = this.add.sprite(0, 0, 'combo-ring').setDepth(11).setVisible(false);
+    sprite.setDisplaySize(diameter, diameter);
+    sprite.setTint(color);
+    return sprite;
+  }
+
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
     const enemy = createEnemy(kind, x, y);
     const stats = ENEMY_STATS[enemy.kind];
@@ -1467,7 +1500,13 @@ export class PlayScene extends Phaser.Scene {
       ring.setPosition(this.player.x, this.player.y);
       // 회전하는 대신 맥동시켜 준비 상태를 눈에 띄게 한다.
       const pulse = 1 + Math.sin(this.time.now / 110) * 0.12;
-      ring.setScale(pulse);
+      if (ring instanceof Phaser.GameObjects.Sprite) {
+        // 스프라이트는 원본 크기가 제각각이라 배율이 아니라 표시 지름으로 잡는다.
+        const size = this.comboRingSize[side] * pulse;
+        ring.setDisplaySize(size, size);
+      } else {
+        ring.setScale(pulse);
+      }
     }
   }
 
@@ -2541,8 +2580,8 @@ export class PlayScene extends Phaser.Scene {
       this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0 } : null;
     }
 
-    this.comboRings.left.setStrokeStyle(3, left.color);
-    this.comboRings.right.setStrokeStyle(3, right?.color ?? 0x2a2f42);
+    tintView(this.comboRings.left, left.color);
+    tintView(this.comboRings.right, right?.color ?? 0x2a2f42);
     this.refreshWeaponViews();
   }
 
@@ -2839,6 +2878,7 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private saveCurrentProgress(): void {
+    if (!this.persistProgress) return;
     saveProgress(this.run.progress);
   }
 
