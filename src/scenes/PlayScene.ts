@@ -70,7 +70,15 @@ import {
   type Enemy,
   type EnemyKind,
 } from '@/game/enemy';
-import { ROOMS, TOTAL_ROOMS, type RoomReward } from '@/game/rooms';
+import {
+  ROOMS,
+  TOTAL_ROOMS,
+  TOWN_PROPS,
+  TOWN_TONE,
+  type PropKind,
+  type RoomReward,
+  type RoomTone,
+} from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
 import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
@@ -354,7 +362,7 @@ export class PlayScene extends Phaser.Scene {
   private weapons: { left: WeaponId; right: WeaponId | null } = { left: 'sword', right: null };
   /** 현재 방의 이동 가능 영역. 방마다 크기가 다르다. */
   private bounds = { minX: WALL, minY: WALL, maxX: GAME_WIDTH - WALL, maxY: GAME_HEIGHT - WALL };
-  private exit!: Phaser.GameObjects.Rectangle;
+  private exit!: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
   private exitLabel!: Phaser.GameObjects.Text;
   private roomFloor: Phaser.GameObjects.GameObject[] = [];
   /** 방을 정리해 출구가 열렸는지. */
@@ -374,7 +382,7 @@ export class PlayScene extends Phaser.Scene {
   private loreNotes: {
     x: number;
     y: number;
-    mark: Phaser.GameObjects.Rectangle;
+    mark: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
     plate: Phaser.GameObjects.Rectangle;
     text: Phaser.GameObjects.Text;
   }[] = [];
@@ -943,17 +951,20 @@ export class PlayScene extends Phaser.Scene {
     const cx = room.width / 2;
     const cy = room.height / 2;
     this.roomFloor.push(this.floorView(cx, cy, room.width, room.height, COLORS.background, 0x1b1e2b));
-    this.roomFloor.push(...this.wallViews(room.width, room.height, 0x2a2f42));
+    // 서술 오브젝트를 먼저 놓아야 장식물이 그 자리를 피할 수 있다.
+    this.placeLore(room);
+    this.roomFloor.push(...this.propViews(room, this.run.roomIndex + 1, room.props));
+    this.roomFloor.push(...this.wallViews(room.width, room.height, 0x2a2f42, cy));
+    // 색조는 바닥·장식물·벽을 모두 덮어야 한 장소로 읽힌다. 그래서 마지막에 얹는다.
+    this.roomFloor.push(this.toneView(cx, cy, room.width, room.height, room.tone));
 
     // 출구는 오른쪽 벽 가운데. 방을 정리하기 전에는 닫혀 있다.
-    this.exit = this.add.rectangle(room.width - WALL / 2, cy, WALL, EXIT_SIZE, 0x2a2f42).setDepth(1);
+    this.exit = this.exitView(room.width - WALL / 2, cy, 0x2a2f42);
     this.exitLabel = this.add
       .text(room.width - WALL - 110, cy, '', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
       .setOrigin(0.5)
       .setDepth(2);
     this.roomFloor.push(this.exit, this.exitLabel);
-
-    this.placeLore(room);
 
     // 플레이어는 왼쪽에서 들어온다.
     this.player.setPosition(WALL + 90, cy);
@@ -996,9 +1007,13 @@ export class PlayScene extends Phaser.Scene {
     this.roomFloor.push(
       this.floorView(cx, cy, TOWN_WIDTH, TOWN_HEIGHT, 0x11131c, 0x24283a),
     );
-    this.roomFloor.push(...this.wallViews(TOWN_WIDTH, TOWN_HEIGHT, 0x3a4059));
+    // 마을에는 서술 오브젝트가 없으므로 비워 둘 자리를 계산할 것도 없다.
+    this.loreNotes = [];
+    this.roomFloor.push(...this.propViews({ width: TOWN_WIDTH, height: TOWN_HEIGHT }, 99, TOWN_PROPS));
+    this.roomFloor.push(...this.wallViews(TOWN_WIDTH, TOWN_HEIGHT, 0x3a4059, cy));
+    this.roomFloor.push(this.toneView(cx, cy, TOWN_WIDTH, TOWN_HEIGHT, TOWN_TONE));
 
-    this.exit = this.add.rectangle(TOWN_WIDTH - WALL / 2, cy, WALL, EXIT_SIZE, COLORS.accent, 0.75).setDepth(1);
+    this.exit = this.exitView(TOWN_WIDTH - WALL / 2, cy, COLORS.accent);
     this.exitLabel = this.add
       .text(TOWN_WIDTH - WALL - 110, cy, '다음 전투 →', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
       .setOrigin(0.5)
@@ -1082,6 +1097,67 @@ export class PlayScene extends Phaser.Scene {
       return this.add.grid(cx, cy, width, height, 64, 64, background, 1, line, 1).setDepth(0);
     }
     return this.add.tileSprite(cx, cy, width, height, 'tile-floor').setDepth(0);
+  }
+
+  /**
+   * 방 색조.
+   *
+   * 타일 한 장을 모든 방에 그대로 깔면 다섯 방과 마을이 전부 같은 곳으로 보인다.
+   * 바닥 위에 반투명한 판을 한 겹 덮어 방마다 다른 인상을 만든다.
+   */
+  private toneView(cx: number, cy: number, width: number, height: number, tone: RoomTone) {
+    return this.add.rectangle(cx, cy, width, height, tone.color, tone.alpha).setDepth(0);
+  }
+
+  /**
+   * 바닥 장식물.
+   *
+   * **위치는 방 번호로 고정한다.** 매번 다르게 흩뿌리면 같은 방이 갈 때마다 달라 보여
+   * 장소로 기억되지 않고, 플레이 테스트에서 본 화면을 다시 만들 수도 없다.
+   *
+   * 충돌 판정을 주지 않는다. 장식이 전투 계산에 끼어들면 안 된다.
+   * 대신 시작 지점·출구·서술 오브젝트 근처는 비워 둔다. 그 자리는 읽어야 할 것이 있다.
+   */
+  private propViews(room: { width: number; height: number }, seed: number, props: readonly { kind: PropKind; count: number }[]) {
+    const views: Phaser.GameObjects.GameObject[] = [];
+    let state = seed * 9301 + 49297;
+    const random = () => {
+      state = (state * 9301 + 49297) % 233280;
+      return state / 233280;
+    };
+
+    const cy = room.height / 2;
+    const keepClear = [
+      { x: WALL + 90, y: cy, r: 150 }, // 플레이어가 들어오는 자리
+      { x: room.width - WALL, y: cy, r: 170 }, // 출구
+      ...this.loreNotes.map((note) => ({ x: note.x, y: note.y, r: 110 })),
+    ];
+
+    for (const { kind, count } of props) {
+      const key = `prop-${kind}`;
+      if (!this.textures.exists(key)) continue;
+      for (let i = 0; i < count; i++) {
+        let x = 0;
+        let y = 0;
+        // 비워 둘 자리에 걸리면 다시 뽑는다. 몇 번 실패하면 그 하나는 포기한다.
+        let tries = 0;
+        do {
+          x = WALL + 70 + random() * (room.width - WALL * 2 - 140);
+          y = WALL + 70 + random() * (room.height - WALL * 2 - 140);
+          tries += 1;
+        } while (tries < 12 && keepClear.some((z) => Math.hypot(x - z.x, y - z.y) < z.r));
+        if (tries >= 12) continue;
+
+        const sprite = this.add.sprite(x, y, key).setDepth(0);
+        // 크기와 각도를 조금씩 흔든다. 같은 그림이 반복되는 것이 눈에 띄지 않아야 한다.
+        const size = 52 + random() * 30;
+        sprite.setScale(size / Math.max(sprite.width, sprite.height));
+        sprite.setAngle(random() * 360);
+        sprite.setAlpha(0.85 + random() * 0.15);
+        views.push(sprite);
+      }
+    }
+    return views;
   }
 
   private createWeaponView(): Phaser.GameObjects.Sprite | null {
@@ -1173,7 +1249,7 @@ export class PlayScene extends Phaser.Scene {
    * 카메라가 방 안으로 제한되므로 벽은 판정 경계(`WALL`) 안쪽 24px 띠에만 그릴 수 있다.
    * 타일 이미지가 없으면 예전처럼 선 테두리 하나로 대체한다.
    */
-  private wallViews(width: number, height: number, lineColor: number): Phaser.GameObjects.GameObject[] {
+  private wallViews(width: number, height: number, lineColor: number, exitY?: number): Phaser.GameObjects.GameObject[] {
     if (!this.textures.exists('tile-wall')) {
       return [
         this.add
@@ -1195,8 +1271,22 @@ export class PlayScene extends Phaser.Scene {
       this.add.tileSprite(width / 2, WALL / 2, span, WALL, 'tile-wall'),
       this.add.tileSprite(width / 2, height - WALL / 2, span, WALL, 'tile-wall').setFlipY(true),
       this.add.tileSprite(WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90).setFlipY(true),
-      this.add.tileSprite(width - WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90),
     ];
+
+    // 오른쪽 벽은 출구 자리에서 끊는다. 통로가 벽 위에 얹힌 물체가 아니라
+    // 벽이 뚫린 자리로 보이려면, 그 구간에 벽을 그리지 않아야 한다.
+    if (exitY === undefined) {
+      bands.push(this.add.tileSprite(width - WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90));
+    } else {
+      const top = exitY - EXIT_SIZE / 2;
+      const bottom = height - (exitY + EXIT_SIZE / 2);
+      if (top > 0) bands.push(this.add.tileSprite(width - WALL / 2, top / 2, top, WALL, 'tile-wall').setAngle(90));
+      if (bottom > 0) {
+        bands.push(
+          this.add.tileSprite(width - WALL / 2, height - bottom / 2, bottom, WALL, 'tile-wall').setAngle(90),
+        );
+      }
+    }
     for (const band of bands) {
       band.setTileScale(tileScale);
       band.setDepth(0);
@@ -1216,7 +1306,18 @@ export class PlayScene extends Phaser.Scene {
       );
     }
     return [...bands, ...corners];
-    return bands;
+  }
+
+  /**
+   * 오른쪽 벽의 출구.
+   *
+   * **문짝 그림을 쓰지 않는다.** 이 맵은 천장에서 내려다보는 시점이라, 정면에서 본 문은
+   * 아무리 크기와 위치를 맞춰도 시점이 어긋난다. 위에서 보면 출구는 문이 아니라
+   * **벽이 끊긴 통로**다. 그래서 벽 띠를 출구 자리에서 끊고(`wallViews`), 그 틈을 이 사각형이
+   * 채운다. 닫혀 있으면 어둡고, 열리면 강조색으로 바뀐다.
+   */
+  private exitView(x: number, y: number, color: number) {
+    return this.add.rectangle(x, y, WALL, EXIT_SIZE, color).setDepth(1);
   }
 
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
@@ -1248,7 +1349,13 @@ export class PlayScene extends Phaser.Scene {
       const y = note.at.y * room.height;
 
       // 바닥에 놓인 작은 표식. 마름모로 두어 적(사각형)과 헷갈리지 않게 한다.
-      const mark = this.add.rectangle(x, y, 15, 15, 0x3a4059).setAngle(45).setDepth(1);
+      const mark = this.textures.exists('lore-stone')
+        ? (() => {
+            const sprite = this.add.sprite(x, y, 'lore-stone').setDepth(1);
+            sprite.setScale(46 / Math.max(sprite.width, sprite.height));
+            return sprite;
+          })()
+        : this.add.rectangle(x, y, 15, 15, 0x3a4059).setAngle(45).setDepth(1);
       const text = this.add
         .text(x, y - 46, note.text, {
           fontSize: '15px',
@@ -1280,7 +1387,13 @@ export class PlayScene extends Phaser.Scene {
       const alpha = Phaser.Math.Linear(note.text.alpha, target, 0.12);
       note.text.setAlpha(alpha);
       note.plate.setAlpha(alpha);
-      note.mark.setFillStyle(near ? 0x6b7396 : 0x3a4059);
+      // 가까이 가면 밝아진다. 스프라이트는 원래 색을 살려야 하므로 멀어지면 틴트를 걷는다.
+      if (note.mark instanceof Phaser.GameObjects.Sprite) {
+        if (near) note.mark.setTint(0xbcc6e6);
+        else note.mark.clearTint();
+      } else {
+        note.mark.setFillStyle(near ? 0x6b7396 : 0x3a4059);
+      }
     }
   }
 
@@ -1321,7 +1434,7 @@ export class PlayScene extends Phaser.Scene {
 
     const room = ROOMS[this.run.roomIndex];
     this.exitOpen = true;
-    this.exit.setFillStyle(COLORS.accent);
+    tintView(this.exit, COLORS.accent);
     this.exitLabel.setText(room?.entersTown ? '마을 →' : '출구 →');
     this.tweens.add({ targets: this.exit, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
   }

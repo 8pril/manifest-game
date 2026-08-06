@@ -18,6 +18,21 @@ export interface RoomReward {
  * "썰면서 나아가는" 밀도를 올린다.
  */
 
+/** 바닥에 흩뿌리는 장식물. 충돌 판정이 없어 전투 계산에 영향을 주지 않는다. */
+export type PropKind = 'rubble' | 'pillar' | 'bones' | 'brazier';
+
+/**
+ * 방의 색조.
+ *
+ * 바닥 위에 반투명하게 덮어 방마다 다른 인상을 준다. `setTint`를 쓰지 않는 이유는 두 가지다.
+ * 틴트는 곱연산이라 이미 어두운 바닥(#0a0b0f)에 어떤 색을 넣어도 더 어두워지기만 하고,
+ * WebGL이 없는 환경에서 조용히 무시된다.
+ */
+export interface RoomTone {
+  color: number;
+  alpha: number;
+}
+
 export interface RoomDef {
   label: string;
   spawns: { kind: EnemyKind; count: number }[];
@@ -28,6 +43,10 @@ export interface RoomDef {
   /** 방의 크기. 화면(1280×720)보다 크면 카메라가 플레이어를 따라간다. */
   width: number;
   height: number;
+  /** 바닥 색조. 방마다 달라야 "다른 곳에 왔다"가 읽힌다. */
+  tone: RoomTone;
+  /** 바닥 장식물의 종류와 개수. 방의 성격을 말해주는 만큼만 둔다. */
+  props: { kind: PropKind; count: number }[];
 }
 
 /** 기본 방 크기. 화면의 두 배 남짓이라 한눈에 다 들어오지 않는다. */
@@ -44,6 +63,12 @@ export const ROOMS: readonly RoomDef[] = [
     },
     width: 1900,
     height: 1150,
+    // 시작 방은 색을 거의 넣지 않는다. 기준점이 있어야 뒤의 방이 달라 보인다.
+    tone: { color: 0x3a4a6b, alpha: 0.08 },
+    props: [
+      { kind: 'rubble', count: 5 },
+      { kind: 'bones', count: 2 },
+    ],
   },
   {
     // 첫 보스. 클리어하면 활/방패와 무기 교체 기능이 해금되고 마을로 들어간다.
@@ -59,6 +84,14 @@ export const ROOMS: readonly RoomDef[] = [
     },
     width: 2000,
     height: 1250,
+    // 첫 보스방. 붉은 기를 넣어 앞 방과 확실히 갈라 놓는다.
+    tone: { color: 0x6b2f34, alpha: 0.13 },
+    // 보스가 지키고 있던 곳이다. 불 꺼진 화로를 둬서 누가 머물던 자리로 읽히게 한다.
+    props: [
+      { kind: 'brazier', count: 3 },
+      { kind: 'pillar', count: 2 },
+      { kind: 'rubble', count: 4 },
+    ],
   },
   {
     label: '해금 시험장',
@@ -69,6 +102,12 @@ export const ROOMS: readonly RoomDef[] = [
     ],
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
+    tone: { color: 0x2f5f6b, alpha: 0.11 },
+    props: [
+      { kind: 'rubble', count: 9 },
+      { kind: 'bones', count: 5 },
+      { kind: 'pillar', count: 2 },
+    ],
   },
   {
     // 첫 보스 뒤 얻은 무기와 R키 교체를 써보는 엘리트 전투.
@@ -80,6 +119,12 @@ export const ROOMS: readonly RoomDef[] = [
     ],
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
+    // 이름이 "파편 회랑"이다. 부러진 기둥을 가장 많이 둔다.
+    tone: { color: 0x4a3a6b, alpha: 0.12 },
+    props: [
+      { kind: 'pillar', count: 7 },
+      { kind: 'rubble', count: 7 },
+    ],
   },
   {
     // 최종 보스.
@@ -104,7 +149,27 @@ export const ROOMS: readonly RoomDef[] = [
     },
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
+    // 최종 보스방. 보라를 가장 세게 넣는다. 타이틀 화면의 빛과 같은 색이다.
+    tone: { color: 0x5b3a8f, alpha: 0.17 },
+    props: [
+      { kind: 'rubble', count: 11 },
+      { kind: 'bones', count: 7 },
+      { kind: 'pillar', count: 4 },
+      { kind: 'brazier', count: 3 },
+    ],
   },
+];
+
+/**
+ * 마을의 색조와 장식물.
+ *
+ * 전투방이 전부 차갑고 어두우므로 마을만 따뜻하게 둔다. 안전한 곳이라는 것을
+ * 글자가 아니라 색으로 먼저 알린다. 잔해와 뼈는 두지 않는다 — 정돈된 곳이어야 한다.
+ */
+export const TOWN_TONE: RoomTone = { color: 0x8a6a3a, alpha: 0.1 };
+export const TOWN_PROPS: { kind: PropKind; count: number }[] = [
+  { kind: 'brazier', count: 3 },
+  { kind: 'pillar', count: 2 },
 ];
 
 export const TOTAL_ROOMS = ROOMS.length;

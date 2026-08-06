@@ -103,6 +103,11 @@
 | --- | --- | --- |
 | `tile-floor.png` | 바닥 타일 (반복) | 128×128 |
 | `tile-wall.png` | 벽 타일 (반복) | 192×38 (가로로 긴 띠) |
+| `lore-stone.png` | 방 서술 오브젝트 | 128×101 |
+
+**출구는 아트를 쓰지 않는다.** 위에서 내려다보는 시점에서 출구는 문짝이 아니라 벽이 끊긴
+자리다. 벽 띠를 출구 높이만큼 끊고 그 틈을 색 사각형이 채운다. 자세한 경위는
+[버린 결과와 이유](#버린-결과와-이유) 참고.
 
 벽은 **판정 경계 안쪽 24px 띠**에만 그린다. 카메라가 방 밖으로 나가지 않으므로
 그보다 두껍게 그릴 자리가 없다. 바닥보다 밝고 구조가 분명해야 경계가 읽힌다.
@@ -362,6 +367,95 @@ edges
 
 바닥은 **캐릭터를 받쳐주는 배경이지 주인공이 아니다.** 무늬가 눈에 띄면 다시 뽑는다.
 
+**바닥 장식물**
+
+방마다 종류와 개수를 다르게 깔아 "다른 곳"으로 읽히게 하는 소품이다. 충돌 판정은 없다.
+공통 꼬리말은 아래를 쓴다.
+
+```
+seen from DIRECTLY ABOVE looking straight down at the floor, orthographic
+top-down, NO PERSPECTIVE, no side of the object is visible, it lies flat on
+the ground, hand-drawn chalky texture, muted desaturated palette, cool dark
+blue-grey dungeon tones, thick dark outline, bold silhouette readable at 60
+pixels, transparent background, no floor beneath it, no shadow, centered
+```
+
+| 파일 | 앞에 붙이는 내용 |
+| --- | --- |
+| `prop-rubble.png` | `A scattered pile of broken stone rubble and chunks of masonry lying on a dungeon floor, irregular clustered heap, a few larger slabs among smaller fragments` |
+| `prop-pillar.png` | `The broken stump of a stone pillar, snapped off near the floor so only the round base and a jagged cross-section remain, seen from above as a rough circle with a cracked ring of stone around a broken core` |
+| `prop-bones.png` | `A small scatter of old bones and a cracked skull lying on a dungeon floor, bleached pale grey-yellow, loosely spread, not a neat pile, the bones do not touch each other` + 아래 투명 배경 강화 문구 |
+| `prop-brazier.png` | `A dead cold brazier: a squat bowl of BLACK WROUGHT IRON with a riveted rim, standing on THREE SPLAYED IRON LEGS that stick out from under the bowl like a tripod, so its outline is not a plain circle. Looking straight down into the bowl we see only cold grey ash and dead black charcoal. THE FIRE IS OUT: no flames, no glowing embers, no orange light, no heat, nothing is burning. Dark iron, NOT stone, no masonry, no grey stone ring` |
+| `prop-brazier-candidate.png` | `A small extinguished stone brazier lying on a dungeon floor, a low broken circular stone fire bowl with cold dark ash inside, no flame, no ember glow, no orange light, no red light, no yellow light, harmless environment decoration, not a danger marker` |
+
+**생성 직후에는 셋 다 바닥보다 훨씬 밝아 장식이 주인공이 됐다.** 벽 타일 때와 같이
+코드로 밝기를 낮춰 가라앉혔다. 장식물은 눈에 띄면 안 되고, 있는 줄 알면 된다.
+
+뼈는 **`background: transparent`를 줬는데도 뼈 뒤에 회색 판이 깔려 나왔다.** 바닥에 놓으면
+네모난 타일처럼 보인다. 흩어진 물체는 사이사이가 다 뚫려 있어야 해서 모델이 배경을
+채우려 드는 것으로 보인다. 아래를 덧붙여 다시 뽑아 해결했다.
+
+```
+CUTOUT ON A FULLY TRANSPARENT BACKGROUND: there must be NO backing panel,
+NO tile, NO rectangle, NO patch of ground behind the bones. Only the bones
+themselves are drawn. Everything between and around the bones is empty and
+transparent.
+```
+
+**투명 픽셀 비율을 숫자로 확인한다.** 눈으로만 보면 어두운 배경판을 놓친다.
+현재 잔해 45%, 기둥 27%, 뼈 75%, 화톳불 30%. 흩어진 물체인데 비율이 낮으면 배경이 깔린 것이다.
+
+**밝기도 눈이 아니라 숫자로 맞춘다.** 불투명 픽셀의 평균 밝기를 재서 네 소품을 같은 층에
+앉힌다. 기준은 바닥 타일 25.6이고 소품은 **30 근처**다. 처음에는 눈대중으로 계수를 정했다가
+뼈가 44.7(너무 밝아 혼자 떠오름), 화톳불이 19.7(바닥보다 어두워 구멍처럼 보임)로 어긋났다.
+계수만 고쳐 잔해 30.4 / 기둥 30.8 / 뼈 30.1 / 화톳불 29.3으로 맞췄다.
+
+**소품끼리 실루엣이 겹치지 않아야 한다.** 종류를 늘려도 형태가 같으면 같은 것을 두 번 깐
+셈이다. 화톳불 첫 후보가 기둥과 똑같은 회색 돌 원반이라 60px에서 구분이 안 됐다.
+재질을 돌에서 **철**로 바꾸고 다리를 뻗은 삼발이로 만들어 갈랐다.
+
+**타이틀 배경**
+
+```
+Key art for a dark fantasy top-down dungeon game. A colossal ruined stone
+doorway looms in silhouette, its lintel cracked and its frame broken, violet
+light bleeding from the gap where the door should be. A tiny hooded figure
+with one sword stands far below it, dwarfed. Heavy stone, deep shadow,
+hand-drawn painterly chalky texture, thick dark outlines, muted desaturated
+palette, cool dark blue-grey dungeon tones with one accent light source,
+cinematic wide key art, ABSOLUTELY NO TEXT, no letters, no words, no title,
+no logo, no signature, no watermark, the centre and lower half must stay dark
+and uncluttered so title text can be placed on top
+```
+
+제목 글자는 **그림에 굽지 않고 코드로 얹는다.** 제목이 바뀌어도 이미지를 다시 안 뽑는다.
+`no text` 계열 지시를 길게 넣은 것은 이미지 모델이 키 아트에 뜻 없는 글자를 그려 넣기 때문이다.
+
+**아이콘**
+
+```
+A bold simple app icon, square. A cracked stone archway seen head-on, reduced
+to a heavy silhouette, with a single narrow slit of violet light glowing in
+its centre. EXTREMELY SIMPLIFIED, only two or three shapes, massive thick
+forms, very high contrast: near-black stone (#0a0b0f) against a violet glow
+(#8f7cff), dark navy background. Must stay readable when shrunk to 16 pixels.
+Flat, centered, fills the frame, no text, no letters, no border, no perspective
+```
+
+16px에서 형태가 남는지 **줄여서 눈으로 확인한 뒤** 채택했다. 모델이 요청하지 않은
+둥근 사각 배지 여백을 그려 넣어, 그만큼 잘라내고 썼다.
+
+**방 오브젝트**
+
+```
+a small broken stone tablet half buried in the floor with faint scratched marks
+on it, seen from directly above, something a player would want to walk over and
+inspect, compact and low to the ground, a faint pale glow in the carved marks,
+hand-drawn chalky texture, muted desaturated palette, cool grey-blue stone tones
+matching a dark dungeon, bold silhouette readable at small size, transparent
+background, no shadow, centered
+```
+
 ## 검수 기준
 
 넘기기 전에 확인할 것.
@@ -432,6 +526,14 @@ model=gpt-image-1  size=1024x1024  background=transparent  output_format=png  n=
 | `weapon-bow.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
 | `weapon-arcane.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
 | `weapon-shield.png` | gpt-image-1 | 2026-08-04 | 이 문서 `손에 든 무기 4종` 항목 | 없음 |
+| `lore-stone.png` | gpt-image-1 | 2026-08-06 | 아래 `방 오브젝트` 항목 | 없음 |
+| `title-bg.jpg` | gpt-image-1 | 2026-08-06 | 아래 `타이틀 배경` 항목 | 16:9로 자름, JPEG로 저장(PNG 2.1MB → 214KB) |
+| `favicon.ico` / `icon-*.png` | gpt-image-1 | 2026-08-06 | 아래 `아이콘` 항목 | 모델이 넣은 배지 여백을 잘라냄 |
+| `prop-rubble.png` | gpt-image-1 | 2026-08-06 | 아래 `바닥 장식물` 항목 | 밝기 0.52배, 채도 0.85배 |
+| `prop-pillar.png` | gpt-image-1 | 2026-08-06 | 아래 `바닥 장식물` 항목 | 밝기 0.58배, 채도 0.85배 |
+| `prop-bones.png` | gpt-image-1 | 2026-08-07 | 아래 `바닥 장식물` 항목 | 밝기 0.34배, 채도 0.55배 |
+| `prop-brazier.png` | gpt-image-1 | 2026-08-07 | 아래 `바닥 장식물` 항목 | 밝기 0.92배, 채도 0.80배 |
+| `prop-brazier-candidate.png` | gpt-image-1 | 2026-08-06 | 아래 `바닥 장식물` 항목 | 후보만 생성. 게임 미반영. 밝기 0.55배, 채도 0.85배 |
 
 게임에 넣기 전 처리(코드로만, 그림은 건드리지 않음):
 
@@ -449,6 +551,11 @@ model=gpt-image-1  size=1024x1024  background=transparent  output_format=png  n=
 | 완전한 탑다운 프롬프트 3종 | 1종만 성공 | `STRICT ORTHOGRAPHIC TOP-DOWN`, `NO FACE IS VISIBLE`을 넣으면 진짜 탑다운이 나오지만, 40px로 줄이면 옷도 장비도 안 보이는 덩어리가 된다. 다른 2종은 바닥을 그려 넣거나(투명 배경 파괴) 다시 3/4 뷰로 돌아갔다 |
 | 첫 `껍데기` | 재생성 | `속이 비어 있다`는 정체가 안 보이고 그냥 갑옷 기사로 나왔다. 투구 안이 검은 공백이고 목 틈으로 어둠이 보이도록 프롬프트를 강화해 다시 뽑음 |
 | 지대 4종 | 반영 안 함 | 요구는 `가운데가 비치고 가장자리로 갈수록 진해지는` 원판이었는데 **가운데가 완전히 뚫린 도넛**이 나왔다. 지대는 `이 범위가 위험하다`를 알리는 표시인데 정작 범위 안이 안 보인다. 냉각은 튜브처럼 입체로 그려져 바닥에 눕지도 않았다. 현재의 반투명 원이 더 정확해서 그대로 뒀다. `가운데가 비치는 원판`은 이미지 모델이 잘 못 만드는 형태다 |
+| `exit-door.png` | 반영 안 함 | **시점이 맞지 않았다.** 프롬프트에 `seen from directly above **and slightly in front**`를 넣은 것이 직접 원인으로, 문틀·상인방·문짝을 정면에서 본 그림이 나왔다. 이 맵은 천장에서 내려다보는 시점이다. 크기와 위치를 아무리 맞춰도 벽 위에 얹힌 별개 물체로 보였고, 폭(58px)이 벽 두께(24px)보다 넓어 방 안으로 34px 튀어나왔다. 위에서 본 출구는 문짝이 아니라 **벽이 끊긴 통로**다. 그래서 그림을 버리고 벽 띠를 출구 자리에서 끊는 방식으로 바꿨다. 아트를 넣을 자리인지부터 판단해야 한다는 사례다 |
+| 불타는 화톳불 | 재생성 | 그림도 시점도 정확했지만 **색이 문제였다.** 타는 숯이 `#ff6b3d`로 나왔는데 이 색은 게임에서 **화염 지대**를 뜻한다. 바닥에 깔린 주황색 원은 플레이어에게 "여기 밟으면 아프다"로 읽힌다. 장식이 게임플레이를 오해시키면 안 된다. 다른 색으로 바꾸려 해도 남은 색이 전부 다른 지대나 무기에 이미 쓰여서(충격 `#ffd23d`, 냉각 `#6ec8ff`, 비전 `#b08bff`, 방패 `#ffc55c`) 색을 피하는 대신 **불을 껐다.** `THE FIRE IS OUT: no flames, no glowing embers, no orange light`로 다시 뽑아 채택했다 |
+| 돌로 된 화톳불 | 재생성 | 불을 끈 두 번째 후보는 색 충돌이 없었지만 **기둥과 실루엣이 겹쳤다.** 둘 다 회색 돌 원반이라 60px에서 같은 그림이었다. 종류를 늘려도 형태가 같으면 소용이 없다. 재질을 `BLACK WROUGHT IRON`으로 못 박고 `THREE SPLAYED IRON LEGS ... so its outline is not a plain circle`로 실루엣을 갈라 세 번째에 채택했다 |
+| 체인 장식물 (`prop-chain`) | 반영 안 함 | **바닥에 깔린 원은 이 게임에서 지대를 뜻한다.** 완벽한 원형 고리로 나와서 지대와 헷갈리고, 원형 띠인 콤보 링과도 겹친다. 던전 바닥에 체인이 가지런한 원으로 놓일 이유도 없다. 흐트러진 형태로 다시 뽑을 수는 있으나, 이미 네 종이 있어 종류를 더 늘릴 이유가 없어 버렸다 |
+| 꺼진 화로 후보 (`prop-brazier-candidate`) | 후보 보류 | 이전 실패를 피하려고 `no flame`, `no ember glow`, `no orange/red/yellow light`, `not a danger marker`를 넣어 다시 뽑았다. 위험 색은 사라졌지만 아직 실제 방 위에서 장식으로 읽히는지 확인하지 않았다. |
 | 편집 API로 공격 포즈 | 보류 | `images/edits`에 기본 스프라이트를 넣으면 같은 캐릭터·같은 화풍을 유지한 채 포즈만 바꿀 수 있다는 것을 확인했다. 프레임을 따로 생성하면 매번 다른 캐릭터가 나오므로 이 방식이 맞다. 다만 예선 일정상 정적 스프라이트를 먼저 넣기로 함 |
 
 사운드를 생성이 아니라 **무료 음원에서 가져오는 경우에도 출처와 라이선스를 반드시 남겨야 한다.** 요구사항이 `외부 에셋 / 오픈소스 출처`를 명시하고 있고, 라이선스 누락은 실격 사유가 될 수 있다. 사이트 이름, 원본 링크, 라이선스 종류(CC0, CC-BY 등)를 함께 적을 것.

@@ -23,6 +23,11 @@ export const SPRITE_KEYS = [
   'bolt-enemy',
   'tile-floor',
   'tile-wall',
+  'lore-stone',
+  'prop-rubble',
+  'prop-pillar',
+  'prop-bones',
+  'prop-brazier',
   'weapon-sword',
   'weapon-bow',
   'weapon-arcane',
@@ -40,6 +45,9 @@ export class BootScene extends Phaser.Scene {
     // 타이틀에서 미리 받아두기만 하고, PlayScene은 있으면 쓰고 없으면 도형을 쓴다.
     this.load.setPath(`${import.meta.env.BASE_URL}sprites/`);
     for (const key of SPRITE_KEYS) this.load.image(key, `${key}.png`);
+    // 타이틀 배경만 JPEG다. 투명도가 필요 없는 전체 화면 그림이라 PNG로 두면 2.1MB인데
+    // JPEG로는 214KB다. 심사위원이 링크를 열었을 때 첫 화면이 늦게 뜨면 안 된다.
+    this.load.image('title-bg', 'title-bg.jpg');
     this.load.on('loaderror', (file: Phaser.Loader.File) => {
       console.warn(`스프라이트 로딩 실패: ${file.key}. 도형으로 대체한다.`);
     });
@@ -48,6 +56,15 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     applyRenderScale(this);
     const cx = GAME_WIDTH / 2;
+
+    // 배경 키 아트. 없으면 예전처럼 빈 화면에 글자만 나온다.
+    // 화면비가 어긋나도 여백이 생기지 않도록 긴 쪽에 맞춰 덮고 넘치는 만큼 잘라낸다.
+    if (this.textures.exists('title-bg')) {
+      const bg = this.add.image(cx, GAME_HEIGHT / 2, 'title-bg').setDepth(-1);
+      bg.setScale(Math.max(GAME_WIDTH / bg.width, GAME_HEIGHT / bg.height));
+      // 얇게만 덮는다. 이 그림은 광원이 보라색 빛줄기 하나뿐이라 세게 누르면 그게 죽는다.
+      this.add.rectangle(cx, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x05060a, 0.12).setDepth(-1);
+    }
 
     this.add
       .text(cx, GAME_HEIGHT / 2 - 80, 'NAN 2026 예선 빌드', {
