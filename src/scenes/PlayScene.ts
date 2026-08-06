@@ -1189,9 +1189,11 @@ export class PlayScene extends Phaser.Scene {
     const texture = this.textures.get('tile-wall').getSourceImage() as { height: number };
     const tileScale = WALL / (texture.height || WALL);
 
+    // 가로 벽은 모서리를 비켜 안쪽만 덮는다. 겹쳐 두면 모서리에서 돌 방향이 갑자기 꺾인다.
+    const span = width - WALL * 2;
     const bands: Phaser.GameObjects.TileSprite[] = [
-      this.add.tileSprite(width / 2, WALL / 2, width, WALL, 'tile-wall'),
-      this.add.tileSprite(width / 2, height - WALL / 2, width, WALL, 'tile-wall').setFlipY(true),
+      this.add.tileSprite(width / 2, WALL / 2, span, WALL, 'tile-wall'),
+      this.add.tileSprite(width / 2, height - WALL / 2, span, WALL, 'tile-wall').setFlipY(true),
       this.add.tileSprite(WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90).setFlipY(true),
       this.add.tileSprite(width - WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90),
     ];
@@ -1199,6 +1201,21 @@ export class PlayScene extends Phaser.Scene {
       band.setTileScale(tileScale);
       band.setDepth(0);
     }
+
+    // 네 모서리는 기둥으로 막는다. 두 방향의 돌이 만나는 자리를 그대로 두면
+    // 무늬가 어긋나 보이므로, 이음매를 감추는 동시에 방 구조처럼 읽히게 한다.
+    const corners: Phaser.GameObjects.GameObject[] = [];
+    for (const [cx2, cy2] of [
+      [WALL / 2, WALL / 2],
+      [width - WALL / 2, WALL / 2],
+      [WALL / 2, height - WALL / 2],
+      [width - WALL / 2, height - WALL / 2],
+    ] as const) {
+      corners.push(
+        this.add.rectangle(cx2, cy2, WALL, WALL, 0x3d4658).setStrokeStyle(2, 0x20242f, 0.9).setDepth(0),
+      );
+    }
+    return [...bands, ...corners];
     return bands;
   }
 
