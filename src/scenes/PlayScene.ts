@@ -470,14 +470,6 @@ export class PlayScene extends Phaser.Scene {
   private combo: ComboState = createCombo();
   /** 콤보를 소모해 얻은 한시적 손 강화. 콤보와 수명이 달라 따로 둔다. */
   private empower: EmpowerByHand = {};
-  /**
-   * 이름을 이미 띄워 본 강화기술.
-   *
-   * 강화기술이 나갔다는 것을 글자로도 알려야 하는데, 교차만 지키면 매 타가
-   * 강화기술이라 매번 띄우면 화면이 글자로 뒤덮인다. 무기마다 **처음 한 번만**
-   * 띄워 이름을 가르치고 그 뒤로는 연출로만 구분한다.
-   */
-  private announcedCombos = new Set<string>();
   private comboRings!: { left: ShapeOrSprite; right: ShapeOrSprite };
   /** 링의 기준 지름. 맥동은 이 값에 배율을 곱해 만든다. */
   private comboRingSize = { left: 0, right: 0 };
@@ -875,11 +867,12 @@ export class PlayScene extends Phaser.Scene {
     // **첫 소켓에 끼운 기본스킬이 곧 기본 공격이다.** 조건도 전환도 없다.
     // 끼웠으면 계속 그것이 나가고, 비웠으면 무기 본래의 공격이 나간다.
     const skill = equippedBasicSkill(this.run.progress, runtime.weapon.id);
-    const transformed = skill.id !== runtime.weapon.basic.id;
     // 형태가 바뀌면 간격도 그 스킬의 것을 쓴다. 지대형은 겹치면 피해가 곱으로
     // 불어나므로 `comboInterval`로 늦춘다. 그 이유는 `attackIntervalFor` 참고.
     runtime.readyAt = this.time.now + attackIntervalFor(runtime.weapon, skill);
-    this.useSkill(runtime, skill, angle, !transformed);
+    // 첫 소켓에 끼운 기본스킬도 이제는 "기본 공격"이다. 옛 콤보 전환 시절처럼
+    // `basic: false`로 넘기면 콤보형 연계를 붙여도 콤보가 오르지 않는다.
+    this.useSkill(runtime, skill, angle);
     this.refreshHud();
   }
 
@@ -967,45 +960,32 @@ export class PlayScene extends Phaser.Scene {
   }
 
   /** 스킬 하나를 전달 방식에 맞게 내보낸다. */
-  private useSkill(runtime: WeaponRuntime, skill: Skill, angle: number, basic: boolean): void {
+  /**
+   * 무기를 한 번 쓴다.
+   *
+   * **`basic` 구분은 없어졌다.** 첫 소켓에 무엇을 끼웠든 그것이 그 무기의 기본 공격이다.
+   * 옛 콤보 전환 시절에는 강화기술을 `basic: false`로 넘겨 콤보를 올리지 않았는데,
+   * 그 값이 남아 있어 기본스킬을 끼우면 콤보형 연계가 먹통이 됐다.
+   *
+   * **지대에는 `owner`를 반드시 넘긴다.** 지대는 직접 명중이 없어서, owner가 없으면
+   * 상태이상도 안 걸리고 콤보 지속시간도 안 늘어난다. 비전 개화(지대형 기본스킬)를
+   * 끼우면 콤보가 아예 안 오르던 것이 이 때문이다.
+   */
+  private useSkill(runtime: WeaponRuntime, skill: Skill, angle: number): void {
     const resolved = resolveFor(this.run.loadout, skill);
-    playSfx(basic ? 'attack' : 'combo');
-    if (!basic) this.announceComboSkill(runtime, skill);
+    playSfx('attack');
 
     switch (deliveryOf(skill)) {
       case 'projectile':
-        this.fireProjectiles(runtime.weapon, skill, resolved.stats, resolved.behaviors, angle, basic);
+        this.fireProjectiles(runtime.weapon, skill, resolved.stats, resolved.behaviors, angle, true);
         break;
       case 'melee':
-        this.swingMelee(runtime, skill, resolved.stats, resolved.behaviors, angle, basic);
+        this.swingMelee(runtime, skill, resolved.stats, resolved.behaviors, angle, true);
         break;
       case 'area':
-        this.dropArea(resolved.stats, resolved.behaviors, angle, basic ? null : runtime);
+        this.dropArea(resolved.stats, resolved.behaviors, angle, runtime);
         break;
     }
-  }
-
-  /**
-   * 강화기술이 나갔다는 것을 손에서 알린다.
-   *
-   * **투사체 무기는 기본 공격과 강화기술이 똑같이 생겼었다.** 검과 방패는 강화기술이
-   * 지대를 깔아서 한눈에 다르지만, 활과 비전은 화살이 1발에서 5발로 늘 뿐이고
-     * 부채가 좁아 그 차이가 안 읽힌다. 실제로 "그냥 활 쏘는 거랑 일제 사격이 무슨 차이인지
-   * 모르겠다"는 말을 들었다.
-   *
-   * 손에서 고리가 퍼지는 것은 매번, 이름은 무기마다 처음 한 번만 띄운다.
-   */
-  private announceComboSkill(runtime: WeaponRuntime, skill: Skill): void {
-    ring(this, this.player.x, this.player.y, runtime.weapon.color, {
-      from: 12,
-      to: 58,
-      duration: 260,
-      width: 3,
-    });
-    if (this.announcedCombos.has(skill.id)) return;
-
-    this.announcedCombos.add(skill.id);
-    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, skill.name, COLORS.accentText);
   }
 
   private fireProjectiles(
@@ -1016,12 +996,7 @@ export class PlayScene extends Phaser.Scene {
     angle: number,
     basic: boolean,
   ): void {
-    // 강화기술 투사체는 더 크게 그린다. 개수만으로는 기본 공격과 구분되지 않는다.
-    //
-    // 발광 효과(`postFX.addGlow`)를 쓰지 않는 이유는 `render.ts`에 적힌 것과 같다.
-    // Canvas 렌더러에서 조용히 무시되고, 도형(`Arc`)에는 아예 없다. 스프라이트가
-    // 없는 환경에서 대체로 그리는 원까지 함께 커지려면 크기로 다뤄야 한다.
-    const size = basic ? 22 : 32;
+    const size = 22;
     for (const state of spawnProjectiles(stats, behaviors, { x: this.player.x, y: this.player.y }, angle)) {
       this.projectiles.push({
         state,
@@ -2001,6 +1976,7 @@ export class PlayScene extends Phaser.Scene {
       const dt = delta / 1000;
       this.movePlayer(dt);
       this.updateAim();
+      this.updateHeldWeaponInputs();
       this.updateComboRings();
       this.updateTownNpcPrompt();
       this.updateMinimap();
@@ -2022,6 +1998,7 @@ export class PlayScene extends Phaser.Scene {
 
     this.movePlayer(dt);
     this.updateAim();
+    this.updateHeldWeaponInputs();
     this.updateComboRings();
     this.updateComboText();
     this.updateArcaneAura();
@@ -2038,6 +2015,16 @@ export class PlayScene extends Phaser.Scene {
     this.checkRoomCleared();
     this.checkCombatPortalReached();
     this.checkExitReached();
+  }
+
+  private updateHeldWeaponInputs(): void {
+    if (this.weaponWheel || this.paused || this.overlay) return;
+    if (this.run.phase !== 'combat' && this.run.phase !== 'town') return;
+
+    const pointer = this.input.activePointer;
+    const angle = this.pointerAimAngle(pointer);
+    if (pointer.leftButtonDown()) this.useWeapon(this.left, angle);
+    if ((pointer.rightButtonDown() || this.keys.shift.isDown) && this.right) this.useWeapon(this.right, angle);
   }
 
   /** 개발 빌드에서만 상태를 노출한다. 헤드리스 검증 드라이버가 읽는다. */
