@@ -13,6 +13,10 @@ import { createEmptyLayout, reconcileLayout, autoSortLayout, swapCells } from '@
 
 export type Hand = 'left' | 'right';
 export type WheelSlot = WeaponId | null;
+export interface WheelSlotRef {
+  hand: Hand;
+  index: 0 | 1;
+}
 
 export interface WeaponWheel {
   left: readonly [WheelSlot, WheelSlot];
@@ -206,6 +210,7 @@ export function setWheelSlot(
   weapon: WheelSlot,
 ): PlayerProgress {
   if (weapon && !hasWeapon(progress, weapon)) return progress;
+  if (weapon && wheelHasWeaponElsewhere(progress, { hand, index }, weapon)) return progress;
 
   const slots: [WheelSlot, WheelSlot] = [...progress.wheel[hand]];
   slots[index] = weapon;
@@ -215,6 +220,35 @@ export function setWheelSlot(
     wheel: {
       ...progress.wheel,
       [hand]: slots,
+    },
+  };
+}
+
+function wheelHasWeaponElsewhere(progress: PlayerProgress, target: WheelSlotRef, weapon: WeaponId): boolean {
+  for (const hand of ['left', 'right'] as const) {
+    for (const index of [0, 1] as const) {
+      if (hand === target.hand && index === target.index) continue;
+      if (progress.wheel[hand][index] === weapon) return true;
+    }
+  }
+  return false;
+}
+
+export function swapWheelSlots(progress: PlayerProgress, a: WheelSlotRef, b: WheelSlotRef): PlayerProgress {
+  if (a.hand === b.hand && a.index === b.index) return progress;
+
+  const left: [WheelSlot, WheelSlot] = [...progress.wheel.left];
+  const right: [WheelSlot, WheelSlot] = [...progress.wheel.right];
+  const slots = { left, right };
+  const from = slots[a.hand][a.index];
+  slots[a.hand][a.index] = slots[b.hand][b.index];
+  slots[b.hand][b.index] = from;
+
+  return {
+    ...progress,
+    wheel: {
+      left,
+      right,
     },
   };
 }

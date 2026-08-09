@@ -60,6 +60,10 @@ export interface RunState {
   invulnerable: number;
   /** 처치한 적 수. 결과 화면에 쓴다. */
   kills: number;
+  /** 현재 방에 들어온 순간의 진행 상태. 사망 재도전 때 이 상태로 돌아간다. */
+  roomStartProgress: PlayerProgress;
+  /** 현재 방에 들어온 순간의 처치 수. 사망한 방의 처치는 되돌린다. */
+  roomStartKills: number;
   /**
    * 방금 정리한 방에서 **실제로 새로 얻은 것**. 이미 갖고 있던 것은 빠진다.
    * 연출이 방의 `reward`를 그대로 읽으면 두 번째 판에서 거짓말을 하게 된다.
@@ -99,6 +103,8 @@ export function createRun(left: WeaponId, right: WeaponId | null, savedProgress?
     shieldEnergy: SHIELD_ENERGY_MAX,
     loadout: loadoutFromProgress(progress),
     progress,
+    roomStartProgress: progress,
+    roomStartKills: 0,
     invulnerable: 0,
     kills: 0,
     elapsed: 0,
@@ -123,6 +129,7 @@ export function clearRoom(run: RunState): RunState {
       phase: 'won',
       shieldEnergy: SHIELD_ENERGY_MAX,
       progress: rewarded,
+      roomStartProgress: rewarded,
       loadout: loadoutFromProgress(rewarded, run.loadout),
       gained,
     };
@@ -131,13 +138,23 @@ export function clearRoom(run: RunState): RunState {
     let progress = unlockWeaponSwitch(rewarded);
     progress = setWheelSlot(progress, 'left', 0, progress.active.left);
     progress = setWheelSlot(progress, 'left', 1, progress.unlockedWeapons.includes('shield') ? 'shield' : null);
-    return { ...run, phase: 'town', shieldEnergy: SHIELD_ENERGY_MAX, progress, loadout: loadoutFromProgress(progress, run.loadout), gained };
+    return {
+      ...run,
+      phase: 'town',
+      shieldEnergy: SHIELD_ENERGY_MAX,
+      progress,
+      roomStartProgress: progress,
+      loadout: loadoutFromProgress(progress, run.loadout),
+      gained,
+    };
   }
   return {
     ...run,
     roomIndex: run.roomIndex + 1,
     shieldEnergy: SHIELD_ENERGY_MAX,
     progress: rewarded,
+    roomStartProgress: rewarded,
+    roomStartKills: run.kills,
     loadout: loadoutFromProgress(rewarded, run.loadout),
     gained,
   };
@@ -224,6 +241,8 @@ export function leaveTown(run: RunState): RunState {
     roomIndex: run.roomIndex + 1,
     shieldEnergy: SHIELD_ENERGY_MAX,
     progress,
+    roomStartProgress: progress,
+    roomStartKills: run.kills,
     loadout: loadoutFromProgress(progress, run.loadout),
   };
 }
@@ -250,6 +269,22 @@ export function damagePlayer(run: RunState, amount: number, shieldActive = false
 
 export function hasActiveShield(run: RunState): boolean {
   return run.loadout.left === 'shield' || run.loadout.right === 'shield';
+}
+
+/** 사망 후 현재 방 시작점에서 다시 시작한다. 현재 방에서 얻은 보상과 처치는 되돌린다. */
+export function retryCurrentRoom(run: RunState): RunState {
+  const progress = run.roomStartProgress;
+  return {
+    ...run,
+    phase: 'combat',
+    hp: run.maxHp,
+    shieldEnergy: SHIELD_ENERGY_MAX,
+    progress,
+    loadout: loadoutFromProgress(progress, run.loadout),
+    invulnerable: 0,
+    kills: run.roomStartKills,
+    gained: undefined,
+  };
 }
 
 /** 지금 피해를 받을 수 있는 상태인지. 씬이 피격 연출을 결정할 때 쓴다. */

@@ -8,6 +8,7 @@ import {
   hasSupport,
   hasWeapon,
   setWheelSlot,
+  swapWheelSlots,
   unlockSupports,
   unlockWeapons,
   unlockWeaponSwitch,
@@ -89,6 +90,28 @@ describe('weapon wheel', () => {
 
     expect(equipFromWheel(progress, 'left', 1).active.left).toBe('shield');
     expect(equipFromWheel(progress, 'right', 0).active.right).toBe('bow');
+  });
+
+  it('같은 무기를 좌우 후보에 중복 등록하지 않는다', () => {
+    let progress = createInitialProgress();
+    progress = unlockWeapons(progress, ['bow']);
+    progress = setWheelSlot(progress, 'right', 0, 'bow');
+
+    const rejected = setWheelSlot(progress, 'left', 1, 'bow');
+
+    expect(rejected).toBe(progress);
+  });
+
+  it('R링 후보 칸끼리 무기를 맞바꾼다', () => {
+    let progress = createInitialProgress();
+    progress = unlockWeapons(progress, ['bow', 'shield']);
+    progress = setWheelSlot(progress, 'left', 1, 'shield');
+    progress = setWheelSlot(progress, 'right', 0, 'bow');
+
+    const swapped = swapWheelSlots(progress, { hand: 'left', index: 1 }, { hand: 'right', index: 0 });
+
+    expect(swapped.wheel.left[1]).toBe('bow');
+    expect(swapped.wheel.right[0]).toBe('shield');
   });
 
   it('마을을 나갈 때 쓸 첫 번째 좌우 후보를 active로 반영한다', () => {

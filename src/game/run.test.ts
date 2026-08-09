@@ -5,6 +5,7 @@ import {
   collectRoomReward,
   leaveTown,
   damagePlayer,
+  retryCurrentRoom,
   addKill,
   advanceTime,
   isOver,
@@ -237,6 +238,40 @@ describe('damagePlayer', () => {
 
     expect(backToShield.hp).toBe(PLAYER_MAX_HP - 10);
     expect(backToShield.shieldEnergy).toBe(SHIELD_ENERGY_MAX - 30);
+  });
+});
+
+describe('retryCurrentRoom', () => {
+  it('사망하면 같은 방 시작 상태로 되돌린다', () => {
+    let run = { ...createRun('sword', null), roomIndex: 4 };
+    run = collectRoomReward(run, { keys: ['key-upper'] });
+    run = addKill(run);
+    run = damagePlayer(run, PLAYER_MAX_HP);
+
+    const retried = retryCurrentRoom(run);
+
+    expect(retried.phase).toBe('combat');
+    expect(retried.roomIndex).toBe(4);
+    expect(retried.hp).toBe(PLAYER_MAX_HP);
+    expect(retried.shieldEnergy).toBe(SHIELD_ENERGY_MAX);
+    expect(retried.progress.ownedKeys).toEqual([]);
+    expect(retried.kills).toBe(0);
+    expect(retried.gained).toBeUndefined();
+  });
+
+  it('이미 클리어한 분기 보스 보상은 다음 방에서 죽어도 유지한다', () => {
+    let run = { ...createRun('sword', null), roomIndex: 4 };
+    run = clearRoom(collectRoomReward(run, { keys: ['key-upper'] }));
+    expect(run.roomIndex).toBe(5);
+    expect(run.progress.ownedKeys).toContain('key-upper');
+
+    run = collectRoomReward(run, { keys: ['key-lower'] });
+    run = damagePlayer(run, PLAYER_MAX_HP);
+    const retried = retryCurrentRoom(run);
+
+    expect(retried.roomIndex).toBe(5);
+    expect(retried.progress.ownedKeys).toEqual(['key-upper']);
+    expect(retried.progress.ownedKeys).not.toContain('key-lower');
   });
 });
 

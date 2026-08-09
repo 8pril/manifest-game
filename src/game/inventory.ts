@@ -41,6 +41,10 @@ export type InventoryItem =
 
 /** 칸 하나. 비어 있으면 null. */
 export type InventoryCell = InventoryItem | null;
+export interface FilteredInventoryCell {
+  item: InventoryItem | null;
+  matchesFilter: boolean;
+}
 
 /** 저장되는 배치. 칸 번호 → 항목 id. 빈 칸은 문자열이 아니라 null이다. */
 export type InventoryLayout = readonly (string | null)[];
@@ -149,18 +153,17 @@ export function swapCells(layout: InventoryLayout, from: number, to: number): In
   return next;
 }
 
-/** 배치를 실제 항목으로 바꾼다. 필터에 걸리지 않는 것은 빈 칸으로 둔다. */
+/** 배치를 실제 항목으로 바꾼다. 필터에 걸리지 않는 것도 자리는 유지한다. */
 export function cellsOf(
   progress: PlayerProgress,
   layout: InventoryLayout,
   filter: InventoryFilter = 'all',
-): InventoryCell[] {
+): FilteredInventoryCell[] {
   const byId = new Map(ownedItems(progress).map((item) => [item.id, item]));
   return layout.map((id) => {
-    if (id === null) return null;
+    if (id === null) return { item: null, matchesFilter: true };
     const item = byId.get(id);
-    if (!item) return null;
-    if (filter !== 'all' && item.kind !== filter) return null;
-    return item;
+    if (!item) return { item: null, matchesFilter: true };
+    return { item, matchesFilter: filter === 'all' || item.kind === filter };
   });
 }

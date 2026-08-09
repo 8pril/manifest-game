@@ -37,3 +37,7 @@ pnpm-debug.log*
 # 팀원 롤 기술서에는 실명이 들어가므로 특히 커밋하면 안 된다.
 # 심사에는 PDF로 직접 제출한다. 근거 자료(docs/)는 그대로 공개한다.
 submission/
+
+# 기획 원본 파일. 내용은 `docs/design/`의 PNG로 들어가 있다.
+# 저장소가 Public이라 남의 작업 파일을 그대로 올리지 않는다.
+docs/design/*.pptx

@@ -101,6 +101,7 @@ import {
   clearRoom,
   collectRoomReward,
   leaveTown,
+  retryCurrentRoom,
   damagePlayer as applyPlayerDamage,
   addKill,
   advanceTime,
@@ -119,7 +120,7 @@ import {
   type InventoryFilter,
   type InventoryItem,
 } from '@/game/inventory';
-import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboSupport, equippedBasicSkill, unlockSupports, unlockWeapons, setWheelSlot, moveInventoryItem, sortInventory, type Hand, type PlayerProgress } from '@/game/progression';
+import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboSupport, equippedBasicSkill, unlockSupports, unlockWeapons, setWheelSlot, swapWheelSlots, moveInventoryItem, sortInventory, type Hand, type PlayerProgress } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
@@ -353,6 +354,10 @@ type TownSlotTarget =
   | { kind: 'basic'; weapon: WeaponId }
   | { kind: 'support'; weapon: WeaponId; slot: 'primary' | 'synergy' };
 
+type TownDragSource =
+  | { kind: 'inventory'; index: number }
+  | { kind: 'townSlot'; target: TownSlotTarget };
+
 interface ComboBadge {
   back: Phaser.GameObjects.Rectangle;
   title: Phaser.GameObjects.Text;
@@ -452,8 +457,8 @@ export class PlayScene extends Phaser.Scene {
    * 마을에 들르는 이유가 없어지고, 보스 앞에서 세팅을 바꾸는 것이 정답이 된다.
    */
   private townReadOnly = false;
-  /** 인벤토리에서 드래그 중인 칸 번호. 드롭 지점에서 무엇을 옮길지 판단한다. */
-  private townDragFrom: number | null = null;
+  /** 인벤토리 또는 장착 칸에서 드래그 중인 출발점. 드롭 지점에서 무엇을 옮길지 판단한다. */
+  private townDragSource: TownDragSource | null = null;
   /** 화면 최하단 안내. 패널을 다시 그려도 살아남도록 오버레이 밖에 둔다. */
   private townToast: Phaser.GameObjects.Text | null = null;
   /** 인벤토리 항목에 마우스를 올렸을 때 뜨는 설명. */
@@ -722,6 +727,7 @@ export class PlayScene extends Phaser.Scene {
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.weaponWheel) return;
       if (this.paused) return;
+      if (this.overlay) return;
       if (this.run.phase !== 'combat') return;
       // 트랙패드에서는 두 손가락 탭이 꺼져 있거나 브라우저가 다르게 넘겨줄 수 있어
       // 눌린 버튼 상태와 이벤트의 버튼 번호를 모두 본다.
@@ -735,6 +741,7 @@ export class PlayScene extends Phaser.Scene {
     // 왼손이 WASD에 있으므로 새끼손가락으로 닿는 Shift가 가장 편하다.
     keyboard.on('keydown-SHIFT', () => {
       if (this.weaponWheel || this.paused) return;
+      if (this.overlay) return;
       if (this.run.phase !== 'combat') return;
       if (this.right) this.useWeapon(this.right);
     });
@@ -742,6 +749,7 @@ export class PlayScene extends Phaser.Scene {
 
   private tryDash(): void {
     if (this.weaponWheel || this.paused) return;
+    if (this.overlay) return;
     if (this.run.phase !== 'combat' || this.time.now < this.dashReadyAt) return;
 
     const direction = this.moveDirection();
@@ -1782,6 +1790,10 @@ export class PlayScene extends Phaser.Scene {
       this.updateWeaponWheel();
       return;
     }
+    if (this.run.phase === 'combat' && this.overlay) {
+      if (DEBUG_ENABLED) this.publishDebug();
+      return;
+    }
     if (this.run.phase === 'town') {
       if (this.overlay) {
         if (DEBUG_ENABLED) this.publishDebug();
@@ -2027,8 +2039,7 @@ export class PlayScene extends Phaser.Scene {
           enemy.sinceContact = 0;
           this.hitPlayer(isBossKind(enemy.kind) ? bossContactDamage(enemy) : stats.contactDamage);
           if (this.run.phase === 'lost') {
-            this.showResult(false);
-            if (DEBUG_ENABLED) this.publishDebug();
+            this.retryAfterDeath();
             return;
           }
         }
@@ -2113,7 +2124,7 @@ export class PlayScene extends Phaser.Scene {
 
     if (Math.hypot(this.player.x - enemy.x, this.player.y - enemy.y) <= radius + PLAYER_RADIUS) {
       this.hitPlayer(damage);
-      if (this.run.phase === 'lost') this.showResult(false);
+      if (this.run.phase === 'lost') this.retryAfterDeath();
     }
   }
 
@@ -2174,8 +2185,7 @@ export class PlayScene extends Phaser.Scene {
         if (this.run.phase === 'lost') {
           shot.view.destroy();
           this.enemyShots.splice(i, 1);
-          this.showResult(false);
-          if (DEBUG_ENABLED) this.publishDebug();
+          this.retryAfterDeath();
           return;
         }
       }
@@ -2200,6 +2210,17 @@ export class PlayScene extends Phaser.Scene {
     playSfx('playerHit');
     this.flashPlayer();
     this.refreshHud();
+  }
+
+  private retryAfterDeath(): void {
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, '방 시작점에서 재도전', COLORS.accentText, { duration: 1400 });
+    this.run = retryCurrentRoom(this.run);
+    this.saveCurrentProgress();
+    this.syncWeaponRuntimes();
+    this.time.delayedCall(450, () => {
+      this.enterRoom();
+      if (DEBUG_ENABLED) this.publishDebug();
+    });
   }
 
   private guardedPlayerDamage(amount: number): number {
@@ -3242,7 +3263,7 @@ export class PlayScene extends Phaser.Scene {
     this.townTab = !readOnly && untouched ? 2 : 1;
     this.townFilter = 'all';
     this.townPendingSlot = null;
-    this.townDragFrom = null;
+    this.townDragSource = null;
     this.townReadOnly = readOnly;
     this.renderTown();
   }
@@ -3526,6 +3547,10 @@ export class PlayScene extends Phaser.Scene {
    */
   private showTownTip(item: InventoryItem, x: number, y: number, scope?: WeaponId): void {
     this.hideTownTip();
+    if (item.kind === 'weapon') {
+      this.drawTownTip(this.weaponTipText(item.id), x, y, true);
+      return;
+    }
     // 기본스킬은 붙이는 게 아니라 형태를 바꾸는 것이라 설명이 짧다.
     if (item.kind === 'skill') {
       const weapon = weaponOf(item.weapon);
@@ -3588,6 +3613,31 @@ export class PlayScene extends Phaser.Scene {
     this.drawTownTip(`${head}\n\n${body}`, x, y, true);
   }
 
+  private weaponTipText(weaponId: WeaponId): string {
+    const weapon = weaponOf(weaponId);
+    const equippedSkill = equippedBasicSkill(this.run.progress, weaponId);
+    const configured = this.run.progress.configs[weaponId].basicSkillId !== null;
+    const lines = [
+      weapon.name,
+      weapon.concept,
+      '',
+      `기본 공격: ${weapon.basic.name}`,
+      `기본스킬: ${weapon.basicSkill.name}`,
+      configured ? `현재 공격: ${equippedSkill.name}` : `현재 공격: ${weapon.basic.name}`,
+    ];
+
+    if (weaponId === 'shield') {
+      lines.push(
+        '',
+        `방패 공격 중 보호막 ${SHIELD_ENERGY_MAX}이 체력보다 먼저 닳는다`,
+        `보호 시간에는 받는 피해가 ${Math.round(SHIELD_GUARD_DAMAGE_TAKEN * 100)}%로 줄어든다`,
+        '보호막은 방을 클리어해야 회복된다',
+      );
+    }
+
+    return lines.join('\n');
+  }
+
   private drawTownTip(text: string, x: number, y: number, ok: boolean): void {
     const label = this.add.text(0, 0, text, {
       fontSize: '13px',
@@ -3647,7 +3697,9 @@ export class PlayScene extends Phaser.Scene {
    * 점멸했는데 안 들어가거나 그 반대가 된다.
    */
   private townSlotAccepts(target: TownSlotTarget, item: InventoryItem): boolean {
-    if (target.kind === 'wheel') return item.kind === 'weapon';
+    if (target.kind === 'wheel') {
+      return item.kind === 'weapon' && !this.wheelHasWeaponElsewhere(target, item.id);
+    }
     // 첫 소켓은 그 무기의 기본스킬만 받는다. 활에서 멸검이 나가면 그림도 소리도 안 맞는다.
     if (target.kind === 'basic') return item.kind === 'skill' && item.weapon === target.weapon;
     if (item.kind !== 'support') return false;
@@ -3657,6 +3709,23 @@ export class PlayScene extends Phaser.Scene {
     const support = findSupport(item.id);
     if (!support) return false;
     return canAttach(equippedBasicSkill(this.run.progress, target.weapon), support, []).ok;
+  }
+
+  private wheelHasWeaponElsewhere(target: Extract<TownSlotTarget, { kind: 'wheel' }>, weapon: WeaponId): boolean {
+    for (const hand of ['left', 'right'] as const) {
+      for (const index of [0, 1] as const) {
+        if (hand === target.hand && index === target.index) continue;
+        if (this.run.progress.wheel[hand][index] === weapon) return true;
+      }
+    }
+    return false;
+  }
+
+  private townRejectMessage(target: TownSlotTarget, item: InventoryItem): string {
+    if (target.kind === 'wheel' && item.kind === 'weapon' && this.wheelHasWeaponElsewhere(target, item.id)) {
+      return '이미 무기 후보에 등록되어 있습니다.';
+    }
+    return '무기 유형에 맞지 않습니다.';
   }
 
   /** 칸 하나를 그린다. 클릭하면 채우기 대기 상태가 되고, 드롭도 여기서 받는다. */
@@ -3682,7 +3751,7 @@ export class PlayScene extends Phaser.Scene {
     if (!this.townReadOnly) {
       // `dropZone`이 없으면 Phaser가 `drop` 이벤트를 주지 않는다. 드래그해서
       // 놓아도 아무 일이 일어나지 않아 기능이 없는 것처럼 보인다.
-      rect.setInteractive({ useHandCursor: true, dropZone: true });
+      rect.setInteractive({ useHandCursor: true, draggable: item !== null, dropZone: true });
       rect.setData('townSlot', target);
       rect.on('pointerdown', () => {
         // 같은 칸을 다시 누르면 대기를 푼다. 잘못 눌렀을 때 빠져나갈 길이 있어야 한다.
@@ -3785,7 +3854,7 @@ export class PlayScene extends Phaser.Scene {
     const filters: Array<{ key: InventoryFilter; label: string }> = [
       { key: 'all', label: '전체' },
       { key: 'weapon', label: '무기' },
-      { key: 'skill', label: '기본' },
+      { key: 'skill', label: '기본스킬' },
       { key: 'support', label: '보조형' },
     ];
     for (const [index, f] of filters.entries()) {
@@ -3825,7 +3894,8 @@ export class PlayScene extends Phaser.Scene {
     for (let i = 0; i < INVENTORY_COLUMNS * INVENTORY_ROWS; i++) {
       const cx = originX + (i % INVENTORY_COLUMNS) * step;
       const cy = originY + Math.floor(i / INVENTORY_COLUMNS) * step;
-      this.renderInventoryCell(container, i, cells[i] ?? null, cx, cy);
+      const cell = cells[i];
+      this.renderInventoryCell(container, i, cell?.item ?? null, cx, cy, cell?.matchesFilter ?? true);
     }
 
     const sortY = inv.y + inv.h - 26;
@@ -3861,6 +3931,7 @@ export class PlayScene extends Phaser.Scene {
     item: InventoryItem | null,
     x: number,
     y: number,
+    matchesFilter = true,
   ): void {
     const size = TOWN_UI.cell;
     const pending = this.townPendingSlot;
@@ -3929,13 +4000,17 @@ export class PlayScene extends Phaser.Scene {
     } else if (pending !== null && item !== null) {
       // 대기 중인데 못 넣는 것은 눌러서 헤매지 않도록 흐리게 둔다.
       for (const part of parts) (part as unknown as { setAlpha(v: number): void }).setAlpha(0.4);
+    } else if (!matchesFilter && item !== null) {
+      // 필터에 걸리지 않는 항목도 위치를 유지해 보여준다. 사라지면 드래그 배치가
+      // 당겨진 것처럼 보여 헷갈리므로, 회색으로만 낮춘다.
+      for (const part of parts) (part as unknown as { setAlpha(v: number): void }).setAlpha(0.28);
     }
 
     rect.on('pointerdown', () => {
       if (!item) return;
       if (pending === null) return;
       if (!this.townSlotAccepts(pending, item)) {
-        this.showTownToast('무기 유형에 맞지 않습니다.');
+        this.showTownToast(this.townRejectMessage(pending, item));
         return;
       }
       this.applyTownSlot(pending, item);
@@ -3959,7 +4034,12 @@ export class PlayScene extends Phaser.Scene {
     this.input.on('dragstart', (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject) => {
       if (this.overlayKind !== 'town-config') return;
       const index = obj.getData('cellIndex');
-      this.townDragFrom = typeof index === 'number' ? index : null;
+      if (typeof index === 'number') {
+        this.townDragSource = { kind: 'inventory', index };
+        return;
+      }
+      const target = obj.getData('townSlot') as TownSlotTarget | undefined;
+      this.townDragSource = target && this.townSlotItem(target) !== null ? { kind: 'townSlot', target } : null;
     });
 
     this.input.on('drag', (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject, x: number, y: number) => {
@@ -3977,23 +4057,21 @@ export class PlayScene extends Phaser.Scene {
 
     this.input.on('dragend', (_p: Phaser.Input.Pointer, _obj: Phaser.GameObjects.GameObject, dropped: boolean) => {
       if (this.overlayKind !== 'town-config') return;
-      this.townDragFrom = null;
+      this.townDragSource = null;
       // 놓을 곳이 아니면 원래 자리로 돌아가야 한다. 다시 그리는 것이 가장 확실하다.
       if (!dropped) this.renderTown();
     });
   }
 
   private handleTownDrop(zone: Phaser.GameObjects.GameObject): void {
-    const from = this.townDragFrom;
-    this.townDragFrom = null;
-    if (from === null) return;
-
-    const item = cellsOf(this.run.progress, this.run.progress.inventory)[from] ?? null;
+    const source = this.townDragSource;
+    this.townDragSource = null;
+    if (source === null) return;
 
     // 격자 칸끼리 — 자리 맞바꾸기.
     const toIndex = zone.getData('cellIndex');
-    if (typeof toIndex === 'number') {
-      this.run = { ...this.run, progress: moveInventoryItem(this.run.progress, from, toIndex) };
+    if (source.kind === 'inventory' && typeof toIndex === 'number') {
+      this.run = { ...this.run, progress: moveInventoryItem(this.run.progress, source.index, toIndex) };
       this.saveCurrentProgress();
       this.renderTown();
       return;
@@ -4005,16 +4083,47 @@ export class PlayScene extends Phaser.Scene {
       this.renderTown();
       return;
     }
+
+    if (source.kind === 'townSlot') {
+      this.handleTownSlotDrop(source.target, target);
+      return;
+    }
+
+    const item = cellsOf(this.run.progress, this.run.progress.inventory)[source.index]?.item ?? null;
     if (!item) {
       this.renderTown();
       return;
     }
     if (!this.townSlotAccepts(target, item)) {
-      this.showTownToast('무기 유형에 맞지 않습니다.');
+      this.showTownToast(this.townRejectMessage(target, item));
       this.renderTown();
       return;
     }
     this.applyTownSlot(target, item);
+  }
+
+  private handleTownSlotDrop(from: TownSlotTarget, to: TownSlotTarget): void {
+    if (this.sameTownSlot(from, to)) {
+      this.renderTown();
+      return;
+    }
+    if (from.kind !== 'wheel' || to.kind !== 'wheel') {
+      this.showTownToast('무기 후보 칸끼리만 교체할 수 있습니다.');
+      this.renderTown();
+      return;
+    }
+
+    const progress = equipFirstWheelSlots(swapWheelSlots(this.run.progress, from, to));
+    this.run = {
+      ...this.run,
+      progress,
+      loadout: loadoutFromProgress(progress, this.run.loadout),
+    };
+    this.saveCurrentProgress();
+    this.syncWeaponRuntimes();
+    this.refreshHud();
+    this.townPendingSlot = null;
+    this.renderTown();
   }
 
   /**

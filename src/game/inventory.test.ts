@@ -116,7 +116,7 @@ describe('기본스킬', () => {
     const progress = withAll();
     const cells = cellsOf(progress, reconcileLayout(progress, createEmptyLayout()), 'skill');
 
-    expect(cells.filter((c) => c !== null).map((c) => c!.id)).toEqual([
+    expect(cells.filter((c) => c.item !== null && c.matchesFilter).map((c) => c.item!.id)).toEqual([
       'thrust',
       'scattershot',
       'shield-slam',
@@ -154,26 +154,28 @@ describe('필터', () => {
     const progress = withAll();
     const cells = cellsOf(progress, reconcileLayout(progress, createEmptyLayout()), 'weapon');
 
-    expect(cells.filter((c) => c !== null).map((c) => c!.id)).toEqual(['sword', 'bow', 'shield']);
+    expect(cells.filter((c) => c.matchesFilter && c.item !== null).map((c) => c.item!.id)).toEqual(['sword', 'bow', 'shield']);
+    expect(cells.find((c) => c.item?.id === 'thrust')?.matchesFilter).toBe(false);
   });
 
   it('보조형스킬만 남긴다', () => {
     const progress = withAll();
     const cells = cellsOf(progress, reconcileLayout(progress, createEmptyLayout()), 'support');
 
-    expect(cells.filter((c) => c !== null).map((c) => c!.id)).toEqual([
+    expect(cells.filter((c) => c.matchesFilter && c.item !== null).map((c) => c.item!.id)).toEqual([
       'multiple-projectiles',
       'fracture-resonance',
     ]);
+    expect(cells.find((c) => c.item?.id === 'sword')?.matchesFilter).toBe(false);
   });
 
   it('필터가 걸려도 칸 위치는 그대로다', () => {
-    // 필터는 감추기만 한다. 자리를 당겨오면 드래그 대상이 어긋난다.
+    // 필터는 자리를 유지하고 일치 여부만 표시한다. 자리를 당겨오면 드래그 대상이 어긋난다.
     const progress = withAll();
     const layout = reconcileLayout(progress, createEmptyLayout());
     const cells = cellsOf(progress, layout, 'support');
 
-    expect(cells[0]).toBeNull();
-    expect(cells[6]?.id).toBe('multiple-projectiles');
+    expect(cells[0]).toMatchObject({ item: { id: 'sword' }, matchesFilter: false });
+    expect(cells[6]).toMatchObject({ item: { id: 'multiple-projectiles' }, matchesFilter: true });
   });
 });

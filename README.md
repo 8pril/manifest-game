@@ -135,7 +135,7 @@ src/
     skills.ts      스킬 정의
     lore.ts        방 오브젝트 서술 텍스트
   game/            한 판의 진행 규칙
-    run.ts         상태 기계 (전투 / 마을 / 승리 / 패배)
+    run.ts         상태 기계 (전투 / 마을 / 승리 / 현재 방 재도전)
     rooms.ts       방 구성과 방별 보상
     progression.ts 해금과 장비 설정 상태
     progress-storage.ts  localStorage 저장·복원
@@ -166,6 +166,7 @@ docs/              기획 및 진행 문서
 - [플레이 테스트 요청](docs/playtest-brief.md)
 - [액션 트래커](docs/action-tracker.md)
 - [AI 활용 기록 로그](docs/ai-usage-log.md)
+- [기획 도해와 구현 결과](docs/design/README.md)
 
 ## 라이선스 및 출처
 
