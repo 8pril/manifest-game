@@ -13,7 +13,7 @@ import {
 import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
-import { attackIntervalFor, deliveryOf, weaponOf, WEAPON_IDS, type Weapon, type WeaponId } from '@/data/weapons';
+import { attackIntervalFor, deliveryOf, weaponOf, WEAPON_IDS, WEAPON_LIST, type Weapon, type WeaponId } from '@/data/weapons';
 import { SUPPORTS, findSupport } from '@/data/supports';
 import { missingKeys } from '@/data/keys';
 import { canAttach, findBehavior, resolveSkill, supportSlotType, type Behavior, type Skill, type Support } from '@/engine/support';
@@ -44,11 +44,14 @@ import {
   consumeBrand,
   incomingDamageMultiplier,
   hasStatus,
+  STATUS_RULES,
   WOUND_BURST_DAMAGE,
   consumeWound,
   WOUND_CONSUME_PER_STACK,
   ARCANE_FLOW_MORE,
   ARCANE_FLOW_DURATION,
+  EXPOSED_DAMAGE_INCREASE,
+  FRACTURE_IMMUNITY,
   type StatusKind,
 } from '@/engine/status';
 import {
@@ -311,6 +314,22 @@ interface ProjectileEntity {
   behaviors: readonly Behavior[];
 }
 
+interface PortalView {
+  x: number;
+  y: number;
+  enabledAt: number;
+  ring: Phaser.GameObjects.Arc;
+  core: Phaser.GameObjects.Arc;
+  prompt: Phaser.GameObjects.Text;
+}
+
+interface TownPortalReturn {
+  roomIndex: number;
+  player: { x: number; y: number };
+  enemies: Enemy[];
+  exitOpen: boolean;
+}
+
 interface WeaponRuntime {
   weapon: Weapon;
   /** 어느 손인지. 콤보 조건의 `self`/`other`가 이 기준으로 갈린다. */
@@ -339,7 +358,7 @@ interface WeaponWheelMenu {
   segments: WheelSegment[];
 }
 
-type OverlayKind = 'town-dialogue' | 'town-config' | 'pause' | 'result';
+type OverlayKind = 'town-dialogue' | 'town-config' | 'pause' | 'map' | 'result';
 
 /**
  * 마을 패널에서 채우기를 기다리는 칸.
@@ -379,6 +398,34 @@ interface RewardDrop {
   glow: Phaser.GameObjects.Arc;
   prompt: Phaser.GameObjects.Text;
 }
+
+type WorldMapNode =
+  | { kind: 'room'; roomIndex: number; x: number; y: number }
+  | { kind: 'town'; x: number; y: number };
+
+const WORLD_MAP_NODES: readonly WorldMapNode[] = [
+  { kind: 'room', roomIndex: 0, x: 120, y: 250 },
+  { kind: 'room', roomIndex: 1, x: 250, y: 250 },
+  { kind: 'town', x: 380, y: 250 },
+  { kind: 'room', roomIndex: 2, x: 510, y: 250 },
+  { kind: 'room', roomIndex: 3, x: 640, y: 250 },
+  { kind: 'room', roomIndex: 4, x: 770, y: 160 },
+  { kind: 'room', roomIndex: 5, x: 770, y: 340 },
+  { kind: 'room', roomIndex: 6, x: 900, y: 250 },
+  { kind: 'room', roomIndex: 7, x: 1030, y: 250 },
+] as const;
+
+const WORLD_MAP_LINKS: readonly [number, number][] = [
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 4],
+  [4, 5],
+  [4, 6],
+  [5, 7],
+  [6, 7],
+  [7, 8],
+] as const;
 
 interface TownNpc {
   x: number;
@@ -466,6 +513,9 @@ export class PlayScene extends Phaser.Scene {
   private transientOverlays: Phaser.GameObjects.GameObject[] = [];
   private rewardDrops: RewardDrop[] = [];
   private townNpc: TownNpc | null = null;
+  private combatPortal: PortalView | null = null;
+  private townReturnPortal: PortalView | null = null;
+  private townPortalReturn: TownPortalReturn | null = null;
   private weaponWheel: WeaponWheelMenu | null = null;
   /**
    * 일시정지 여부.
@@ -662,6 +712,7 @@ export class PlayScene extends Phaser.Scene {
 
     keyboard.on('keydown-SPACE', () => this.tryDash());
     keyboard.on('keydown-R', () => {
+      if (this.overlayKind === 'map') return;
       // 판이 끝났으면 다시 시작. 이 분기가 없으면 죽은 뒤 새로고침 말고는
       // 빠져나갈 방법이 없다. 결과 화면이 R을 안내하는데 아무 반응이 없었다.
       // 일시정지 중에도 같은 길을 연다.
@@ -690,6 +741,24 @@ export class PlayScene extends Phaser.Scene {
       }
       // 마을에서는 관리인 패널과 같다. 전투 지역에서는 보기 전용으로 연다.
       this.showTown(this.run.phase !== 'town');
+    });
+    keyboard.on('keydown-M', () => {
+      if (isOver(this.run) || this.weaponWheel) return;
+      if (this.overlayKind === 'map') {
+        this.closeMap();
+        return;
+      }
+      if (this.paused || this.overlay) return;
+      if (this.run.phase !== 'combat' && this.run.phase !== 'town') return;
+      this.showWorldMap();
+    });
+    keyboard.on('keydown-B', () => {
+      if (isOver(this.run) || this.weaponWheel || this.paused || this.overlay) return;
+      if (this.run.phase !== 'combat') {
+        floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, '전투 구역에서만 열린다', COLORS.textDim);
+        return;
+      }
+      this.openTownPortal();
     });
     keyboard.on('keydown-F', () => {
       if (this.overlayKind === 'town-dialogue') {
@@ -728,7 +797,7 @@ export class PlayScene extends Phaser.Scene {
       if (this.weaponWheel) return;
       if (this.paused) return;
       if (this.overlay) return;
-      if (this.run.phase !== 'combat') return;
+      if (this.run.phase !== 'combat' && this.run.phase !== 'town') return;
       // 트랙패드에서는 두 손가락 탭이 꺼져 있거나 브라우저가 다르게 넘겨줄 수 있어
       // 눌린 버튼 상태와 이벤트의 버튼 번호를 모두 본다.
       const isRight = pointer.rightButtonDown() || pointer.button === 2;
@@ -742,7 +811,7 @@ export class PlayScene extends Phaser.Scene {
     keyboard.on('keydown-SHIFT', () => {
       if (this.weaponWheel || this.paused) return;
       if (this.overlay) return;
-      if (this.run.phase !== 'combat') return;
+      if (this.run.phase !== 'combat' && this.run.phase !== 'town') return;
       if (this.right) this.useWeapon(this.right);
     });
   }
@@ -1190,7 +1259,7 @@ export class PlayScene extends Phaser.Scene {
   // ───────────────────────── 방
 
   /** 방에 들어설 때. 크기를 잡고 바닥과 벽을 그린 뒤 적을 채운다. */
-  private enterRoom(): void {
+  private enterRoom(restoredEnemies?: readonly Enemy[], restoredPlayer?: { x: number; y: number }, restoredExitOpen = false): void {
     const room = ROOMS[this.run.roomIndex];
     if (!room) return;
 
@@ -1206,6 +1275,10 @@ export class PlayScene extends Phaser.Scene {
     this.clearTransientOverlays();
     this.rewardDrops = [];
     this.townNpc = null;
+    this.destroyPortal(this.combatPortal);
+    this.combatPortal = null;
+    this.destroyPortal(this.townReturnPortal);
+    this.townReturnPortal = null;
     for (const object of this.roomFloor) object.destroy();
     this.roomFloor = [];
     for (const entity of this.enemies) {
@@ -1249,15 +1322,25 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(2);
     this.roomFloor.push(this.exit, this.exitLabel);
 
-    // 플레이어는 왼쪽에서 들어온다.
-    this.player.setPosition(WALL + 90, cy);
+    // 플레이어는 왼쪽에서 들어온다. 포탈 복귀 때만 열었던 자리로 돌아온다.
+    this.player.setPosition(restoredPlayer?.x ?? WALL + 90, restoredPlayer?.y ?? cy);
     followInRoom(this, this.player, room.width, room.height);
 
-    for (const spawn of room.spawns) {
-      for (let i = 0; i < spawn.count; i++) {
-        const at = this.edgeSpawnPoint();
-        this.enemies.push(this.createEnemyEntity(spawn.kind, at.x, at.y));
+    if (restoredEnemies) {
+      for (const enemy of restoredEnemies) this.enemies.push(this.createEnemyEntityFromState(this.cloneEnemy(enemy)));
+    } else {
+      for (const spawn of room.spawns) {
+        for (let i = 0; i < spawn.count; i++) {
+          const at = this.edgeSpawnPoint();
+          this.enemies.push(this.createEnemyEntity(spawn.kind, at.x, at.y));
+        }
       }
+    }
+    if (restoredExitOpen) {
+      this.exitOpen = true;
+      tintView(this.exit, COLORS.accent);
+      this.exitLabel.setText(room.entersTown ? '마을 →' : '출구 →');
+      this.tweens.add({ targets: this.exit, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
     }
     this.refreshHud();
   }
@@ -1266,6 +1349,10 @@ export class PlayScene extends Phaser.Scene {
   private enterTownRoom(): void {
     this.clearTransientOverlays();
     this.rewardDrops = [];
+    this.destroyPortal(this.combatPortal);
+    this.combatPortal = null;
+    this.destroyPortal(this.townReturnPortal);
+    this.townReturnPortal = null;
     for (const object of this.roomFloor) object.destroy();
     this.roomFloor = [];
     for (const projectile of this.projectiles) projectile.view.destroy();
@@ -1274,9 +1361,15 @@ export class PlayScene extends Phaser.Scene {
     this.areas = [];
     for (const shot of this.enemyShots) shot.view.destroy();
     this.enemyShots = [];
+    for (const entity of this.enemies) {
+      entity.view.destroy();
+      entity.hpBar.destroy();
+      for (const dot of entity.statusDots) dot.destroy();
+    }
     this.enemies = [];
 
-    this.exitOpen = true;
+    const viaPortal = this.townPortalReturn !== null;
+    this.exitOpen = !viaPortal;
     this.resultScheduled = false;
     this.bounds = { minX: WALL, minY: WALL, maxX: TOWN_WIDTH - WALL, maxY: TOWN_HEIGHT - WALL };
     this.minimapRoom = {
@@ -1296,12 +1389,16 @@ export class PlayScene extends Phaser.Scene {
     this.roomFloor.push(...this.wallViews(TOWN_WIDTH, TOWN_HEIGHT, 0x3a4059, cy));
     this.roomFloor.push(this.toneView(cx, cy, TOWN_WIDTH, TOWN_HEIGHT, TOWN_TONE));
 
-    this.exit = this.exitView(TOWN_WIDTH - WALL / 2, cy, COLORS.accent);
+    this.exit = this.exitView(TOWN_WIDTH - WALL / 2, cy, viaPortal ? 0x2a2f42 : COLORS.accent);
     this.exitLabel = this.add
-      .text(TOWN_WIDTH - WALL - 110, cy, '다음 전투 →', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
+      .text(TOWN_WIDTH - WALL - 110, cy, viaPortal ? '' : '다음 전투 →', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
       .setOrigin(0.5)
       .setDepth(2);
     this.roomFloor.push(this.exit, this.exitLabel);
+
+    if (viaPortal) {
+      this.townReturnPortal = this.createPortalView(WALL + 150, cy + 110, '전투 구역 포탈', 0xb08bff, 0);
+    }
 
     const npcX = cx - 120;
     const npcY = cy;
@@ -1605,6 +1702,10 @@ export class PlayScene extends Phaser.Scene {
 
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
     const enemy = createEnemy(kind, x, y);
+    return this.createEnemyEntityFromState(enemy);
+  }
+
+  private createEnemyEntityFromState(enemy: Enemy): EnemyEntity {
     const stats = ENEMY_STATS[enemy.kind];
 
     return {
@@ -1618,6 +1719,40 @@ export class PlayScene extends Phaser.Scene {
           .setVisible(false),
       ),
     };
+  }
+
+  private cloneEnemy(enemy: Enemy): Enemy {
+    return {
+      ...enemy,
+      statuses: enemy.statuses.map((status) => ({ ...status })),
+      immunity: { ...enemy.immunity },
+      boss: enemy.boss
+        ? {
+            ...enemy.boss,
+            chargeDirection: { ...enemy.boss.chargeDirection },
+            summonedAt: [...enemy.boss.summonedAt],
+          }
+        : undefined,
+    };
+  }
+
+  private createPortalView(x: number, y: number, label: string, color: number, delayMs = 280): PortalView {
+    const ringView = this.add.circle(x, y, 42, color, 0.18).setStrokeStyle(3, color, 0.8).setDepth(3);
+    const core = this.add.circle(x, y, 18, color, 0.36).setDepth(3);
+    const prompt = this.add
+      .text(x, y - 58, label, { fontSize: '15px', color: COLORS.accentText, fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(22);
+    this.tweens.add({ targets: ringView, scale: 1.12, alpha: 0.36, duration: 720, yoyo: true, repeat: -1 });
+    this.tweens.add({ targets: core, scale: 0.78, alpha: 0.58, duration: 560, yoyo: true, repeat: -1 });
+    return { x, y, enabledAt: this.time.now + delayMs, ring: ringView, core, prompt };
+  }
+
+  private destroyPortal(portal: PortalView | null): void {
+    if (!portal) return;
+    portal.ring.destroy();
+    portal.core.destroy();
+    portal.prompt.destroy();
   }
 
   /**
@@ -1695,6 +1830,54 @@ export class PlayScene extends Phaser.Scene {
       if (Math.hypot(point.x - this.player.x, point.y - this.player.y) > 220) return point;
     }
     return { x: this.bounds.minX + 30, y: this.bounds.minY + 30 };
+  }
+
+  private openTownPortal(): void {
+    const angle = this.aimAngle();
+    const x = Phaser.Math.Clamp(this.player.x + Math.cos(angle) * 115, this.bounds.minX + 60, this.bounds.maxX - 60);
+    const y = Phaser.Math.Clamp(this.player.y + Math.sin(angle) * 115, this.bounds.minY + 60, this.bounds.maxY - 60);
+    this.destroyPortal(this.combatPortal);
+    this.combatPortal = this.createPortalView(x, y, '마을 포탈', 0x8ea4ff);
+    floatingText(this, x, y - 70, '마을 포탈이 열렸다', COLORS.accentText, { duration: 1200 });
+  }
+
+  private updateCombatPortalPrompt(): void {
+    if (!this.combatPortal) return;
+    const near = Math.hypot(this.player.x - this.combatPortal.x, this.player.y - this.combatPortal.y) <= 90;
+    this.combatPortal.prompt.setAlpha(near ? 1 : 0.42);
+  }
+
+  private checkCombatPortalReached(): void {
+    const portal = this.combatPortal;
+    if (!portal || this.run.phase !== 'combat' || this.time.now < portal.enabledAt) return;
+    if (Math.hypot(this.player.x - portal.x, this.player.y - portal.y) > 42) return;
+
+    this.townPortalReturn = {
+      roomIndex: this.run.roomIndex,
+      player: { x: portal.x, y: portal.y },
+      enemies: this.enemies.filter((entity) => isAlive(entity.state)).map((entity) => this.cloneEnemy(entity.state)),
+      exitOpen: this.exitOpen,
+    };
+    this.destroyPortal(this.combatPortal);
+    this.combatPortal = null;
+    this.run = { ...this.run, phase: 'town' };
+    this.enterTownRoom();
+    if (DEBUG_ENABLED) this.publishDebug();
+  }
+
+  private checkTownReturnPortalReached(): void {
+    const portal = this.townReturnPortal;
+    const snapshot = this.townPortalReturn;
+    if (!portal || !snapshot || this.run.phase !== 'town' || this.overlay) return;
+    if (Math.hypot(this.player.x - portal.x, this.player.y - portal.y) > 44) return;
+
+    this.townPortalReturn = null;
+    this.destroyPortal(this.townReturnPortal);
+    this.townReturnPortal = null;
+    this.run = { ...this.run, phase: 'combat', roomIndex: snapshot.roomIndex };
+    this.syncWeaponRuntimes();
+    this.enterRoom(snapshot.enemies, snapshot.player, snapshot.exitOpen);
+    if (DEBUG_ENABLED) this.publishDebug();
   }
 
   /**
@@ -1805,6 +1988,9 @@ export class PlayScene extends Phaser.Scene {
       this.updateComboRings();
       this.updateTownNpcPrompt();
       this.updateMinimap();
+      this.updateAreas(dt);
+      this.updateProjectiles(dt);
+      this.checkTownReturnPortalReached();
       this.checkTownExitReached();
       if (DEBUG_ENABLED) this.publishDebug();
       return;
@@ -1827,12 +2013,14 @@ export class PlayScene extends Phaser.Scene {
     this.updateMinimap();
     this.updateLore();
     this.updateRewardDropPrompt();
+    this.updateCombatPortalPrompt();
     if (DEBUG_ENABLED) this.publishDebug();
     this.updateAreas(dt);
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
     this.updateEnemyShots(dt);
     this.checkRoomCleared();
+    this.checkCombatPortalReached();
     this.checkExitReached();
   }
 
@@ -3563,6 +3751,8 @@ export class PlayScene extends Phaser.Scene {
           `[${weapon.name}]`,
           `${weapon.basic.name} 대신 나간다`,
           `공격 간격 ${weapon.cooldown}ms → ${attackIntervalFor(weapon, weapon.basicSkill)}ms`,
+          '',
+          this.statusTipText(weapon.status),
         ].join('\n'),
         x,
         y,
@@ -3576,6 +3766,7 @@ export class PlayScene extends Phaser.Scene {
 
     const notAttachable = `${support.requires.join('·')} 스킬에만 붙는다`;
     const category = this.supportCategory(support);
+    const statusBehavior = findBehavior(support.behaviors ?? [], 'statusDamage');
     const head = [
       support.name,
       `${this.slotKindOf(item.slot).label}${category ? ` · ${category}` : ''}`,
@@ -3609,8 +3800,9 @@ export class PlayScene extends Phaser.Scene {
 
     const blocks = weapons.map((id) => `[${weaponOf(id).name}]\n${this.supportEffectFor(id, support)}`);
     const body = blocks.length ? blocks.join('\n\n') : '붙일 수 있는 무기가 없다';
+    const statusBody = statusBehavior ? `\n\n[필요한 상태]\n${this.statusTipText(statusBehavior.status)}` : '';
 
-    this.drawTownTip(`${head}\n\n${body}`, x, y, true);
+    this.drawTownTip(`${head}\n\n${body}${statusBody}`, x, y, true);
   }
 
   private weaponTipText(weaponId: WeaponId): string {
@@ -3624,6 +3816,8 @@ export class PlayScene extends Phaser.Scene {
       `기본 공격: ${weapon.basic.name}`,
       `기본스킬: ${weapon.basicSkill.name}`,
       configured ? `현재 공격: ${equippedSkill.name}` : `현재 공격: ${weapon.basic.name}`,
+      '',
+      this.statusTipText(weapon.status),
     ];
 
     if (weaponId === 'shield') {
@@ -3636,6 +3830,36 @@ export class PlayScene extends Phaser.Scene {
     }
 
     return lines.join('\n');
+  }
+
+  private statusTipText(kind: StatusKind): string {
+    const rule = STATUS_RULES[kind];
+    const chance = rule.chance >= 1 ? '항상' : `${Math.round(rule.chance * 100)}%`;
+    const source = this.statusSourceText(kind, chance);
+    const effects: Record<StatusKind, string[]> = {
+      wound: [
+        `${rule.maxStacks}스택이면 상처 폭발 ${WOUND_BURST_DAMAGE} 피해 후 초기화`,
+        `다른 무기로 때리면 스택당 ${WOUND_CONSUME_PER_STACK} 피해를 주고 소모`,
+      ],
+      exposed: [`대상이 받는 피해 +${Math.round(EXPOSED_DAMAGE_INCREASE * 100)}%`],
+      brand: [
+        '낙인 대상을 다시 때리면 낙인이 사라진다',
+        `비전 흐름: 비전 피해 +${Math.round(ARCANE_FLOW_MORE * 100)}% (${ARCANE_FLOW_DURATION}초)`,
+      ],
+      fracture: [
+        `기절 ${rule.duration}초`,
+        `${FRACTURE_IMMUNITY}초 동안 재기절 면역`,
+        '방패 넉백으로 벽에 부딪히면 확정 기절',
+        '보스는 기본적으로 기절·넉백 면역',
+      ],
+    };
+    return [`상태: ${rule.label}`, source, ...effects[kind]].join('\n');
+  }
+
+  private statusSourceText(kind: StatusKind, chance: string): string {
+    const weapon = WEAPON_LIST.find((candidate) => candidate.status === kind);
+    if (!weapon) return `명중 시 ${chance} 부여`;
+    return `${weapon.name} 명중 시 ${chance} 부여`;
   }
 
   private drawTownTip(text: string, x: number, y: number, ok: boolean): void {
@@ -3754,6 +3978,9 @@ export class PlayScene extends Phaser.Scene {
       rect.setInteractive({ useHandCursor: true, draggable: item !== null, dropZone: true });
       rect.setData('townSlot', target);
       rect.on('pointerdown', () => {
+        // 무기 후보 칸에 이미 무기가 있으면 드래그 출발점이 된다. 여기서 다시 그리면
+        // Phaser가 dragstart를 내기 전에 출발 객체가 사라져 슬롯 간 교체가 막힌다.
+        if (target.kind === 'wheel' && item !== null) return;
         // 같은 칸을 다시 누르면 대기를 푼다. 잘못 눌렀을 때 빠져나갈 길이 있어야 한다.
         this.townPendingSlot = pending ? null : target;
         this.renderTown();
@@ -4173,6 +4400,137 @@ export class PlayScene extends Phaser.Scene {
       if ('disableInteractive' in child) (child as Phaser.GameObjects.GameObject).disableInteractive();
     }
     this.time.delayedCall(0, () => overlay.destroy(true));
+  }
+
+  private showWorldMap(): void {
+    this.paused = true;
+
+    const container = this.add.container(0, 0).setDepth(30);
+    pinContainer(this, container);
+    container.add(this.add.rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, VIEW_WIDTH, VIEW_HEIGHT, 0x05060a, 0.78));
+
+    const panel = { x: 70, y: 74, w: VIEW_WIDTH - 140, h: VIEW_HEIGHT - 148 };
+    container.add(
+      this.add
+        .rectangle(panel.x + panel.w / 2, panel.y + panel.h / 2, panel.w, panel.h, 0x0a0b0f, 0.96)
+        .setStrokeStyle(2, 0x3a4059, 0.95),
+    );
+    container.add(
+      this.add
+        .text(panel.x + 28, panel.y + 28, '전체 지도', {
+          fontSize: '28px',
+          color: COLORS.text,
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5),
+    );
+    container.add(
+      this.add
+        .text(panel.x + panel.w - 28, panel.y + 30, 'M 닫기', {
+          fontSize: '15px',
+          color: COLORS.accentText,
+          fontStyle: 'bold',
+        })
+        .setOrigin(1, 0.5),
+    );
+
+    for (const [from, to] of WORLD_MAP_LINKS) {
+      const a = WORLD_MAP_NODES[from];
+      const b = WORLD_MAP_NODES[to];
+      const known = this.worldMapNodeKnown(a) || this.worldMapNodeKnown(b);
+      container.add(
+        this.add
+          .line(0, 0, panel.x + a.x, panel.y + a.y, panel.x + b.x, panel.y + b.y, known ? 0x4b5874 : 0x2a2f42, known ? 0.85 : 0.45)
+          .setOrigin(0),
+      );
+    }
+
+    for (const node of WORLD_MAP_NODES) {
+      this.drawWorldMapNode(container, panel.x + node.x, panel.y + node.y, node);
+    }
+
+    container.add(
+      this.add
+        .text(panel.x + 28, panel.y + panel.h - 34, '회색 구역은 아직 가보지 않은 곳이다', {
+          fontSize: '14px',
+          color: COLORS.textDim,
+        })
+        .setOrigin(0, 0.5),
+    );
+
+    this.overlay = container;
+    this.overlayKind = 'map';
+  }
+
+  private drawWorldMapNode(
+    container: Phaser.GameObjects.Container,
+    x: number,
+    y: number,
+    node: WorldMapNode,
+  ): void {
+    const known = this.worldMapNodeKnown(node);
+    const current = this.worldMapNodeCurrent(node);
+    const cleared = this.worldMapNodeCleared(node);
+    const label = node.kind === 'town' ? '마을' : ROOMS[node.roomIndex]?.label ?? `구역 ${node.roomIndex + 1}`;
+    const index = node.kind === 'town' ? '' : `${node.roomIndex + 1}`;
+    const fill = current ? 0x2b3350 : known ? 0x141824 : 0x1a1c22;
+    const stroke = current ? COLORS.accent : cleared ? 0x6ea8ff : known ? 0x3a4059 : 0x2a2f42;
+    const alpha = known ? 0.98 : 0.62;
+
+    container.add(
+      this.add
+        .rectangle(x, y, node.kind === 'town' ? 96 : 108, node.kind === 'town' ? 58 : 68, fill, alpha)
+        .setStrokeStyle(current ? 3 : 2, stroke, current ? 1 : 0.8),
+    );
+    container.add(
+      this.add
+        .text(x, y - 12, known ? label : '미확인', {
+          fontSize: node.kind === 'town' ? '15px' : '13px',
+          color: known ? COLORS.text : '#717786',
+          fontStyle: current ? 'bold' : undefined,
+          align: 'center',
+          wordWrap: { width: 92 },
+        })
+        .setOrigin(0.5),
+    );
+    if (index) {
+      container.add(
+        this.add
+          .text(x, y + 16, index, {
+            fontSize: '12px',
+            color: current ? COLORS.accentText : known ? COLORS.textDim : '#5a6070',
+            fontStyle: 'bold',
+          })
+          .setOrigin(0.5),
+      );
+    }
+    if (current) {
+      container.add(
+        this.add
+          .text(x, y + 34, '현재', { fontSize: '12px', color: COLORS.accentText, fontStyle: 'bold' })
+          .setOrigin(0.5),
+      );
+    }
+  }
+
+  private worldMapNodeKnown(node: WorldMapNode): boolean {
+    if (node.kind === 'town') return this.run.progress.weaponSwitchUnlocked || this.run.phase === 'town';
+    return node.roomIndex <= this.run.roomIndex;
+  }
+
+  private worldMapNodeCurrent(node: WorldMapNode): boolean {
+    if (node.kind === 'town') return this.run.phase === 'town';
+    return this.run.phase === 'combat' && node.roomIndex === this.run.roomIndex;
+  }
+
+  private worldMapNodeCleared(node: WorldMapNode): boolean {
+    if (node.kind === 'town') return this.run.progress.weaponSwitchUnlocked;
+    return node.roomIndex < this.run.roomIndex || this.run.phase === 'won';
+  }
+
+  private closeMap(): void {
+    this.paused = false;
+    this.closeOverlay();
   }
 
   /**
