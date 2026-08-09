@@ -506,6 +506,8 @@ export class PlayScene extends Phaser.Scene {
   private townReadOnly = false;
   /** 인벤토리 또는 장착 칸에서 드래그 중인 출발점. 드롭 지점에서 무엇을 옮길지 판단한다. */
   private townDragSource: TownDragSource | null = null;
+  /** R링 후보 슬롯 드래그는 원본 칸을 움직이면 dropZone을 가리므로, 별도 고스트만 따라다닌다. */
+  private townDragGhost: Phaser.GameObjects.Container | null = null;
   /** 화면 최하단 안내. 패널을 다시 그려도 살아남도록 오버레이 밖에 둔다. */
   private townToast: Phaser.GameObjects.Text | null = null;
   /** 인벤토리 항목에 마우스를 올렸을 때 뜨는 설명. */
@@ -4249,6 +4251,7 @@ export class PlayScene extends Phaser.Scene {
       if (item) this.showTownTip(item, x + size + 10, y);
     });
     rect.on('pointerout', () => this.hideTownTip());
+    rect.setData('dragParts', parts);
   }
 
   /**
@@ -4263,18 +4266,26 @@ export class PlayScene extends Phaser.Scene {
       const index = obj.getData('cellIndex');
       if (typeof index === 'number') {
         this.townDragSource = { kind: 'inventory', index };
+        this.captureTownDragParts(obj);
         return;
       }
       const target = obj.getData('townSlot') as TownSlotTarget | undefined;
       this.townDragSource = target && this.townSlotItem(target) !== null ? { kind: 'townSlot', target } : null;
+      if (this.townDragSource?.kind === 'townSlot') this.createTownSlotDragGhost(obj, this.townDragSource.target);
     });
 
     this.input.on('drag', (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject, x: number, y: number) => {
       if (this.overlayKind !== 'town-config') return;
+      if (this.townDragSource?.kind === 'townSlot') {
+        // 장착 슬롯 자체는 dropZone이기도 하다. 원본 사각형을 포인터 아래로 끌고 가면
+        // 드롭 순간에 대상 슬롯이 아니라 자기 자신이 잡힐 수 있어, 슬롯끼리 교체가
+        // 같은 칸 드롭으로 끝난다. 슬롯은 제자리에 두고 살짝 흐리게만 표시한다.
+        (obj as Phaser.GameObjects.Rectangle).setAlpha(0.55);
+        this.townDragGhost?.setPosition(x, y);
+        return;
+      }
       // 끌고 있는 칸만 따라다니게 한다. 놓으면 다시 그리므로 위치는 원복된다.
-      const shape = obj as Phaser.GameObjects.Rectangle;
-      shape.setPosition(x, y);
-      shape.setDepth(40);
+      this.moveTownDragParts(obj, x, y);
     });
 
     this.input.on('drop', (_p: Phaser.Input.Pointer, _obj: Phaser.GameObjects.GameObject, zone: Phaser.GameObjects.GameObject) => {
@@ -4285,9 +4296,67 @@ export class PlayScene extends Phaser.Scene {
     this.input.on('dragend', (_p: Phaser.Input.Pointer, _obj: Phaser.GameObjects.GameObject, dropped: boolean) => {
       if (this.overlayKind !== 'town-config') return;
       this.townDragSource = null;
+      this.destroyTownDragGhost();
       // 놓을 곳이 아니면 원래 자리로 돌아가야 한다. 다시 그리는 것이 가장 확실하다.
       if (!dropped) this.renderTown();
     });
+  }
+
+  private createTownSlotDragGhost(obj: Phaser.GameObjects.GameObject, target: TownSlotTarget): void {
+    this.destroyTownDragGhost();
+    const item = this.townSlotItem(target);
+    if (!item) return;
+
+    const rect = obj as Phaser.GameObjects.Rectangle;
+    const w = rect.width;
+    const h = rect.height;
+    const ghost = this.add.container(rect.x, rect.y).setDepth(55);
+    ghost.add(this.add.rectangle(0, 0, w, h, 0x2b3350, 0.72).setStrokeStyle(2, COLORS.accent, 0.95));
+
+    if (item.kind === 'weapon' && this.textures.exists(WEAPON_SPRITE[item.id])) {
+      const icon = this.add.image(w / 2 - 32, 0, WEAPON_SPRITE[item.id]).setOrigin(0.5);
+      icon.setScale(34 / Math.max(icon.width, icon.height));
+      ghost.add(icon);
+    }
+    ghost.add(
+      this.add
+        .text(-w / 2 + 14, 0, item.name, { fontSize: '15px', color: COLORS.accentText, fontStyle: 'bold' })
+        .setOrigin(0, 0.5),
+    );
+    this.overlay?.add(ghost);
+    this.townDragGhost = ghost;
+  }
+
+  private destroyTownDragGhost(): void {
+    this.townDragGhost?.destroy(true);
+    this.townDragGhost = null;
+  }
+
+  private captureTownDragParts(obj: Phaser.GameObjects.GameObject): void {
+    const rect = obj as Phaser.GameObjects.Rectangle;
+    const parts = (obj.getData('dragParts') as Phaser.GameObjects.GameObject[] | undefined) ?? [obj];
+    obj.setData(
+      'dragOffsets',
+      parts.map((part) => ({
+        part,
+        dx: (part as unknown as { x: number }).x - rect.x,
+        dy: (part as unknown as { y: number }).y - rect.y,
+      })),
+    );
+  }
+
+  private moveTownDragParts(obj: Phaser.GameObjects.GameObject, x: number, y: number): void {
+    const offsets = obj.getData('dragOffsets') as
+      | { part: Phaser.GameObjects.GameObject; dx: number; dy: number }[]
+      | undefined;
+    if (!offsets) {
+      (obj as Phaser.GameObjects.Rectangle).setPosition(x, y).setDepth(40);
+      return;
+    }
+    for (const { part, dx, dy } of offsets) {
+      (part as unknown as { setPosition(x: number, y: number): void }).setPosition(x + dx, y + dy);
+      if ('setDepth' in part) (part as Phaser.GameObjects.GameObject & { setDepth(depth: number): void }).setDepth(40);
+    }
   }
 
   private handleTownDrop(zone: Phaser.GameObjects.GameObject): void {
@@ -4389,6 +4458,7 @@ export class PlayScene extends Phaser.Scene {
   private closeOverlay(): void {
     // 설명은 오버레이 밖에 있어 함께 사라지지 않는다. 명시적으로 지운다.
     this.hideTownTip();
+    this.destroyTownDragGhost();
     this.townReadOnly = false;
     const overlay = this.overlay;
     this.overlay = null;
