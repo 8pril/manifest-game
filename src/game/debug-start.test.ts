@@ -8,7 +8,7 @@ describe('parseDebugStart', () => {
       right: 'arcane',
       roomIndex: 3,
       town: false,
-      combo: false,
+      combo: null,
     });
   });
 
@@ -18,7 +18,7 @@ describe('parseDebugStart', () => {
       right: null,
       roomIndex: undefined,
       town: false,
-      combo: false,
+      combo: null,
     });
   });
 
@@ -28,7 +28,7 @@ describe('parseDebugStart', () => {
       right: undefined,
       roomIndex: undefined,
       town: false,
-      combo: false,
+      combo: null,
     });
   });
 });
@@ -52,7 +52,7 @@ describe('마을 진입 파라미터', () => {
       right: undefined,
       roomIndex: undefined,
       town: true,
-      combo: false,
+      combo: null,
     });
   });
 
@@ -64,24 +64,34 @@ describe('마을 진입 파라미터', () => {
 describe('콤보 빌드 파라미터', () => {
   // 콤보는 첫 보스 보상을 마을에서 붙여야 켜진다. 콤보 유무를 비교하려면 매번
   // 방 두 개를 클리어해야 해서, 검증과 플레이 테스트 양쪽에서 비용이 크다.
-  it('?combo=1 이면 켜진다', () => {
-    expect(parseDebugStart('?combo=1', 5).combo).toBe(true);
+  it('?combo=1 이면 기본 보조가 켜진다', () => {
+    expect(parseDebugStart('?combo=1', 5).combo).toBe('combo-imprint');
   });
 
   it('?combo 만 있어도 켜진다', () => {
-    expect(parseDebugStart('?combo', 5).combo).toBe(true);
+    expect(parseDebugStart('?combo', 5).combo).toBe('combo-imprint');
+  });
+
+  it('보조 id를 직접 줄 수 있다', () => {
+    // 콤보 계열이 셋이고 조건이 각자 달라 어느 것을 볼지 골라야 한다.
+    expect(parseDebugStart('?combo=combo-release', 5).combo).toBe('combo-release');
+    expect(parseDebugStart('?combo=linked-momentum', 5).combo).toBe('linked-momentum');
+  });
+
+  it('모르는 id는 기본 보조로 떨어진다', () => {
+    expect(parseDebugStart('?combo=nope', 5).combo).toBe('combo-imprint');
   });
 
   it('?combo=0 이면 꺼진다', () => {
-    expect(parseDebugStart('?combo=0', 5).combo).toBe(false);
+    expect(parseDebugStart('?combo=0', 5).combo).toBeNull();
   });
 
   it('없으면 꺼진다', () => {
-    expect(parseDebugStart('?wave=2', 5).combo).toBe(false);
+    expect(parseDebugStart('?wave=2', 5).combo).toBeNull();
   });
 
   it('다른 파라미터와 함께 쓸 수 있다', () => {
     const parsed = parseDebugStart('?wave=3&left=bow&combo=1', 5);
-    expect(parsed).toEqual({ left: 'bow', right: undefined, roomIndex: 2, town: false, combo: true });
+    expect(parsed).toEqual({ left: 'bow', right: undefined, roomIndex: 2, town: false, combo: 'combo-imprint' });
   });
 });

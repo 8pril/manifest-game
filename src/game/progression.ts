@@ -7,7 +7,7 @@ import { supportSlotType, type Support } from '@/engine/support';
  *
  * 기존 Loadout은 "이번 전투에서 양손에 무엇을 들었는가"만 표현한다.
  * 새 기획에는 그보다 바깥의 상태가 필요하다: 어떤 무기를 해금했는지, R키 링 메뉴에
- * 어떤 후보를 넣었는지, 무기별 콤보스킬과 보조형스킬 슬롯이 어떻게 세팅됐는지.
+ * 어떤 후보를 넣었는지, 무기별 강화기술과 보조형스킬 슬롯이 어떻게 세팅됐는지.
  */
 
 export type Hand = 'left' | 'right';
@@ -21,9 +21,9 @@ export interface WeaponWheel {
 export interface ManifestationConfig {
   /** 콤보 상태에서 기본 공격을 대체할 강화기술. 내부 id는 기존 comboSkillId를 유지한다. */
   comboSkillId: string;
-  /** 보조1형: 성능 보강. */
+  /** 보조. */
   primarySupportId: string | null;
-  /** 보조2형: 조건/시너지. */
+  /** 연계. */
   synergySupportId: string | null;
 }
 
@@ -99,17 +99,32 @@ export function unlockComboSkills(progress: PlayerProgress, skillIds: readonly s
   };
 }
 
+/** 콤보를 읽는 연계. `?combo=`로 어느 것을 물릴지 고른다. */
+export const COMBO_SUPPORT_IDS = ['combo-imprint', 'linked-momentum', 'combo-release'] as const;
+export type ComboSupportId = (typeof COMBO_SUPPORT_IDS)[number];
+
 /**
- * 개발용: 모든 무기에 `콤보 개방`을 물려 콤보 빌드 상태를 만든다.
+ * 개발용: 모든 무기에 콤보 계열 연계를 물려 콤보 빌드 상태를 만든다.
  *
  * 콤보는 이 보조를 붙였을 때만 켜지는데, 그 보조는 첫 보스 보상이고 장착은 마을에서만
  * 된다. 콤보가 걸린 상태를 보려면 매번 두 방을 클리어해야 해서 검증과 플레이 테스트가
  * 막힌다. `?combo=1`이 이 함수를 쓴다.
+ *
+ * 콤보 계열이 셋이고 조건이 각자 달라서 어느 것을 물릴지 고를 수 있어야 한다.
  */
-export function grantComboImprint(progress: PlayerProgress): PlayerProgress {
-  let next = unlockSupports(progress, ['combo-imprint']);
+export function grantComboSupport(
+  progress: PlayerProgress,
+  supportId: ComboSupportId = 'combo-imprint',
+): PlayerProgress {
+  // 보조만 물리면 콤보 조건이 성립해도 발동하지 않는다. 강화기술을 보유하지 않으면
+  // `hasComboSkill`에서 막히기 때문이다. 실제로 이걸 빠뜨려 검증에서 발동이 0회로
+  // 나왔고, 규칙이 잘못된 것으로 오진할 뻔했다. 쓸 수 있는 상태까지 만들어 준다.
+  let next = unlockComboSkills(
+    unlockSupports(progress, [supportId]),
+    progress.unlockedWeapons.map((id) => weaponOf(id).combo.id),
+  );
   for (const weapon of next.unlockedWeapons) {
-    next = configureManifestation(next, weapon, { synergySupportId: 'combo-imprint' });
+    next = configureManifestation(next, weapon, { synergySupportId: supportId });
   }
   return next;
 }

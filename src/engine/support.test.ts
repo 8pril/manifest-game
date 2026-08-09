@@ -77,11 +77,11 @@ describe('canAttach - 태그 기반 장착 제약', () => {
 });
 
 describe('supportSlotType', () => {
-  it('slotType을 생략한 기존 보조능력은 보조1형으로 취급한다', () => {
+  it('slotType을 생략한 기존 보조능력은 보조으로 취급한다', () => {
     expect(supportSlotType(multipleProjectiles)).toBe('primary');
   });
 
-  it('명시된 시너지 보조능력은 보조2형으로 취급한다', () => {
+  it('명시된 시너지 보조능력은 연계으로 취급한다', () => {
     expect(supportSlotType({ ...opulence, slotType: 'synergy' })).toBe('synergy');
   });
 });

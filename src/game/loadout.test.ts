@@ -68,9 +68,9 @@ describe('resolveFor', () => {
 });
 
 describe('loadoutFromProgress', () => {
-  it('콤보 개방을 붙이면 보조1형이 강화기술로 간다', () => {
-    // 강화기술이 실제로 발동하는 빌드이므로 보조1형은 그쪽을 강화한다.
-    // 보조2형(`콤보 개방`)은 기본 공격에 붙어야 전환을 열 수 있다.
+  it('콤보 개방을 붙이면 보조가 강화기술로 간다', () => {
+    // 강화기술이 실제로 발동하는 빌드이므로 보조는 그쪽을 강화한다.
+    // 연계(`콤보 개방`)은 기본 공격에 붙어야 전환을 열 수 있다.
     let progress = unlockWeapons(createInitialProgress(), ['bow']);
     progress = unlockSupports(progress, ['multiple-projectiles', 'combo-imprint']);
     progress = { ...progress, active: { left: 'sword', right: 'bow' } };
@@ -85,8 +85,8 @@ describe('loadoutFromProgress', () => {
     expect(resolveFor(loadout, rightWeapon(loadout)!.combo).stats.projectileCount).toBe(7);
   });
 
-  it('콤보 개방이 없으면 보조1형이 기본 공격으로 간다', () => {
-    // 콤보를 안 쓰는 빌드에서는 강화기술이 발동할 일이 없다. 거기에 보조1형을
+  it('콤보 개방이 없으면 보조가 기본 공격으로 간다', () => {
+    // 콤보를 안 쓰는 빌드에서는 강화기술이 발동할 일이 없다. 거기에 보조를
     // 붙이면 칸이 통째로 죽으므로 평소 쓰는 기본 공격을 강화한다.
     let progress = unlockWeapons(createInitialProgress(), ['bow']);
     progress = unlockSupports(progress, ['multiple-projectiles', 'wound-seeker']);
@@ -105,7 +105,7 @@ describe('loadoutFromProgress', () => {
     expect(resolveFor(loadout, rightWeapon(loadout)!.basic).stats.projectileCount).toBe(3);
   });
 
-  it('기본 공격에 태그가 안 맞는 보조2형은 강화기술로 넘어간다', () => {
+  it('기본 공격에 태그가 안 맞는 연계는 강화기술로 넘어간다', () => {
     // `상처 공명`은 `지대`를 요구하는데 검의 기본 공격 베기에는 지대가 없다.
     // 붙을 곳이 없다고 버리지 않고 강화기술 멸검으로 넘긴다.
     let progress = unlockSupports(createInitialProgress(), ['wound-resonance']);

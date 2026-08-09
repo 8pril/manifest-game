@@ -86,11 +86,16 @@ import {
   gainCombo,
   sustainCombo,
   tickCombo,
-  isComboReady,
-  comboBehaviorOf,
+  consumeCombo,
+  comboRulesOf,
+  comboTriggerMet,
+  comboTotal,
+  comboOf,
+  otherHand,
   COMBO_REQUIRED,
   type ComboState,
 } from '@/game/combo';
+import { grantEmpower, empowerMore, spendEmpower, tickEmpower, type EmpowerByHand } from '@/game/empower';
 import {
   createRun,
   clearRoom,
@@ -105,7 +110,7 @@ import {
   SHIELD_ENERGY_MAX,
   type RunState,
 } from '@/game/run';
-import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboImprint, hasComboSkill, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
+import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboSupport, hasComboSkill, unlockWeapons, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
@@ -259,7 +264,8 @@ interface ProjectileEntity {
 
 interface WeaponRuntime {
   weapon: Weapon;
-  combo: ComboState;
+  /** 어느 손인지. 콤보 조건의 `self`/`other`가 이 기준으로 갈린다. */
+  hand: Hand;
   readyAt: number;
 }
 
@@ -335,6 +341,14 @@ export class PlayScene extends Phaser.Scene {
   private shieldBarFill!: Phaser.GameObjects.Rectangle;
   private comboBadges!: { left: ComboBadge; right: ComboBadge };
   /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
+  /**
+   * 판 전체에 하나뿐인 콤보. 예전에는 손마다 따로 쌓였는데, 그러면 양손을 번갈아
+   * 쓸수록 게이지가 쪼개져 손해였다. 양손 조합이 이 게임의 핵심인데 기계가
+   * 한 손 연타를 보상하고 있었다.
+   */
+  private combo: ComboState = createCombo();
+  /** 콤보를 소모해 얻은 한시적 손 강화. 콤보와 수명이 달라 따로 둔다. */
+  private empower: EmpowerByHand = {};
   private comboRings!: { left: ShapeOrSprite; right: ShapeOrSprite };
   /** 링의 기준 지름. 맥동은 이 값에 배율을 곱해 만든다. */
   private comboRingSize = { left: 0, right: 0 };
@@ -427,13 +441,19 @@ export class PlayScene extends Phaser.Scene {
       hasDebugWeapons ||
       debugStart.roomIndex !== undefined ||
       debugStart.town === true ||
-      debugStart.combo === true;
+      debugStart.combo !== null;
     // 저장을 안 읽는 개발 진입은 저장도 하지 않는다. 안 그러면 실제 진행을 덮어쓴다.
     this.persistProgress = !ignoresSavedProgress;
     let progress = data?.progress ?? (ignoresSavedProgress ? null : loadProgress()) ?? createInitialProgress();
-    // 개발용: `?combo=1`이면 모든 무기에 `콤보 개방`을 미리 물려 콤보 빌드로 시작한다.
-    if (debugStart.combo) progress = grantComboImprint(progress);
-    this.initialProgress = hasDebugWeapons ? null : progress;
+    // 개발용: `?combo=`면 콤보 계열 연계를 미리 물려 콤보 빌드로 시작한다.
+    // `?left=`/`?right=`로 지정한 무기까지 해금해야 그 무기에도 보조가 붙는다.
+    // 콤보는 양손을 오가며 성립하므로, 두 파라미터를 같이 쓰는 것이 기본 사용법이다.
+    if (debugStart.combo) {
+      const forced = [debugStart.left, debugStart.right].filter((id): id is WeaponId => !!id);
+      progress = grantComboSupport(unlockWeapons(progress, forced), debugStart.combo);
+    }
+    // 콤보 보조를 물렸으면 그 진행을 살려야 한다. 무기만 지정한 경우에는 예전대로 버린다.
+    this.initialProgress = hasDebugWeapons && !debugStart.combo ? null : progress;
     // 저장된 진행이 있어도 손에 든 무기는 이어받지 않는다. 항상 초기값으로 시작한다.
     // 자세한 이유는 createRun 참고.
     const fresh = createInitialProgress();
@@ -469,9 +489,9 @@ export class PlayScene extends Phaser.Scene {
 
     this.run = { ...createRun(this.weapons.left, this.weapons.right, this.initialProgress ?? undefined), roomIndex: this.startRoomIndex };
     if (this.startInTown) this.run = this.fastForwardToTown(this.run);
-    this.left = { weapon: leftWeapon(this.run.loadout), combo: createCombo(), readyAt: 0 };
+    this.left = { weapon: leftWeapon(this.run.loadout), hand: 'left', readyAt: 0 };
     const right = rightWeapon(this.run.loadout);
-    this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0 } : null;
+    this.right = right ? { weapon: right, hand: 'right', readyAt: 0 } : null;
 
 
     this.player = this.textures.exists('player')
@@ -666,17 +686,81 @@ export class PlayScene extends Phaser.Scene {
   /**
    * 이 무기에 콤보 전환이 열려 있는지.
    *
-   * 기본 공격에 `콤보 개방` 보조2형이 붙어 있어야만 열린다. 콤보는 더 이상
+   * 기본 공격에 `콤보 개방` 연계가 붙어 있어야만 열린다. 콤보는 더 이상
    * 모든 무기의 기본 규칙이 아니라 골라서 얹는 것이다.
    */
-  private comboRuleFor(runtime: WeaponRuntime): { required: number; duration: number } | null {
-    return comboBehaviorOf(resolveFor(this.run.loadout, runtime.weapon.basic).behaviors);
+  private comboRulesFor(runtime: WeaponRuntime) {
+    return comboRulesOf(resolveFor(this.run.loadout, runtime.weapon.basic).behaviors);
+  }
+
+  /** 이 무기가 콤보를 쓰는가. 콤보를 읽는 연계가 하나라도 붙어 있으면 그렇다. */
+  private usesCombo(runtime: WeaponRuntime): boolean {
+    return this.comboRulesFor(runtime).length > 0;
   }
 
   private canUseComboSkill(runtime: WeaponRuntime): boolean {
-    const rule = this.comboRuleFor(runtime);
-    if (!rule) return false;
-    return isComboReady(runtime.combo, rule.required) && hasComboSkill(this.run.progress, runtime.weapon.combo.id);
+    if (!hasComboSkill(this.run.progress, runtime.weapon.combo.id)) return false;
+    return this.comboRulesFor(runtime).some(
+      ({ trigger, effect }) =>
+        effect.kind === 'comboSkill' && comboTriggerMet(this.combo, runtime.hand, trigger),
+    );
+  }
+
+  /**
+   * 강화 효과를 가진 콤보 규칙을 평가한다.
+   *
+   * 조건이 성립하면 지정한 손을 강화하고, 소모를 선언한 규칙은 콤보를 털어낸다.
+   * **소모하는 규칙은 조건이 성립한 그 순간 한 번만 발동**해야 하므로 명중 시점에
+   * 부른다. 소모하지 않는 규칙은 조건이 유지되는 동안 계속 켜져 있어야 해서
+   * 매 프레임 다시 본다(`refreshSustainedEmpower`).
+   */
+  private applyComboEffects(runtime: WeaponRuntime): void {
+    for (const { trigger, effect } of this.comboRulesFor(runtime)) {
+      if (effect.kind !== 'empower' || !effect.consumes) continue;
+      if (!comboTriggerMet(this.combo, runtime.hand, trigger)) continue;
+
+      const target = effect.hand === 'self' ? runtime.hand : otherHand(runtime.hand);
+      this.empower = grantEmpower(this.empower, target, {
+        more: effect.more,
+        hits: effect.hits,
+        seconds: effect.seconds,
+      });
+      const scope =
+        effect.consumes === 'self'
+          ? runtime.hand
+          : effect.consumes === 'other'
+            ? otherHand(runtime.hand)
+            : 'total';
+      this.combo = consumeCombo(this.combo, scope);
+      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, '연계 방출', COLORS.accentText);
+    }
+  }
+
+  /**
+   * 소모하지 않는 강화를 조건에 맞춰 켜고 끈다.
+   *
+   * `양손 합계 6 이상인 동안` 같은 규칙은 상태가 아니라 조건이므로, 콤보가 줄거나
+   * 풀리면 같이 꺼져야 한다. 한 번 켜고 두면 조건이 깨져도 계속 남는다.
+   */
+  private refreshSustainedEmpower(): void {
+    for (const runtime of [this.left, this.right]) {
+      if (!runtime) continue;
+      for (const { trigger, effect } of this.comboRulesFor(runtime)) {
+        if (effect.kind !== 'empower' || effect.consumes) continue;
+
+        const target = effect.hand === 'self' ? runtime.hand : otherHand(runtime.hand);
+        const met = comboTriggerMet(this.combo, runtime.hand, trigger);
+        const on = empowerMore(this.empower, target) > 0;
+        if (met && !on) {
+          this.empower = grantEmpower(this.empower, target, { more: effect.more });
+        } else if (!met && on && this.empower[target]?.hitsLeft === undefined && this.empower[target]?.secondsLeft === undefined) {
+          // 횟수·시간 제한이 없는 것만 끈다. 소모형으로 받은 강화는 조건과 무관하게 남는다.
+          const next = { ...this.empower };
+          delete next[target];
+          this.empower = next;
+        }
+      }
+    }
   }
 
   /** 스킬 하나를 전달 방식에 맞게 내보낸다. */
@@ -854,7 +938,11 @@ export class PlayScene extends Phaser.Scene {
     behaviors: readonly Behavior[] = [],
   ): void {
     const enemy = entity.state;
-    let damage = this.applyStatusDamageBonus(rawDamage, enemy, behaviors) * incomingDamageMultiplier(enemy);
+    // 콤보로 얻은 손 강화를 여기서 곱한다. 스킬 수치가 아니라 손에 걸린 상태라
+    // 수정자 파이프라인이 아니라 명중 시점에 적용한다.
+    const empowered = runtime ? 1 + empowerMore(this.empower, runtime.hand) : 1;
+    let damage =
+      this.applyStatusDamageBonus(rawDamage, enemy, behaviors) * incomingDamageMultiplier(enemy) * empowered;
 
     // 평범한 명중에도 반응이 있어야 한다. 지금까지는 체력바만 줄었다.
     hitSpark(this, enemy.x, enemy.y, weapon.color);
@@ -887,7 +975,7 @@ export class PlayScene extends Phaser.Scene {
     }
 
     // 각성 중에도 무기의 상태 정체성은 유지한다.
-    // 기본 공격만 콤보 게이지를 올리고, 콤보스킬 명중은 지속시간만 갱신한다.
+    // 기본 공격만 콤보 게이지를 올리고, 강화기술 명중은 지속시간만 갱신한다.
     if (weapon.id === 'arcane' && consumeBrand(enemy)) {
       this.arcaneFlowUntil = this.time.now + ARCANE_FLOW_DURATION * 1000;
       this.ruleEvents.brand++;
@@ -912,17 +1000,22 @@ export class PlayScene extends Phaser.Scene {
       floatingText(this, enemy.x, enemy.y - radius - 12, `상처 폭발 ${WOUND_BURST_DAMAGE}`, '#ff9b9b');
     }
 
-    if (basic) {
-      // `콤보 개방`을 붙이지 않은 무기는 게이지가 아예 돌지 않는다.
-      if (runtime && this.comboRuleFor(runtime)) {
-        const resolved = resolveFor(this.run.loadout, weapon.basic);
-        const rule = comboBehaviorOf(resolved.behaviors);
-        runtime.combo = gainCombo(runtime.combo, resolved.stats, rule?.required);
+    if (runtime) {
+      // 콤보를 읽는 연계를 붙인 무기만 콤보를 쌓는다. 안 붙였으면 아무 일도 없다.
+      // 콤보는 판 전체에 하나뿐이라, 어느 손으로 쌓았는지를 따로 들고 있는다.
+      if (this.usesCombo(runtime)) {
+        const stats = resolveFor(this.run.loadout, weapon.basic).stats;
+        this.combo = basic
+          ? gainCombo(this.combo, runtime.hand, stats)
+          : // 강화기술 명중은 수치를 올리지 않고 지속시간과 직전 손만 갱신한다.
+            // 직전 손을 갱신해야 강화기술이 나가는 동안에도 교차 판정이 이어진다.
+            sustainCombo(this.combo, runtime.hand, stats);
+        this.applyComboEffects(runtime);
       }
-    } else if (runtime) {
-      // 발동 스킬 명중은 게이지를 올리지 않고 지속시간만 갱신한다.
-      // 계속 맞혀야 발동 상태가 유지된다.
-      runtime.combo = sustainCombo(runtime.combo, resolveFor(this.run.loadout, weapon.basic).stats);
+      // 강화된 손으로 때렸으면 횟수를 하나 쓴다.
+      if (empowerMore(this.empower, runtime.hand) > 0) {
+        this.empower = spendEmpower(this.empower, runtime.hand);
+      }
     }
 
     this.damageEnemy(entity, damage);
@@ -1542,8 +1635,10 @@ export class PlayScene extends Phaser.Scene {
     const dt = delta / 1000;
 
     this.run = advanceTime(this.run, dt);
-    this.left.combo = tickCombo(this.left.combo, dt);
-    if (this.right) this.right.combo = tickCombo(this.right.combo, dt);
+    this.combo = tickCombo(this.combo, dt);
+    this.empower = tickEmpower(this.empower, dt);
+    // 콤보가 줄거나 풀리면 `합계 N 이상인 동안` 같은 지속 강화도 같이 꺼져야 한다.
+    this.refreshSustainedEmpower();
 
     this.movePlayer(dt);
     this.updateAim();
@@ -1587,9 +1682,17 @@ export class PlayScene extends Phaser.Scene {
           stunned: isStunned(e.state),
       })),
       combo: {
-        left: this.left.combo.value,
-        right: this.right?.combo.value ?? 0,
+        left: this.combo.left,
+        right: this.combo.right,
         required: COMBO_REQUIRED,
+      },
+      comboSkill: {
+        left: this.canUseComboSkill(this.left),
+        right: this.right ? this.canUseComboSkill(this.right) : false,
+      },
+      empower: {
+        left: empowerMore(this.empower, 'left'),
+        right: empowerMore(this.empower, 'right'),
       },
       exit: this.exitOpen ? { x: this.exit.x, y: this.exit.y } : null,
       drop: this.debugRewardDrop(),
@@ -1680,7 +1783,7 @@ export class PlayScene extends Phaser.Scene {
         ring.setVisible(false);
         continue;
       }
-      // 콤보스킬을 아직 못 얻은 무기는 게이지가 차도 발동하지 않는다.
+      // 강화기술을 아직 못 얻은 무기는 게이지가 차도 발동하지 않는다.
       // 링만 준비 완료로 돌면 배지의 `잠김`과 서로 다른 말을 하게 된다.
       const ready = this.canUseComboSkill(runtime);
       ring.setVisible(ready);
@@ -1998,8 +2101,8 @@ export class PlayScene extends Phaser.Scene {
       }
 
       // 지대형 발동 스킬도 지속피해가 들어가는 동안은 콤보를 유지시킨다.
-      if (damagedSomething && owner) {
-        owner.combo = sustainCombo(owner.combo, resolveFor(this.run.loadout, owner.weapon.basic).stats);
+      if (damagedSomething && owner && this.usesCombo(owner)) {
+        this.combo = sustainCombo(this.combo, owner.hand, resolveFor(this.run.loadout, owner.weapon.basic).stats);
       }
 
       view.setAlpha(0.15 + 0.35 * remainingRatio(state));
@@ -2243,7 +2346,7 @@ export class PlayScene extends Phaser.Scene {
    * 지금은 아직 쓸 수 없는 보상이라는 것을 알린다.
    *
    * 1번 방 보상은 무엇을 주든 2번 방에서 쓸 수 없다. 보조형스킬 장착도 R링 교체도
-   * 마을에서 열리는데 마을은 첫 보스 뒤에 나오기 때문이다. 전에는 콤보스킬만 예외라
+   * 마을에서 열리는데 마을은 첫 보스 뒤에 나오기 때문이다. 전에는 강화기술만 예외라
    * 주우면 바로 나갔는데, 콤보가 `콤보 개방`을 요구하게 되면서 그 예외가 사라졌다.
    *
    * 예치되는 것 자체는 이상하지 않다. 첫 마을이 게임이 열리는 순간이고 이 드랍은 거기서
@@ -2254,7 +2357,7 @@ export class PlayScene extends Phaser.Scene {
     const pending = (drop.reward.comboSkills ?? []).filter((id) => {
       const weapon = WEAPON_IDS.map(weaponOf).find((w) => w.combo.id === id);
       // 그 무기에 `콤보 개방`이 붙어 있으면 바로 쓸 수 있으므로 안내하지 않는다.
-      return weapon ? !comboBehaviorOf(resolveFor(this.run.loadout, weapon.basic).behaviors) : false;
+      return weapon ? comboRulesOf(resolveFor(this.run.loadout, weapon.basic).behaviors).length === 0 : false;
     });
     if (!pending.length) return;
 
@@ -2482,31 +2585,43 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private updateComboBadge(badge: ComboBadge, runtime: WeaponRuntime | null): void {
-    // 콤보를 쓰지 않는 무기는 배지 자체를 숨긴다. `콤보 개방`을 안 붙였으면
-    // 게이지가 돌지 않으므로 0으로 굳은 눈금을 보여줄 이유가 없다.
-    const rule = runtime ? this.comboRuleFor(runtime) : null;
-    const visible = runtime !== null && rule !== null;
+    // 콤보를 쓰지 않는 무기는 배지 자체를 숨긴다. 콤보를 읽는 연계를 안 붙였으면
+    // 수치가 돌지 않으므로 0으로 굳은 눈금을 보여줄 이유가 없다.
+    const visible = runtime !== null && this.usesCombo(runtime);
     for (const object of this.comboBadgeObjects(badge)) object.setVisible(visible);
-    if (!runtime || !rule) return;
+    if (!runtime || !visible) return;
 
+    const hand = runtime.hand;
+    const count = comboOf(this.combo, hand);
     const unlocked = hasComboSkill(this.run.progress, runtime.weapon.combo.id);
-    const ready = unlocked && isComboReady(runtime.combo, rule.required);
-    const color = ready ? COLORS.accent : runtime.weapon.color;
-    const hand = badge === this.comboBadges.left ? '왼손' : '오른손';
-    badge.back.setStrokeStyle(ready ? 2 : 1, color, ready ? 0.95 : 0.55);
-    badge.title.setText(`${hand} ${runtime.weapon.name}`);
-    badge.value.setText(unlocked ? ready ? 'MAX' : `${runtime.combo.value}` : '잠김');
-    badge.value.setColor(ready ? COLORS.accentText : '#ffffff');
+    const firing = this.canUseComboSkill(runtime);
+    const more = empowerMore(this.empower, hand);
+
+    // 지금 무슨 일이 일어나고 있는지를 한 단어로 알린다.
+    // 강화가 강화기술보다 앞이다. 배율이 붙은 순간이 더 짧고 놓치기 쉽다.
+    const [label, color] = more > 0
+      ? [`강화 +${Math.round(more * 100)}%`, COLORS.accent]
+      : firing
+        ? ['발동', COLORS.accent]
+        : unlocked
+          ? [`${count}`, runtime.weapon.color]
+          : ['잠김', runtime.weapon.color];
+    const lit = more > 0 || firing;
+
+    badge.back.setStrokeStyle(lit ? 2 : 1, color, lit ? 0.95 : 0.55);
+    badge.title.setText(`${hand === 'left' ? '왼손' : '오른손'} ${runtime.weapon.name}   합계 ${comboTotal(this.combo)}`);
+    badge.value.setText(label);
+    badge.value.setColor(lit ? COLORS.accentText : '#ffffff');
 
     for (const [index, pip] of badge.pips.entries()) {
-      const filled = unlocked && index < runtime.combo.value;
+      const filled = index < count;
       pip.setFillStyle(filled ? color : 0x2a2f42, filled ? 0.95 : 0.9);
     }
 
     const duration = resolveFor(this.run.loadout, runtime.weapon.basic).stats.comboDuration ?? 5;
-    const ratio = unlocked && runtime.combo.value > 0 ? Phaser.Math.Clamp(runtime.combo.remaining / duration, 0, 1) : 0;
+    const ratio = count > 0 ? Phaser.Math.Clamp(this.combo.remaining / duration, 0, 1) : 0;
     badge.timer.width = 224 * ratio;
-    badge.timer.setFillStyle(color, ready ? 0.9 : 0.65);
+    badge.timer.setFillStyle(color, lit ? 0.9 : 0.65);
   }
 
   private showTownDialogue(): void {
@@ -2795,10 +2910,10 @@ export class PlayScene extends Phaser.Scene {
     const right = rightWeapon(this.run.loadout);
 
     if (this.left.weapon.id !== left.id) {
-      this.left = { weapon: left, combo: createCombo(), readyAt: 0 };
+      this.left = { weapon: left, hand: 'left', readyAt: 0 };
     }
     if (this.right?.weapon.id !== right?.id) {
-      this.right = right ? { weapon: right, combo: createCombo(), readyAt: 0 } : null;
+      this.right = right ? { weapon: right, hand: 'right', readyAt: 0 } : null;
     }
 
     tintView(this.comboRings.left, left.color);
@@ -2885,8 +3000,8 @@ export class PlayScene extends Phaser.Scene {
     container.add(this.add.text(startX, startY - 42, '실체화 장비 설정', { fontSize: '21px', color: COLORS.text, fontStyle: 'bold' }));
     container.add(this.add.text(column.weapon, startY - 14, '무기', { fontSize: '13px', color: COLORS.textDim }));
     container.add(this.add.text(column.combo, startY - 14, '강화기술', { fontSize: '13px', color: COLORS.textDim }));
-    container.add(this.add.text(column.primary, startY - 14, '보조1형: 성능 보강', { fontSize: '13px', color: COLORS.textDim }));
-    container.add(this.add.text(column.synergy, startY - 14, '보조2형: 조건/시너지', { fontSize: '13px', color: COLORS.textDim }));
+    container.add(this.add.text(column.primary, startY - 14, '보조', { fontSize: '13px', color: COLORS.textDim }));
+    container.add(this.add.text(column.synergy, startY - 14, '연계', { fontSize: '13px', color: COLORS.textDim }));
 
     for (const [index, weaponId] of this.run.progress.unlockedWeapons.entries()) {
       const weapon = weaponOf(weaponId);
@@ -2910,7 +3025,7 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private supportSlotLabel(skill: Skill, current: Support | undefined, candidates: readonly Support[]): string {
-    // 보유한 보조형스킬이 하나도 없으면 슬롯 8칸이 전부 `비어 있음`으로만 남는다.
+    // 이 칸에 넣을 수 있는 후보가 하나도 없으면 `비어 있음`만 남는다.
     // 왜 비었는지 말해주지 않으면 기능이 고장 난 것처럼 읽힌다.
     if (candidates.length === 0) return '아직 없음\n보스 드랍으로 얻는다';
 

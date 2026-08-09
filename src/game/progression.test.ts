@@ -27,7 +27,7 @@ describe('createInitialProgress', () => {
     expect(progress.wheel.right).toEqual([null, null]);
   });
 
-  it('무기별 기본 콤보스킬 설정을 갖는다', () => {
+  it('무기별 기본 강화기술 설정을 갖는다', () => {
     const progress = createInitialProgress();
 
     expect(progress.configs.sword).toEqual({
@@ -108,7 +108,7 @@ describe('weapon wheel', () => {
 });
 
 describe('manifestation config', () => {
-  it('해금된 무기의 콤보스킬과 보조형스킬 슬롯을 바꾼다', () => {
+  it('해금된 무기의 강화기술과 보조형스킬 슬롯을 바꾼다', () => {
     const progress = unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['multiple-projectiles', 'wound-seeker']);
     const configured = configureManifestation(progress, 'bow', {
       primarySupportId: 'multiple-projectiles',
@@ -162,7 +162,7 @@ describe('manifestation config', () => {
     expect(configuredSupports(configured, 'bow')).toEqual([]);
   });
 
-  it('미보유 콤보스킬은 설정하지 않는다', () => {
+  it('미보유 강화기술은 설정하지 않는다', () => {
     const progress = createInitialProgress();
     const configured = configureManifestation(progress, 'sword', { comboSkillId: 'volley' });
 

@@ -6,7 +6,7 @@ import { findSupport } from '@/data/supports';
 import type { Skill } from '@/engine/support';
 
 /**
- * 콤보스킬 대체 발동 계측기.
+ * 강화기술 대체 발동 계측기.
  *
  * 브라우저 없이 데이터와 엔진 규칙만으로 초당 피해를 계산한다. 헤드리스 플레이는
  * 느리고 잘 깨져서 밸런스 판단에 쓸 수 없었다. 여기서 나오는 값은 "적이 계속 맞고
@@ -51,7 +51,7 @@ const table = WEAPON_LIST.map((weapon) => ({
   ratio: awakenedDps(weapon) / basicDps(weapon),
 }));
 
-describe('콤보스킬 대체 발동 — 초당 피해', () => {
+describe('강화기술 대체 발동 — 초당 피해', () => {
   it('표를 남긴다', () => {
     const lines = table.map(
       (r) => `  ${r.name.padEnd(3)} ${r.kind.padEnd(10)} 기본 ${String(r.basic).padStart(4)} → 각성 ${String(r.awakened).padStart(4)}  (${r.ratio.toFixed(2)}배)`,

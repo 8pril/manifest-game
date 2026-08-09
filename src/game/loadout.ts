@@ -56,14 +56,13 @@ export function supportsFromProgress(progress: PlayerProgress): Readonly<Record<
     const usesCombo = configured.some((s) => s.behaviors?.some((b) => b.kind === 'combo'));
 
     for (const support of configured) {
-      // **보조2형은 기본 공격에 먼저 붙인다.** 조건과 시너지를 다루는 쪽이라
+      // **연계는 기본 공격에 먼저 붙인다.** 조건과 시너지를 다루는 쪽이라
       // 평소 쓰는 공격에 걸려야 의미가 있고, `콤보 개방`은 기본 공격에 붙어야
       // 기본 → 강화기술 전환을 열 수 있다. 태그가 안 맞으면 강화기술로 넘긴다
       // (예: `상처 공명`은 `지대`를 요구하는데 기본 공격에는 지대가 없다).
       //
-      // **보조1형은 강화기술을 쓸 때만 강화기술에 붙인다.** 콤보를 안 쓰는 빌드에서
-      // 강화기술에 붙이면 발동할 일이 없어 칸이 통째로 죽는다. 그때는 기본 공격을
-      // 강화한다.
+      // **보조는 실제로 발동하는 공격에 붙인다.** 콤보를 쓰는 빌드면 강화기술,
+      // 아니면 기본 공격이다. 발동하지도 않을 스킬에 붙이면 칸이 통째로 죽는다.
       const order =
         supportSlotType(support) === 'synergy'
           ? [weapon.basic, weapon.combo]

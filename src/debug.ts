@@ -34,6 +34,15 @@ export interface DebugState {
   player: { x: number; y: number };
   enemies: DebugEnemy[];
   combo: { left: number; right: number; required: number };
+  /**
+   * 지금 각 손이 강화기술로 나가는지, 그리고 콤보로 얻은 강화 배율.
+   *
+   * 콤보 조건이 연계마다 달라지면서, 밖에서 보이는 것(처치 수, 체력)만으로는
+   * 조건이 성립했는지 알 수 없게 됐다. 실제로 교차 명중과 연타를 비교했을 때
+   * 처치 수가 비슷하게 나와 판별이 되지 않았다.
+   */
+  comboSkill: { left: boolean; right: boolean };
+  empower: { left: number; right: number };
   /** 출구가 열렸으면 그 위치. 닫혀 있으면 null. */
   exit: { x: number; y: number } | null;
   /** 바닥에 놓인 미획득 보상 드랍의 위치. 없으면 null. */

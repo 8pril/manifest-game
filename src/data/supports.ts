@@ -208,15 +208,16 @@ const MODIFIER_SUPPORTS: Support[] = [
 ];
 
 const SYNERGY_SUPPORTS: Support[] = [
-  /**
-   * 콤보를 기본 규칙에서 빼고 선택형으로 돌린 결과물.
-   *
-   * 이걸 장착한 무기만 5타를 쌓아 강화기술로 전환된다. 장착하지 않으면
-   * 그 무기는 기본 공격만 쓴다. 멸검·연사·비전단검·균열 파동은 이제
-   * **모두가 거쳐야 하는 관문이 아니라 이 보조를 고른 사람이 보는 기술이다.**
-   *
-   * `requires: ['공격']`이라 무기 종류를 가리지 않고 기본 공격에 붙는다.
-   */
+  // ─────────────────────────────────────────────
+  // 콤보 계열 (3종)
+  //
+  // 콤보를 모든 무기의 기본 규칙에서 빼고 여기로 옮겼다. **조건과 효과가 항목마다
+  // 다르다.** 하나는 손을 번갈아 쳤는지를 보고, 하나는 양손 합계를 보고, 하나는
+  // 쌓인 콤보를 소모해 반대손을 강화한다.
+  //
+  // 셋 다 `requires: ['공격']`이라 무기를 가리지 않고 기본 공격에 붙는다.
+  // 연계 칸은 무기당 하나뿐이므로 이 셋과 상처·균열 계열 중 하나만 고른다.
+  // ─────────────────────────────────────────────
   {
     id: 'combo-imprint',
     name: '콤보 개방',
@@ -224,8 +225,46 @@ const SYNERGY_SUPPORTS: Support[] = [
     tags: ['공격', '시너지'],
     requires: ['공격'],
     modifiers: [],
-    behaviors: [{ kind: 'combo', required: 5, duration: 5 }],
-    description: '기본 공격 5회 명중 시 강화기술로 전환. 5초 안에 못 맞히면 풀린다',
+    // 세지 않는다. 직전 명중이 반대손이기만 하면 성립한다.
+    // 양손을 번갈아 치는 리듬 자체가 곧 콤보다.
+    behaviors: [{ kind: 'combo', trigger: { reads: 'alternate' }, effect: { kind: 'comboSkill' } }],
+    description: '직전에 반대손으로 명중했다면 이 무기가 강화기술로 나간다',
+  },
+  {
+    id: 'linked-momentum',
+    name: '연결 가속',
+    slotType: 'synergy',
+    tags: ['공격', '시너지'],
+    requires: ['공격'],
+    modifiers: [],
+    // 합계를 보므로 어느 손으로 쌓았든 상관없다. 양손을 고루 쓰면 빨리 찬다.
+    // 소모하지 않아 콤보가 유지되는 동안 계속 켜져 있다.
+    behaviors: [
+      {
+        kind: 'combo',
+        trigger: { reads: 'total', required: 6 },
+        effect: { kind: 'empower', hand: 'self', more: 0.3 },
+      },
+    ],
+    description: '양손 콤보 합계 6 이상인 동안 이 무기의 피해 30% 증폭',
+  },
+  {
+    id: 'combo-release',
+    name: '연계 방출',
+    slotType: 'synergy',
+    tags: ['공격', '시너지'],
+    requires: ['공격'],
+    modifiers: [],
+    // 조건을 채운 순간 콤보를 전부 털고 반대손을 강화한다. 쌓는 손과 쓰는 손이
+    // 갈려서, 한 손으로 모으고 다른 손으로 터뜨리는 리듬이 된다.
+    behaviors: [
+      {
+        kind: 'combo',
+        trigger: { reads: 'self', required: 5 },
+        effect: { kind: 'empower', hand: 'other', more: 0.8, hits: 3, seconds: 6, consumes: 'total' },
+      },
+    ],
+    description: '이 무기 콤보 5에서 전체 콤보를 소모하고 반대손 피해 80% 증폭 (3회 또는 6초)',
   },
   {
     id: 'wound-seeker',

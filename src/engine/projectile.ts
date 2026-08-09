@@ -94,7 +94,7 @@ export function spawnProjectiles(
  * 투사체 수가 늘어날수록 발당 피해를 낮춘다.
  *
  * 몸집이 큰 보스에게 여러 발이 동시에 맞으면 투사체 수만큼 피해가 정직하게 곱해진다.
- * 그래도 콤보스킬/보조형스킬을 장착한 보상은 남아야 하므로, 총합 피해는 1발보다 크되
+ * 그래도 강화기술/보조형스킬을 장착한 보상은 남아야 하므로, 총합 피해는 1발보다 크되
  * 선형 증가보다는 낮게 둔다. 총합 배율은 count^0.6이다.
  */
 export function projectileDamageMultiplier(count: number): number {

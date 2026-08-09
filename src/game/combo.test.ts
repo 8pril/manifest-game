@@ -1,124 +1,182 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   createCombo,
   gainCombo,
-  tickCombo,
-  isComboReady,
   sustainCombo,
-  breakCombo,
-  COMBO_REQUIRED,
-  COMBO_BASE_DURATION,
-} from '@/game/combo';
+  tickCombo,
+  consumeCombo,
+  comboTriggerMet,
+  comboRulesOf,
+  comboTotal,
+  comboOf,
+  otherHand,
+  COMBO_MAX,
+} from './combo';
+import type { StatBlock } from '@/engine/modifiers';
 
-const base = { comboGain: 1, comboDuration: COMBO_BASE_DURATION };
+const stats: StatBlock = {};
 
-describe('gainCombo', () => {
-  it('명중할 때마다 1씩 오른다', () => {
+describe('콤보 적립', () => {
+  it('명중한 손의 수치만 오른다', () => {
+    const combo = gainCombo(createCombo(), 'left', stats);
+
+    expect(combo.left).toBe(1);
+    expect(combo.right).toBe(0);
+    expect(combo.lastHand).toBe('left');
+  });
+
+  it('양손을 번갈아 쳐도 합계로 쌓인다', () => {
+    // 예전에는 손마다 게이지가 따로라 번갈아 쓰면 어느 쪽도 차지 않았다.
+    // 양손 조합이 이 게임의 핵심인데 기계가 한 손 연타를 보상하던 문제다.
     let combo = createCombo();
-    combo = gainCombo(combo, base);
-    expect(combo.value).toBe(1);
-    combo = gainCombo(combo, base);
-    expect(combo.value).toBe(2);
-  });
-
-  it('목표치를 넘어가지 않는다', () => {
-    let combo = createCombo();
-    for (let i = 0; i < COMBO_REQUIRED + 5; i++) combo = gainCombo(combo, base);
-    expect(combo.value).toBe(COMBO_REQUIRED);
-  });
-
-  it('명중할 때마다 유지 시간이 갱신된다', () => {
-    let combo = gainCombo(createCombo(), base);
-    combo = tickCombo(combo, 2);
-    expect(combo.remaining).toBeCloseTo(COMBO_BASE_DURATION - 2, 10);
-
-    combo = gainCombo(combo, base);
-    expect(combo.remaining).toBe(COMBO_BASE_DURATION);
-  });
-
-  it("'과감한 결단'의 comboGain 증폭이 반영된다", () => {
-    // comboGain 1 × (1 + 0.5) = 1.5 -> 반올림 2
-    const boosted = { comboGain: 1.5, comboDuration: COMBO_BASE_DURATION };
-    expect(gainCombo(createCombo(), boosted).value).toBe(2);
-  });
-
-  it("'과감한 결단'의 comboDuration 증폭이 반영된다", () => {
-    const boosted = { comboGain: 1, comboDuration: COMBO_BASE_DURATION * 2 };
-    expect(gainCombo(createCombo(), boosted).remaining).toBe(COMBO_BASE_DURATION * 2);
-  });
-});
-
-describe('tickCombo', () => {
-  it('유지 시간이 다하면 초기화된다', () => {
-    let combo = gainCombo(createCombo(), base);
-    combo = tickCombo(combo, COMBO_BASE_DURATION + 0.1);
-    expect(combo.value).toBe(0);
-  });
-
-  it('콤보가 0이면 아무 일도 하지 않는다', () => {
-    const empty = createCombo();
-    expect(tickCombo(empty, 10)).toBe(empty);
-  });
-});
-
-describe('isComboReady', () => {
-  it('목표치에 도달해야 발동할 수 있다', () => {
-    let combo = createCombo();
-    for (let i = 0; i < COMBO_REQUIRED - 1; i++) combo = gainCombo(combo, base);
-    expect(isComboReady(combo)).toBe(false);
-
-    combo = gainCombo(combo, base);
-    expect(isComboReady(combo)).toBe(true);
-  });
-});
-
-describe('발동 상태 유지 - 원안: n콤보 이상 시 전환, 콤보는 지속시간 n초', () => {
-  const filled = () => {
-    let combo = createCombo();
-    for (let i = 0; i < COMBO_REQUIRED; i++) combo = gainCombo(combo, base);
-    return combo;
-  };
-
-  it('발동 스킬을 써도 콤보가 소모되지 않는다', () => {
-    // 한 번 쓰고 끝나면 '이상 시'와 '지속시간'이 무의미해진다.
-    const combo = filled();
-    expect(isComboReady(combo)).toBe(true);
-    // 발동 스킬 사용은 상태를 바꾸지 않는다
-    expect(isComboReady(combo)).toBe(true);
-  });
-
-  it('발동 스킬이 명중하면 지속시간만 갱신된다', () => {
-    let combo = filled();
-    combo = tickCombo(combo, 2);
-    expect(combo.remaining).toBeCloseTo(COMBO_BASE_DURATION - 2, 10);
-
-    combo = sustainCombo(combo, base);
-    expect(combo.remaining).toBe(COMBO_BASE_DURATION);
-    expect(combo.value).toBe(COMBO_REQUIRED);
-  });
-
-  it('맞히지 못하면 지속시간이 다해 끊긴다', () => {
-    let combo = filled();
-    combo = tickCombo(combo, COMBO_BASE_DURATION + 0.1);
-    expect(isComboReady(combo)).toBe(false);
-    expect(combo.value).toBe(0);
-  });
-
-  it('계속 맞히면 발동 상태가 유지된다', () => {
-    let combo = filled();
-    for (let i = 0; i < 20; i++) {
-      combo = tickCombo(combo, COMBO_BASE_DURATION * 0.6);
-      combo = sustainCombo(combo, base);
+    for (const hand of ['left', 'right', 'left', 'right'] as const) {
+      combo = gainCombo(combo, hand, stats);
     }
-    expect(isComboReady(combo)).toBe(true);
+
+    expect(comboTotal(combo)).toBe(4);
+    expect(combo.left).toBe(2);
+    expect(combo.right).toBe(2);
   });
 
-  it('콤보가 없으면 유지 대상이 아니다', () => {
-    const empty = createCombo();
-    expect(sustainCombo(empty, base)).toBe(empty);
+  it('상한을 넘지 않는다', () => {
+    let combo = createCombo();
+    for (let i = 0; i < COMBO_MAX + 5; i++) combo = gainCombo(combo, 'left', stats);
+
+    expect(combo.left).toBe(COMBO_MAX);
   });
 
-  it('breakCombo는 명시적으로 끊는다', () => {
-    expect(isComboReady(breakCombo())).toBe(false);
+  it('보조능력의 콤보 획득량 수정자를 반영한다', () => {
+    const combo = gainCombo(createCombo(), 'left', { comboGain: 2 });
+
+    expect(combo.left).toBe(2);
+  });
+
+  it('강화기술 명중은 수치를 올리지 않고 직전 손만 갱신한다', () => {
+    // 직전 손을 갱신해야 강화기술이 나가는 동안에도 교차 판정이 이어진다.
+    let combo = gainCombo(createCombo(), 'left', stats);
+    combo = sustainCombo(combo, 'right', stats);
+
+    expect(combo.left).toBe(1);
+    expect(combo.right).toBe(0);
+    expect(combo.lastHand).toBe('right');
+  });
+});
+
+describe('콤보 만료', () => {
+  it('지속시간이 다하면 전부 풀린다', () => {
+    let combo = gainCombo(gainCombo(createCombo(), 'left', stats), 'right', stats);
+    combo = tickCombo(combo, 5.1);
+
+    expect(comboTotal(combo)).toBe(0);
+    expect(combo.lastHand).toBeNull();
+  });
+
+  it('명중이 이어지면 시간이 다시 찬다', () => {
+    let combo = gainCombo(createCombo(), 'left', stats);
+    combo = tickCombo(combo, 4);
+    combo = gainCombo(combo, 'right', stats);
+
+    expect(combo.remaining).toBe(5);
+    expect(comboTotal(combo)).toBe(2);
+  });
+});
+
+describe('콤보 소모', () => {
+  it('전체를 소모하면 양손이 비고 직전 손은 남는다', () => {
+    // 직전 손이 남아야 소모 직후에도 교차 리듬이 끊기지 않는다.
+    let combo = gainCombo(gainCombo(createCombo(), 'left', stats), 'left', stats);
+    combo = gainCombo(combo, 'right', stats);
+    combo = consumeCombo(combo, 'total');
+
+    expect(comboTotal(combo)).toBe(0);
+    expect(combo.lastHand).toBe('right');
+  });
+
+  it('한 손만 소모하면 반대손은 남는다', () => {
+    let combo = gainCombo(gainCombo(createCombo(), 'left', stats), 'right', stats);
+    combo = consumeCombo(combo, 'left');
+
+    expect(combo.left).toBe(0);
+    expect(combo.right).toBe(1);
+  });
+});
+
+describe('콤보 조건 판정', () => {
+  it('교차 — 직전 명중이 반대손이면 성립한다', () => {
+    const combo = gainCombo(createCombo(), 'right', stats);
+
+    expect(comboTriggerMet(combo, 'left', { reads: 'alternate' })).toBe(true);
+    expect(comboTriggerMet(combo, 'right', { reads: 'alternate' })).toBe(false);
+  });
+
+  it('교차 — 같은 손을 연달아 치면 끊긴다', () => {
+    let combo = gainCombo(createCombo(), 'right', stats);
+    expect(comboTriggerMet(combo, 'left', { reads: 'alternate' })).toBe(true);
+
+    combo = gainCombo(combo, 'left', stats);
+    expect(comboTriggerMet(combo, 'left', { reads: 'alternate' })).toBe(false);
+  });
+
+  it('교차 — 아직 아무것도 안 맞혔으면 성립하지 않는다', () => {
+    expect(comboTriggerMet(createCombo(), 'left', { reads: 'alternate' })).toBe(false);
+  });
+
+  it('자기 손 수치를 본다', () => {
+    let combo = createCombo();
+    for (let i = 0; i < 5; i++) combo = gainCombo(combo, 'left', stats);
+
+    expect(comboTriggerMet(combo, 'left', { reads: 'self', required: 5 })).toBe(true);
+    expect(comboTriggerMet(combo, 'right', { reads: 'self', required: 5 })).toBe(false);
+  });
+
+  it('반대손 수치를 본다', () => {
+    let combo = createCombo();
+    for (let i = 0; i < 5; i++) combo = gainCombo(combo, 'left', stats);
+
+    expect(comboTriggerMet(combo, 'right', { reads: 'other', required: 5 })).toBe(true);
+    expect(comboTriggerMet(combo, 'left', { reads: 'other', required: 5 })).toBe(false);
+  });
+
+  it('합계를 보면 어느 손으로 쌓았든 상관없다', () => {
+    let combo = createCombo();
+    for (const hand of ['left', 'right', 'left', 'right', 'left', 'right'] as const) {
+      combo = gainCombo(combo, hand, stats);
+    }
+
+    expect(comboTriggerMet(combo, 'left', { reads: 'total', required: 6 })).toBe(true);
+    expect(comboTriggerMet(combo, 'right', { reads: 'total', required: 6 })).toBe(true);
+    expect(comboTriggerMet(combo, 'left', { reads: 'total', required: 7 })).toBe(false);
+  });
+});
+
+describe('보조능력에서 콤보 규칙 읽기', () => {
+  it('콤보 거동만 골라낸다', () => {
+    const rules = comboRulesOf([
+      { kind: 'pierce', count: 2 },
+      { kind: 'combo', trigger: { reads: 'alternate' }, effect: { kind: 'comboSkill' } },
+    ]);
+
+    expect(rules).toHaveLength(1);
+    expect(rules[0].trigger).toEqual({ reads: 'alternate' });
+  });
+
+  it('콤보 거동이 없으면 비어 있다', () => {
+    // 이게 곧 "이 무기는 콤보를 쓰지 않는다"는 뜻이다.
+    expect(comboRulesOf([{ kind: 'pierce', count: 2 }])).toEqual([]);
+    expect(comboRulesOf(undefined)).toEqual([]);
+  });
+});
+
+describe('보조', () => {
+  it('otherHand는 반대손을 준다', () => {
+    expect(otherHand('left')).toBe('right');
+    expect(otherHand('right')).toBe('left');
+  });
+
+  it('comboOf는 손별 수치를 준다', () => {
+    const combo = gainCombo(createCombo(), 'right', stats);
+
+    expect(comboOf(combo, 'right')).toBe(1);
+    expect(comboOf(combo, 'left')).toBe(0);
   });
 });

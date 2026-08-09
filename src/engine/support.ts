@@ -31,16 +31,51 @@ export type Behavior =
   /** 보스에게도 넉백, 기절, 이동 방해 같은 CC를 적용할 수 있게 한다. */
   | { kind: 'bossCc' }
   /**
-   * 콤보 전환을 연다.
+   * 콤보 규칙.
    *
-   * 이 거동이 붙은 기본 공격만 콤보 게이지를 쌓고, 목표치에 도달하면 그 무기의
-   * 강화기술로 전환된다. **붙지 않은 무기는 콤보가 아예 없다.**
+   * **조건과 효과를 연계가 각자 들고 있다.** 콤보를 모든 무기의 기본 규칙에서
+   * 빼고 연계으로 옮긴 결과다. 어떤 것은 손을 번갈아 쳤는지를 보고, 어떤 것은
+   * 양손 합계를 보고, 어떤 것은 쌓인 콤보를 소모해 반대손을 강화한다.
    *
-   * 콤보를 모든 무기의 기본 규칙에서 빼고 선택형으로 돌린 결과다.
-   * 이전에는 게이지가 항상 돌아가서 "강한 기술을 쓰려면 먼저 5대를 채워야 하는"
-   * 통행세였고, 고를 여지가 없었다.
+   * 새 콤보 규칙을 만드는 일이 코드가 아니라 데이터 한 줄이 되도록 이 모양으로 뒀다.
    */
-  | { kind: 'combo'; required: number; duration: number };
+  | { kind: 'combo'; trigger: ComboTrigger; effect: ComboEffect };
+
+/**
+ * 콤보 조건. 무엇을 보고 성립을 판정하는가.
+ *
+ * `self`와 `other`는 이 보조가 붙어 있는 무기를 기준으로 갈린다.
+ */
+export type ComboTrigger =
+  /** 직전 명중이 반대손이면 성립. 세지 않고 직전 한 번만 본다. */
+  | { reads: 'alternate' }
+  /** 이 무기 자신의 콤보가 기준 이상. */
+  | { reads: 'self'; required: number }
+  /** 반대손의 콤보가 기준 이상. */
+  | { reads: 'other'; required: number }
+  /** 양손 합계가 기준 이상. */
+  | { reads: 'total'; required: number };
+
+/** 콤보 조건이 성립했을 때 일어나는 일. */
+export type ComboEffect =
+  /** 이 무기의 공격이 강화기술로 나간다. */
+  | { kind: 'comboSkill' }
+  /**
+   * 콤보를 소모하고 지정한 손을 한동안 강화한다.
+   *
+   * `hits`와 `seconds`는 둘 다 상한이며, 먼저 닿는 쪽에서 끝난다.
+   * 둘 중 하나만 적어도 된다.
+   */
+  | {
+      kind: 'empower';
+      hand: 'self' | 'other';
+      /** 피해 증폭 배율. 0.5면 50% 증폭. */
+      more: number;
+      hits?: number;
+      seconds?: number;
+      /** 발동하며 소모할 범위. 생략하면 소모하지 않는다. */
+      consumes?: 'total' | 'self' | 'other';
+    };
 
 export type AreaKind = 'plain' | 'ignite' | 'shock' | 'chill' | 'freeze' | 'wither';
 

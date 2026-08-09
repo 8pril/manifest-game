@@ -28,7 +28,7 @@ describe('방 보상', () => {
         expect(findSupport(id), `보조형 ${id}`).toBeTruthy();
       }
       for (const id of reward.comboSkills ?? []) {
-        expect(findSkill(id), `콤보스킬 ${id}`).toBeTruthy();
+        expect(findSkill(id), `강화기술 ${id}`).toBeTruthy();
       }
     });
   }
