@@ -13,6 +13,11 @@ import {
   PLAYER_MAX_HP,
   SHIELD_ENERGY_MAX,
   INVULNERABLE_SECONDS,
+  POTION_MAX_CHARGE,
+  POTION_USE_COST,
+  POTION_KILL_CHARGE,
+  POTION_BOSS_KILL_CHARGE,
+  usePotion,
 } from '@/game/run';
 import { TOTAL_ROOMS } from '@/game/rooms';
 import { totalSupports, supportsFor } from '@/game/loadout';
@@ -62,6 +67,10 @@ describe('createRun', () => {
 
   it('방패 보호막은 최대치로 시작한다', () => {
     expect(createRun('shield', null).shieldEnergy).toBe(SHIELD_ENERGY_MAX);
+  });
+
+  it('충전형 물약은 최대 충전으로 시작한다', () => {
+    expect(newRun().potionCharge).toBe(POTION_MAX_CHARGE);
   });
 });
 
@@ -246,6 +255,7 @@ describe('retryCurrentRoom', () => {
     let run = { ...createRun('sword', null), roomIndex: 4 };
     run = collectRoomReward(run, { keys: ['key-upper'] });
     run = addKill(run);
+    run = { ...run, potionCharge: 0 };
     run = damagePlayer(run, PLAYER_MAX_HP);
 
     const retried = retryCurrentRoom(run);
@@ -254,6 +264,7 @@ describe('retryCurrentRoom', () => {
     expect(retried.roomIndex).toBe(4);
     expect(retried.hp).toBe(PLAYER_MAX_HP);
     expect(retried.shieldEnergy).toBe(SHIELD_ENERGY_MAX);
+    expect(retried.potionCharge).toBe(POTION_MAX_CHARGE);
     expect(retried.progress.ownedKeys).toEqual([]);
     expect(retried.kills).toBe(0);
     expect(retried.gained).toBeUndefined();
@@ -288,11 +299,51 @@ describe('addKill / isOver', () => {
     expect(addKill(addKill(newRun())).kills).toBe(2);
   });
 
+  it('일반 몬스터 처치 시 물약 충전 5를 얻는다', () => {
+    const run = addKill({ ...newRun(), potionCharge: 10 });
+
+    expect(run.potionCharge).toBe(10 + POTION_KILL_CHARGE);
+  });
+
+  it('보스 처치 시 물약 충전 20을 얻는다', () => {
+    const run = addKill({ ...newRun(), potionCharge: 10 }, true);
+
+    expect(run.potionCharge).toBe(10 + POTION_BOSS_KILL_CHARGE);
+  });
+
+  it('물약 충전은 최대치를 넘지 않는다', () => {
+    expect(addKill(newRun(), true).potionCharge).toBe(POTION_MAX_CHARGE);
+  });
+
   it('승리와 패배만 종료 상태다', () => {
     expect(isOver(newRun())).toBe(false);
     expect(isOver(clearRoom(newRun()))).toBe(false);
     expect(isOver(damagePlayer(newRun(), PLAYER_MAX_HP))).toBe(true);
     expect(isOver(clearRoom(advanceWaves(TOTAL_ROOMS - 1)))).toBe(true);
+  });
+});
+
+describe('usePotion', () => {
+  it('충전 15를 소모해 체력 30%를 회복한다', () => {
+    const damaged = { ...newRun(), hp: 40, potionCharge: POTION_MAX_CHARGE };
+    const healed = usePotion(damaged);
+
+    expect(healed.hp).toBe(70);
+    expect(healed.potionCharge).toBe(POTION_MAX_CHARGE - POTION_USE_COST);
+  });
+
+  it('최대 체력을 넘겨 회복하지 않는다', () => {
+    const healed = usePotion({ ...newRun(), hp: 90, potionCharge: POTION_MAX_CHARGE });
+
+    expect(healed.hp).toBe(PLAYER_MAX_HP);
+  });
+
+  it('체력이 가득 차 있거나 충전이 부족하면 쓰지 않는다', () => {
+    const full = newRun();
+    const empty = { ...newRun(), hp: 40, potionCharge: POTION_USE_COST - 1 };
+
+    expect(usePotion(full)).toBe(full);
+    expect(usePotion(empty)).toBe(empty);
   });
 });
 

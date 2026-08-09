@@ -106,6 +106,7 @@ import {
   leaveTown,
   retryCurrentRoom,
   damagePlayer as applyPlayerDamage,
+  usePotion,
   addKill,
   advanceTime,
   hasActiveShield,
@@ -113,6 +114,8 @@ import {
   isOver,
   newPartsOfReward,
   SHIELD_ENERGY_MAX,
+  POTION_MAX_CHARGE,
+  POTION_USE_COST,
   type RunState,
 } from '@/game/run';
 import {
@@ -453,6 +456,10 @@ export class PlayScene extends Phaser.Scene {
   private hpBarFill!: Phaser.GameObjects.Rectangle;
   private shieldBarBack!: Phaser.GameObjects.Rectangle;
   private shieldBarFill!: Phaser.GameObjects.Rectangle;
+  private potionBottleBack!: Phaser.GameObjects.Rectangle;
+  private potionBottleFill!: Phaser.GameObjects.Rectangle;
+  private potionBottleNeck!: Phaser.GameObjects.Rectangle;
+  private potionText!: Phaser.GameObjects.Text;
   private comboBadges!: { left: ComboBadge; right: ComboBadge };
   /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
   /**
@@ -762,6 +769,10 @@ export class PlayScene extends Phaser.Scene {
       }
       this.openTownPortal();
     });
+    keyboard.on('keydown-Q', () => {
+      if (isOver(this.run) || this.weaponWheel || this.paused || this.overlay) return;
+      this.tryUsePotion();
+    });
     keyboard.on('keydown-F', () => {
       if (this.overlayKind === 'town-dialogue') {
         this.showTown();
@@ -791,7 +802,10 @@ export class PlayScene extends Phaser.Scene {
       this.showPause();
     };
     keyboard.on('keydown-P', togglePause);
-    keyboard.on('keydown-ESC', togglePause);
+    keyboard.on('keydown-ESC', () => {
+      if (this.closeTopOverlayByEscape()) return;
+      togglePause();
+    });
 
     this.input.mouse?.disableContextMenu();
     this.setupTownDragAndDrop();
@@ -2441,6 +2455,26 @@ export class PlayScene extends Phaser.Scene {
     floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, '구역 시작점에서 재도전', COLORS.accentText, { duration: 1300 });
   }
 
+  private tryUsePotion(): void {
+    const before = this.run;
+    const after = usePotion(before);
+    if (after === before) {
+      const message = before.hp >= before.maxHp
+        ? '이미 체력이 가득 차 있다'
+        : `물약 충전 부족 ${Math.floor(before.potionCharge)} / ${POTION_USE_COST}`;
+      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, message, COLORS.textDim, { duration: 900 });
+      return;
+    }
+
+    this.run = after;
+    playSfx('reward');
+    ring(this, this.player.x, this.player.y, 0xff5f6d, { from: PLAYER_RADIUS, to: PLAYER_RADIUS + 44, duration: 360, width: 4 });
+    flash(this, this.player.x, this.player.y, PLAYER_RADIUS * 2.4, 0xff5f6d);
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, '물약 사용', '#ffb4a2', { duration: 900 });
+    this.refreshHud();
+    if (DEBUG_ENABLED) this.publishDebug();
+  }
+
   private guardedPlayerDamage(amount: number): number {
     if (!this.shieldProtectionActive()) return amount;
     return amount * SHIELD_GUARD_DAMAGE_TAKEN;
@@ -2580,7 +2614,7 @@ export class PlayScene extends Phaser.Scene {
       entity.view.destroy();
       entity.hpBar.destroy();
       for (const dot of entity.statusDots) dot.destroy();
-      this.run = addKill(this.run);
+      this.run = addKill(this.run, isBossKind(enemy.kind));
       this.refreshHud();
     }
   }
@@ -2929,6 +2963,22 @@ export class PlayScene extends Phaser.Scene {
     this.hud = this.add
       .text(screenX(24), screenY(58), '', { fontSize: '14px', color: COLORS.text, lineSpacing: 3 })
       .setDepth(20);
+    this.potionBottleBack = this.add
+      .rectangle(screenX(36), screenY(152), 24, 34, 0x10141f, 0.82)
+      .setStrokeStyle(2, 0x4a2230, 0.95)
+      .setDepth(19);
+    this.potionBottleFill = this.add
+      .rectangle(screenX(36), screenY(166), 18, 28, 0xff4054, 0.86)
+      .setOrigin(0.5, 1)
+      .setDepth(20);
+    this.potionBottleNeck = this.add
+      .rectangle(screenX(36), screenY(132), 12, 10, 0x10141f, 0.86)
+      .setStrokeStyle(2, 0x4a2230, 0.95)
+      .setDepth(19);
+    this.potionText = this.add
+      .text(screenX(58), screenY(148), '', { fontSize: '13px', color: COLORS.textDim, fontStyle: 'bold' })
+      .setOrigin(0, 0.5)
+      .setDepth(20);
     this.comboBadges = {
       left: this.createComboBadge(screenX(VIEW_WIDTH / 2 - 142), screenY(VIEW_HEIGHT - 54), '왼손'),
       right: this.createComboBadge(screenX(VIEW_WIDTH / 2 + 142), screenY(VIEW_HEIGHT - 54), '오른손'),
@@ -2937,10 +2987,10 @@ export class PlayScene extends Phaser.Scene {
     const hint = this.add
       .text(
         screenX(VIEW_WIDTH - 24),
-        screenY(18),
-        'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시\nR 무기 교체 · I 인벤토리 · M 지도 · B 마을 귀환 · P 메뉴',
+        screenY(20),
+        'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · Q 물약 · R 무기 · I 인벤토리 · M 지도 · B 마을 · P 메뉴',
         {
-          fontSize: '13px',
+          fontSize: '12px',
           color: COLORS.textDim,
           align: 'right',
         },
@@ -2955,6 +3005,10 @@ export class PlayScene extends Phaser.Scene {
       this.shieldBarBack,
       this.shieldBarFill,
       this.hud,
+      this.potionBottleBack,
+      this.potionBottleFill,
+      this.potionBottleNeck,
+      this.potionText,
       hint,
       ...this.comboBadgeObjects(this.comboBadges.left),
       ...this.comboBadgeObjects(this.comboBadges.right),
@@ -3088,7 +3142,22 @@ export class PlayScene extends Phaser.Scene {
         ...(this.exitOpen && !inTown ? ['방을 정리했다. 출구로 이동 →'] : []),
       ].join('\n'),
     );
+    this.updatePotionHud();
     this.updateComboText();
+  }
+
+  private updatePotionHud(): void {
+    const fillRatio = Phaser.Math.Clamp(this.run.potionCharge / POTION_MAX_CHARGE, 0, 1);
+    const x = screenX(36);
+    const bottom = screenY(82 + this.hud.height + 34);
+    const fillHeight = 28 * fillRatio;
+
+    this.potionBottleBack.setPosition(x, bottom - 14);
+    this.potionBottleNeck.setPosition(x, bottom - 34);
+    this.potionBottleFill.setPosition(x, bottom).setSize(18, fillHeight);
+    this.potionText
+      .setPosition(screenX(58), bottom - 15)
+      .setText(`Q 물약 ${Math.floor(this.run.potionCharge)} / ${POTION_MAX_CHARGE}`);
   }
 
   private updateComboText(): void {
@@ -3536,6 +3605,7 @@ export class PlayScene extends Phaser.Scene {
           .setOrigin(0.5),
       );
     }
+    this.addOverlayCloseButton(container, panel.x + panel.w - 30, panel.y + 26, () => this.closeOverlay());
 
     this.renderTownMainTabs(container);
     if (this.townTab === 1) this.renderTownEquipTab(container);
@@ -3544,7 +3614,7 @@ export class PlayScene extends Phaser.Scene {
 
     container.add(
       this.add
-        .text(VIEW_WIDTH / 2, VIEW_HEIGHT - 18, this.townReadOnly ? 'I 닫기' : 'R 닫기   ·   오른쪽 출구로 다음 전투', {
+        .text(VIEW_WIDTH / 2, VIEW_HEIGHT - 18, this.townReadOnly ? 'I / Esc 닫기' : 'R / Esc 닫기   ·   오른쪽 출구로 다음 전투', {
           fontSize: '14px',
           color: COLORS.accentText,
           fontStyle: 'bold',
@@ -4490,6 +4560,26 @@ export class PlayScene extends Phaser.Scene {
     saveProgress(this.run.progress);
   }
 
+  private closeTopOverlayByEscape(): boolean {
+    if (this.weaponWheel) {
+      this.closeWeaponWheel(false);
+      return true;
+    }
+    if (this.overlayKind === 'map') {
+      this.closeMap();
+      return true;
+    }
+    if (this.overlayKind === 'pause') {
+      this.closePause();
+      return true;
+    }
+    if (this.overlay) {
+      this.closeOverlay();
+      return true;
+    }
+    return false;
+  }
+
   private closeOverlay(): void {
     // 설명은 오버레이 밖에 있어 함께 사라지지 않는다. 명시적으로 지운다.
     this.hideTownTip();
@@ -4505,6 +4595,40 @@ export class PlayScene extends Phaser.Scene {
       if ('disableInteractive' in child) (child as Phaser.GameObjects.GameObject).disableInteractive();
     }
     this.time.delayedCall(0, () => overlay.destroy(true));
+  }
+
+  private addOverlayCloseButton(
+    container: Phaser.GameObjects.Container,
+    x: number,
+    y: number,
+    onClose: () => void,
+  ): void {
+    const hit = this.add
+      .rectangle(x, y, 32, 32, 0x141824, 0.92)
+      .setStrokeStyle(1, 0x3a4059, 0.95)
+      .setInteractive({ useHandCursor: true });
+    const label = this.add
+      .text(x, y - 1, 'X', {
+        fontSize: '18px',
+        color: COLORS.text,
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5);
+
+    hit.on('pointerover', () => {
+      hit.setFillStyle(0x2b3350, 0.98);
+      label.setColor(COLORS.accentText);
+    });
+    hit.on('pointerout', () => {
+      hit.setFillStyle(0x141824, 0.92);
+      label.setColor(COLORS.text);
+    });
+    hit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      pointer.event.stopPropagation();
+      onClose();
+    });
+
+    container.add([hit, label]);
   }
 
   private showWorldMap(): void {
@@ -4531,13 +4655,14 @@ export class PlayScene extends Phaser.Scene {
     );
     container.add(
       this.add
-        .text(panel.x + panel.w - 28, panel.y + 30, 'M 닫기', {
+        .text(panel.x + panel.w - 62, panel.y + 30, 'M / Esc', {
           fontSize: '15px',
           color: COLORS.accentText,
           fontStyle: 'bold',
         })
         .setOrigin(1, 0.5),
     );
+    this.addOverlayCloseButton(container, panel.x + panel.w - 28, panel.y + 30, () => this.closeMap());
 
     for (const [from, to] of WORLD_MAP_LINKS) {
       const a = WORLD_MAP_NODES[from];
@@ -4672,7 +4797,7 @@ export class PlayScene extends Phaser.Scene {
         .text(
           VIEW_WIDTH / 2,
           VIEW_HEIGHT / 2 + 80,
-          'P 이어하기\nR 이 판만 다시 시작 (해금 유지)\nShift+R 기록 지우고 처음부터',
+          'P / Esc 이어하기\nR 이 판만 다시 시작 (해금 유지)\nShift+R 기록 지우고 처음부터',
           { fontSize: '18px', color: COLORS.textDim, align: 'center', lineSpacing: 10 },
         )
         .setOrigin(0.5),

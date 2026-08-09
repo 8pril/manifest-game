@@ -34,6 +34,11 @@ export type RunPhase =
 
 export const PLAYER_MAX_HP = 100;
 export const SHIELD_ENERGY_MAX = 45;
+export const POTION_MAX_CHARGE = 70;
+export const POTION_USE_COST = 15;
+export const POTION_HEAL_RATIO = 0.3;
+export const POTION_KILL_CHARGE = 5;
+export const POTION_BOSS_KILL_CHARGE = 20;
 
 /**
  * 피격 후 무적 시간(초).
@@ -52,6 +57,8 @@ export interface RunState {
   maxHp: number;
   /** 방패 공격으로 보호가 활성화됐을 때 체력보다 먼저 소모되는 방별 보호막. */
   shieldEnergy: number;
+  /** Q로 쓰는 충전형 회복 물약. 처치로 충전되고 체력 30%를 회복한다. */
+  potionCharge: number;
   /** 무기 2종과 스킬별 보조능력. */
   loadout: Loadout;
   /** 해금된 무기와 마을 장비 설정. */
@@ -101,6 +108,7 @@ export function createRun(left: WeaponId, right: WeaponId | null, savedProgress?
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
     shieldEnergy: SHIELD_ENERGY_MAX,
+    potionCharge: POTION_MAX_CHARGE,
     loadout: loadoutFromProgress(progress),
     progress,
     roomStartProgress: progress,
@@ -128,6 +136,7 @@ export function clearRoom(run: RunState): RunState {
       ...run,
       phase: 'won',
       shieldEnergy: SHIELD_ENERGY_MAX,
+      potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
       progress: rewarded,
       roomStartProgress: rewarded,
       loadout: loadoutFromProgress(rewarded, run.loadout),
@@ -142,6 +151,7 @@ export function clearRoom(run: RunState): RunState {
       ...run,
       phase: 'town',
       shieldEnergy: SHIELD_ENERGY_MAX,
+      potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
       progress,
       roomStartProgress: progress,
       loadout: loadoutFromProgress(progress, run.loadout),
@@ -152,6 +162,7 @@ export function clearRoom(run: RunState): RunState {
     ...run,
     roomIndex: run.roomIndex + 1,
     shieldEnergy: SHIELD_ENERGY_MAX,
+    potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
     progress: rewarded,
     roomStartProgress: rewarded,
     roomStartKills: run.kills,
@@ -240,6 +251,7 @@ export function leaveTown(run: RunState): RunState {
     phase: 'combat',
     roomIndex: run.roomIndex + 1,
     shieldEnergy: SHIELD_ENERGY_MAX,
+    potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
     progress,
     roomStartProgress: progress,
     roomStartKills: run.kills,
@@ -279,6 +291,7 @@ export function retryCurrentRoom(run: RunState): RunState {
     phase: 'combat',
     hp: run.maxHp,
     shieldEnergy: SHIELD_ENERGY_MAX,
+    potionCharge: POTION_MAX_CHARGE,
     progress,
     loadout: loadoutFromProgress(progress, run.loadout),
     invulnerable: 0,
@@ -292,8 +305,25 @@ export function isVulnerable(run: RunState): boolean {
   return run.phase === 'combat' && run.invulnerable <= 0;
 }
 
-export function addKill(run: RunState): RunState {
-  return { ...run, kills: run.kills + 1 };
+export function addKill(run: RunState, boss = false): RunState {
+  const charge = boss ? POTION_BOSS_KILL_CHARGE : POTION_KILL_CHARGE;
+  return {
+    ...run,
+    kills: run.kills + 1,
+    potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge + charge),
+  };
+}
+
+export function usePotion(run: RunState): RunState {
+  if (run.phase !== 'combat' && run.phase !== 'town') return run;
+  if (run.hp >= run.maxHp) return run;
+  if (run.potionCharge < POTION_USE_COST) return run;
+
+  return {
+    ...run,
+    hp: Math.min(run.maxHp, run.hp + run.maxHp * POTION_HEAL_RATIO),
+    potionCharge: run.potionCharge - POTION_USE_COST,
+  };
 }
 
 export function advanceTime(run: RunState, deltaSeconds: number): RunState {
