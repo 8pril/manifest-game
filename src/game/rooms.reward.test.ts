@@ -42,7 +42,7 @@ describe('방 보상', () => {
     const r = ROOMS[1].reward!;
     expect(r.weapons?.map((id) => weaponOf(id).name).join(' / ')).toBe('활 / 방패');
     expect(r.comboSkills?.map((id) => findSkill(id)!.name).join(' / ')).toBe('연사 / 균열 파동');
-    expect(r.supports ?? []).toEqual([]);
+    expect(r.supports ?? []).toEqual(['combo-imprint']);
   });
 
   it('최종 보스 보상 문구', () => {

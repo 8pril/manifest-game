@@ -208,6 +208,25 @@ const MODIFIER_SUPPORTS: Support[] = [
 ];
 
 const SYNERGY_SUPPORTS: Support[] = [
+  /**
+   * 콤보를 기본 규칙에서 빼고 선택형으로 돌린 결과물.
+   *
+   * 이걸 장착한 무기만 5타를 쌓아 강화기술로 전환된다. 장착하지 않으면
+   * 그 무기는 기본 공격만 쓴다. 멸검·연사·비전단검·균열 파동은 이제
+   * **모두가 거쳐야 하는 관문이 아니라 이 보조를 고른 사람이 보는 기술이다.**
+   *
+   * `requires: ['공격']`이라 무기 종류를 가리지 않고 기본 공격에 붙는다.
+   */
+  {
+    id: 'combo-imprint',
+    name: '콤보 개방',
+    slotType: 'synergy',
+    tags: ['공격', '시너지'],
+    requires: ['공격'],
+    modifiers: [],
+    behaviors: [{ kind: 'combo', required: 5, duration: 5 }],
+    description: '기본 공격 5회 명중 시 강화기술로 전환. 5초 안에 못 맞히면 풀린다',
+  },
   {
     id: 'wound-seeker',
     name: '상처 추적',

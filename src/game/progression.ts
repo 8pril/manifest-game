@@ -19,11 +19,11 @@ export interface WeaponWheel {
 }
 
 export interface ManifestationConfig {
-  /** 콤보 상태에서 기본 공격을 대체할 스킬. 우선 무기 기본 콤보스킬 id를 쓴다. */
+  /** 콤보 상태에서 기본 공격을 대체할 강화기술. 내부 id는 기존 comboSkillId를 유지한다. */
   comboSkillId: string;
-  /** 보조1형: 콤보스킬 자체 강화. */
+  /** 보조1형: 성능 보강. */
   primarySupportId: string | null;
-  /** 보조2형: 다른 무기와의 시너지. */
+  /** 보조2형: 조건/시너지. */
   synergySupportId: string | null;
 }
 
@@ -97,6 +97,21 @@ export function unlockComboSkills(progress: PlayerProgress, skillIds: readonly s
     ...progress,
     ownedComboSkills: orderedComboSkillIds(progress.ownedComboSkills, skillIds),
   };
+}
+
+/**
+ * 개발용: 모든 무기에 `콤보 개방`을 물려 콤보 빌드 상태를 만든다.
+ *
+ * 콤보는 이 보조를 붙였을 때만 켜지는데, 그 보조는 첫 보스 보상이고 장착은 마을에서만
+ * 된다. 콤보가 걸린 상태를 보려면 매번 두 방을 클리어해야 해서 검증과 플레이 테스트가
+ * 막힌다. `?combo=1`이 이 함수를 쓴다.
+ */
+export function grantComboImprint(progress: PlayerProgress): PlayerProgress {
+  let next = unlockSupports(progress, ['combo-imprint']);
+  for (const weapon of next.unlockedWeapons) {
+    next = configureManifestation(next, weapon, { synergySupportId: 'combo-imprint' });
+  }
+  return next;
 }
 
 export function unlockSupports(progress: PlayerProgress, supportIds: readonly string[]): PlayerProgress {

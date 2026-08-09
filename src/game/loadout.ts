@@ -1,5 +1,5 @@
 import type { Skill, Support } from '@/engine/support';
-import { resolveSkill, canAttach, type ResolvedSkill } from '@/engine/support';
+import { resolveSkill, canAttach, supportSlotType, type ResolvedSkill } from '@/engine/support';
 import { weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
 import { configuredSupports, type PlayerProgress } from '@/game/progression';
 
@@ -46,16 +46,39 @@ export function loadoutFromProgress(progress: PlayerProgress, previous: Loadout 
  * 유효하지만, 마을 UI로 직접 고르게 되면 바로 문제가 된다.
  */
 export function supportsFromProgress(progress: PlayerProgress): Readonly<Record<string, readonly Support[]>> {
-  const supports: Record<string, readonly Support[]> = {};
+  const supports: Record<string, Support[]> = {};
 
   for (const weaponId of progress.unlockedWeapons) {
-    const skill = weaponOf(weaponId).combo;
-    const accepted: Support[] = [];
+    const weapon = weaponOf(weaponId);
+    const configured = configuredSupports(progress, weaponId);
 
-    for (const support of configuredSupports(progress, weaponId)) {
-      if (canAttach(skill, support, accepted).ok) accepted.push(support);
+    // 이 무기가 강화기술을 쓰는가. `콤보 개방`을 붙였을 때만 전환이 일어난다.
+    const usesCombo = configured.some((s) => s.behaviors?.some((b) => b.kind === 'combo'));
+
+    for (const support of configured) {
+      // **보조2형은 기본 공격에 먼저 붙인다.** 조건과 시너지를 다루는 쪽이라
+      // 평소 쓰는 공격에 걸려야 의미가 있고, `콤보 개방`은 기본 공격에 붙어야
+      // 기본 → 강화기술 전환을 열 수 있다. 태그가 안 맞으면 강화기술로 넘긴다
+      // (예: `상처 공명`은 `지대`를 요구하는데 기본 공격에는 지대가 없다).
+      //
+      // **보조1형은 강화기술을 쓸 때만 강화기술에 붙인다.** 콤보를 안 쓰는 빌드에서
+      // 강화기술에 붙이면 발동할 일이 없어 칸이 통째로 죽는다. 그때는 기본 공격을
+      // 강화한다.
+      const order =
+        supportSlotType(support) === 'synergy'
+          ? [weapon.basic, weapon.combo]
+          : usesCombo
+            ? [weapon.combo, weapon.basic]
+            : [weapon.basic, weapon.combo];
+
+      for (const skill of order) {
+        const accepted = supports[skill.id] ?? [];
+        if (canAttach(skill, support, accepted).ok) {
+          supports[skill.id] = [...accepted, support];
+          break;
+        }
+      }
     }
-    if (accepted.length > 0) supports[skill.id] = accepted;
   }
   return supports;
 }

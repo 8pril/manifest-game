@@ -65,17 +65,24 @@ describe('보조능력 데이터 무결성', () => {
 
     expect(primary.length).toBeGreaterThan(0);
     expect(synergy.map((support) => support.id)).toEqual([
+      'combo-imprint',
       'wound-seeker',
       'wound-resonance',
       'fracture-resonance',
     ]);
   });
 
-  it('보조2형은 상태이상 시너지 거동을 갖는다', () => {
+  it('보조2형은 조건부 거동을 갖는다', () => {
+    // 보조2형은 수치를 그냥 올려주는 것이 아니라 **조건이 붙은** 효과여야 한다.
+    // 상태이상 대상일 때(statusDamage)이거나 연속 명중했을 때(combo)다.
+    // 콤보를 기본 규칙에서 빼면서 `콤보 개방`이 여기 들어왔고, 그래서 조건이
+    // 상태이상 하나로 고정되지 않는다.
     const synergy = SUPPORTS.filter((support) => supportSlotType(support) === 'synergy');
+    const conditional = ['statusDamage', 'combo'];
 
     for (const support of synergy) {
-      expect(support.behaviors?.some((behavior) => behavior.kind === 'statusDamage'), support.id).toBe(true);
+      const ok = support.behaviors?.some((behavior) => conditional.includes(behavior.kind));
+      expect(ok, `${support.id}에 조건부 거동이 없습니다`).toBe(true);
     }
   });
 

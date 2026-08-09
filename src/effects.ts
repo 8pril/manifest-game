@@ -77,6 +77,16 @@ export function floatingText(
     .setOrigin(0.5)
     .setDepth(25);
 
+  // 가운데 정렬이라 플레이어가 벽에 붙어 있으면 긴 글이 화면 밖으로 잘려 나간다.
+  // 실제로 1번 방 왼쪽 끝에서 보상 안내의 앞부분이 사라졌다. 보이는 영역 안으로 민다.
+  // 여백이 벽 두께(24)보다 커야 한다. 화면 안에만 넣으면 글자가 벽 돌 위에 얹혀
+  // 흐릿해진다. 실제로 1번 방 왼쪽 끝에서 보상 안내가 벽에 겹쳐 읽기 어려웠다.
+  const view = scene.cameras.main.worldView;
+  const half = label.width / 2 + 32;
+  if (view.width > label.width + 24) {
+    label.x = Phaser.Math.Clamp(label.x, view.left + half, view.right - half);
+  }
+
   scene.tweens.add({
     targets: label,
     y: y - 52,

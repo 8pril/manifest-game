@@ -13,7 +13,7 @@ import {
 import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
-import { awakenedAttackInterval, deliveryOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
+import { awakenedAttackInterval, deliveryOf, weaponOf, WEAPON_IDS, type Weapon, type WeaponId } from '@/data/weapons';
 import { findSupport } from '@/data/supports';
 import { findSkill } from '@/data/skills';
 import { canAttach, findBehavior, resolveSkill, supportSlotType, type Behavior, type Skill, type Support } from '@/engine/support';
@@ -81,7 +81,16 @@ import {
 } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
 import { leftWeapon, rightWeapon, resolveFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
-import { createCombo, gainCombo, sustainCombo, tickCombo, isComboReady, COMBO_REQUIRED, type ComboState } from '@/game/combo';
+import {
+  createCombo,
+  gainCombo,
+  sustainCombo,
+  tickCombo,
+  isComboReady,
+  comboBehaviorOf,
+  COMBO_REQUIRED,
+  type ComboState,
+} from '@/game/combo';
 import {
   createRun,
   clearRoom,
@@ -96,7 +105,7 @@ import {
   SHIELD_ENERGY_MAX,
   type RunState,
 } from '@/game/run';
-import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, hasComboSkill, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
+import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboImprint, hasComboSkill, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
@@ -414,10 +423,16 @@ export class PlayScene extends Phaser.Scene {
     // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
     const debugStart = parseDebugStart(location.search, TOTAL_ROOMS);
     const hasDebugWeapons = debugStart.left !== undefined || debugStart.right !== undefined;
-    const ignoresSavedProgress = hasDebugWeapons || debugStart.roomIndex !== undefined || debugStart.town === true;
+    const ignoresSavedProgress =
+      hasDebugWeapons ||
+      debugStart.roomIndex !== undefined ||
+      debugStart.town === true ||
+      debugStart.combo === true;
     // 저장을 안 읽는 개발 진입은 저장도 하지 않는다. 안 그러면 실제 진행을 덮어쓴다.
     this.persistProgress = !ignoresSavedProgress;
-    const progress = data?.progress ?? (ignoresSavedProgress ? null : loadProgress()) ?? createInitialProgress();
+    let progress = data?.progress ?? (ignoresSavedProgress ? null : loadProgress()) ?? createInitialProgress();
+    // 개발용: `?combo=1`이면 모든 무기에 `콤보 개방`을 미리 물려 콤보 빌드로 시작한다.
+    if (debugStart.combo) progress = grantComboImprint(progress);
     this.initialProgress = hasDebugWeapons ? null : progress;
     // 저장된 진행이 있어도 손에 든 무기는 이어받지 않는다. 항상 초기값으로 시작한다.
     // 자세한 이유는 createRun 참고.
@@ -557,7 +572,10 @@ export class PlayScene extends Phaser.Scene {
     // 같은 입력이 어떤 판에서는 먹고 어떤 판에서는 안 먹었다. 보조로만 붙여 둔다.
     const togglePause = () => {
       if (this.weaponWheel) return;
-      if (this.run.phase !== 'combat') return;
+      // 마을에서도 열려야 한다. 이 메뉴에 `Shift+R 기록 지우기`가 들어 있는데
+      // 전투 중에만 열리면 마을에 있는 동안에는 기록을 지울 방법이 없다.
+      // 승리·패배 화면에는 자체 안내가 있으므로 그때는 열지 않는다.
+      if (this.run.phase !== 'combat' && this.run.phase !== 'town') return;
       if (this.paused) {
         this.closePause();
         return;
@@ -645,8 +663,20 @@ export class PlayScene extends Phaser.Scene {
     this.shieldGuardUntil = Math.max(this.shieldGuardUntil, this.time.now + (runtime.weapon.swingDuration || 140));
   }
 
+  /**
+   * 이 무기에 콤보 전환이 열려 있는지.
+   *
+   * 기본 공격에 `콤보 개방` 보조2형이 붙어 있어야만 열린다. 콤보는 더 이상
+   * 모든 무기의 기본 규칙이 아니라 골라서 얹는 것이다.
+   */
+  private comboRuleFor(runtime: WeaponRuntime): { required: number; duration: number } | null {
+    return comboBehaviorOf(resolveFor(this.run.loadout, runtime.weapon.basic).behaviors);
+  }
+
   private canUseComboSkill(runtime: WeaponRuntime): boolean {
-    return isComboReady(runtime.combo) && hasComboSkill(this.run.progress, runtime.weapon.combo.id);
+    const rule = this.comboRuleFor(runtime);
+    if (!rule) return false;
+    return isComboReady(runtime.combo, rule.required) && hasComboSkill(this.run.progress, runtime.weapon.combo.id);
   }
 
   /** 스킬 하나를 전달 방식에 맞게 내보낸다. */
@@ -883,9 +913,11 @@ export class PlayScene extends Phaser.Scene {
     }
 
     if (basic) {
-      if (runtime) {
-        const stats = resolveFor(this.run.loadout, weapon.basic).stats;
-        runtime.combo = gainCombo(runtime.combo, stats);
+      // `콤보 개방`을 붙이지 않은 무기는 게이지가 아예 돌지 않는다.
+      if (runtime && this.comboRuleFor(runtime)) {
+        const resolved = resolveFor(this.run.loadout, weapon.basic);
+        const rule = comboBehaviorOf(resolved.behaviors);
+        runtime.combo = gainCombo(runtime.combo, resolved.stats, rule?.required);
       }
     } else if (runtime) {
       // 발동 스킬 명중은 게이지를 올리지 않고 지속시간만 갱신한다.
@@ -2197,6 +2229,7 @@ export class PlayScene extends Phaser.Scene {
     playSfx('reward');
     ring(this, drop.x, drop.y, drop.color, { from: 18, to: 86, duration: 420, width: 4 });
     floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 12, `${drop.label} 획득`, COLORS.accentText);
+    this.showPendingHint(drop);
 
     drop.marker.destroy();
     drop.glow.destroy();
@@ -2204,6 +2237,34 @@ export class PlayScene extends Phaser.Scene {
     this.rewardDrops = this.rewardDrops.filter((item) => item !== drop);
     this.refreshHud();
     if (DEBUG_ENABLED) this.publishDebug();
+  }
+
+  /**
+   * 지금은 아직 쓸 수 없는 보상이라는 것을 알린다.
+   *
+   * 1번 방 보상은 무엇을 주든 2번 방에서 쓸 수 없다. 보조형스킬 장착도 R링 교체도
+   * 마을에서 열리는데 마을은 첫 보스 뒤에 나오기 때문이다. 전에는 콤보스킬만 예외라
+   * 주우면 바로 나갔는데, 콤보가 `콤보 개방`을 요구하게 되면서 그 예외가 사라졌다.
+   *
+   * 예치되는 것 자체는 이상하지 않다. 첫 마을이 게임이 열리는 순간이고 이 드랍은 거기서
+   * 조립할 재료다. 문제는 **주웠는데 아무 일도 안 일어난 이유를 모른다**는 것이라,
+   * 언제 쓸 수 있는지를 말해준다.
+   */
+  private showPendingHint(drop: RewardDrop): void {
+    const pending = (drop.reward.comboSkills ?? []).filter((id) => {
+      const weapon = WEAPON_IDS.map(weaponOf).find((w) => w.combo.id === id);
+      // 그 무기에 `콤보 개방`이 붙어 있으면 바로 쓸 수 있으므로 안내하지 않는다.
+      return weapon ? !comboBehaviorOf(resolveFor(this.run.loadout, weapon.basic).behaviors) : false;
+    });
+    if (!pending.length) return;
+
+    floatingText(
+      this,
+      this.player.x,
+      this.player.y - PLAYER_RADIUS - 34,
+      '콤보 개방을 붙이면 쓸 수 있다',
+      COLORS.textDim,
+    );
   }
 
   private debugRewardDrop(): { x: number; y: number } | null {
@@ -2421,12 +2482,15 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private updateComboBadge(badge: ComboBadge, runtime: WeaponRuntime | null): void {
-    const visible = runtime !== null;
+    // 콤보를 쓰지 않는 무기는 배지 자체를 숨긴다. `콤보 개방`을 안 붙였으면
+    // 게이지가 돌지 않으므로 0으로 굳은 눈금을 보여줄 이유가 없다.
+    const rule = runtime ? this.comboRuleFor(runtime) : null;
+    const visible = runtime !== null && rule !== null;
     for (const object of this.comboBadgeObjects(badge)) object.setVisible(visible);
-    if (!runtime) return;
+    if (!runtime || !rule) return;
 
     const unlocked = hasComboSkill(this.run.progress, runtime.weapon.combo.id);
-    const ready = unlocked && isComboReady(runtime.combo);
+    const ready = unlocked && isComboReady(runtime.combo, rule.required);
     const color = ready ? COLORS.accent : runtime.weapon.color;
     const hand = badge === this.comboBadges.left ? '왼손' : '오른손';
     badge.back.setStrokeStyle(ready ? 2 : 1, color, ready ? 0.95 : 0.55);
@@ -2767,7 +2831,7 @@ export class PlayScene extends Phaser.Scene {
     );
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 116, '장갑이 기억한 무기와 콤보스킬을 여기서 정리해 두게.', {
+        .text((VIEW_WIDTH / 2), 116, '장갑이 기억한 무기와 강화기술을 여기서 정리해 두게.', {
           fontSize: '16px',
           color: COLORS.textDim,
         })
@@ -2820,9 +2884,9 @@ export class PlayScene extends Phaser.Scene {
 
     container.add(this.add.text(startX, startY - 42, '실체화 장비 설정', { fontSize: '21px', color: COLORS.text, fontStyle: 'bold' }));
     container.add(this.add.text(column.weapon, startY - 14, '무기', { fontSize: '13px', color: COLORS.textDim }));
-    container.add(this.add.text(column.combo, startY - 14, '콤보스킬', { fontSize: '13px', color: COLORS.textDim }));
-    container.add(this.add.text(column.primary, startY - 14, '보조1형: 자체 강화', { fontSize: '13px', color: COLORS.textDim }));
-    container.add(this.add.text(column.synergy, startY - 14, '보조2형: 상태 시너지', { fontSize: '13px', color: COLORS.textDim }));
+    container.add(this.add.text(column.combo, startY - 14, '강화기술', { fontSize: '13px', color: COLORS.textDim }));
+    container.add(this.add.text(column.primary, startY - 14, '보조1형: 성능 보강', { fontSize: '13px', color: COLORS.textDim }));
+    container.add(this.add.text(column.synergy, startY - 14, '보조2형: 조건/시너지', { fontSize: '13px', color: COLORS.textDim }));
 
     for (const [index, weaponId] of this.run.progress.unlockedWeapons.entries()) {
       const weapon = weaponOf(weaponId);
@@ -3093,7 +3157,9 @@ export class PlayScene extends Phaser.Scene {
         .text(
           VIEW_WIDTH / 2,
           VIEW_HEIGHT / 2 + 10,
-          `${ROOMS[this.run.roomIndex]?.label ?? ''} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   처치 ${this.run.kills}`,
+          this.run.phase === 'town'
+            ? `마을   처치 ${this.run.kills}`
+            : `${ROOMS[this.run.roomIndex]?.label ?? ''} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   처치 ${this.run.kills}`,
           { fontSize: '16px', color: COLORS.textDim },
         )
         .setOrigin(0.5),
@@ -3173,7 +3239,7 @@ export class PlayScene extends Phaser.Scene {
     if (weapons.length) lines.push(`무기: ${weapons.join(' / ')}`);
 
     const comboSkills = reward.comboSkills?.map((id) => findSkill(id)?.name ?? id) ?? [];
-    if (comboSkills.length) lines.push(`콤보스킬: ${comboSkills.join(' / ')}`);
+    if (comboSkills.length) lines.push(`강화기술: ${comboSkills.join(' / ')}`);
 
     const supports = reward.supports?.flatMap((id) => {
       const support = findSupport(id);

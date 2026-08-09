@@ -29,7 +29,18 @@ export type Behavior =
   /** 특정 상태이상이 걸린 대상에게 추가 피해를 준다. */
   | { kind: 'statusDamage'; status: StatusKind; more: number }
   /** 보스에게도 넉백, 기절, 이동 방해 같은 CC를 적용할 수 있게 한다. */
-  | { kind: 'bossCc' };
+  | { kind: 'bossCc' }
+  /**
+   * 콤보 전환을 연다.
+   *
+   * 이 거동이 붙은 기본 공격만 콤보 게이지를 쌓고, 목표치에 도달하면 그 무기의
+   * 강화기술로 전환된다. **붙지 않은 무기는 콤보가 아예 없다.**
+   *
+   * 콤보를 모든 무기의 기본 규칙에서 빼고 선택형으로 돌린 결과다.
+   * 이전에는 게이지가 항상 돌아가서 "강한 기술을 쓰려면 먼저 5대를 채워야 하는"
+   * 통행세였고, 고를 여지가 없었다.
+   */
+  | { kind: 'combo'; required: number; duration: number };
 
 export type AreaKind = 'plain' | 'ignite' | 'shock' | 'chill' | 'freeze' | 'wither';
 
@@ -51,7 +62,7 @@ export interface Skill extends Tagged {
 export interface Support extends Tagged {
   id: string;
   name: string;
-  /** 1형은 스킬 자체 강화, 2형은 다른 무기/상태와의 시너지. 생략하면 1형이다. */
+  /** 1형은 성능 보강, 2형은 조건/시너지. 생략하면 1형이다. */
   slotType?: 'primary' | 'synergy';
   /** 이 태그를 모두 가진 스킬에만 장착할 수 있다. */
   requires: readonly Tag[];

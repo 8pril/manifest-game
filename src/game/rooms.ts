@@ -81,6 +81,11 @@ export const ROOMS: readonly RoomDef[] = [
     reward: {
       weapons: ['bow', 'shield'],
       comboSkills: ['volley', 'fracture-wave'],
+      // `콤보 개방`은 강화기술 전환을 여는 유일한 열쇠다. 콤보를 기본 규칙에서
+      // 뺐으므로 이걸 얻기 전까지는 어떤 무기도 기본 공격만 쓴다.
+      // 첫 보스가 무기와 강화기술을 함께 여는 자리라 여기서 준다. 더 뒤로 미루면
+      // 1회차에 강화기술을 한 번도 못 보고, 그건 심사에서 게임의 절반이 빠지는 것이다.
+      supports: ['combo-imprint'],
     },
     width: 2000,
     height: 1250,
