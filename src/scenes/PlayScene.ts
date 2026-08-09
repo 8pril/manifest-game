@@ -291,9 +291,8 @@ const ENEMY_SPRITE: Record<EnemyKind, string> = {
   archer: 'enemy-archer',
   brute: 'enemy-brute',
   gatekeeper: 'enemy-boss',
-  // 새 보스 둘은 전용 스프라이트가 없다. 성격이 가까운 것을 빌려 쓰고 색으로 가른다.
-  warden: 'enemy-boss1',
-  glutton: 'enemy-boss2',
+  warden: 'enemy-boss-warden',
+  glutton: 'enemy-boss-glutton',
   collapsedDoor: 'enemy-boss2',
 };
 
@@ -390,6 +389,7 @@ interface RewardDrop {
   label: string;
   kind: 'weapon' | 'comboSkill' | 'support' | 'synergy';
   color: number;
+  iconKey?: string;
   x: number;
   y: number;
   pickupEnabledAt: number;
@@ -2403,14 +2403,42 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private retryAfterDeath(): void {
-    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, '방 시작점에서 재도전', COLORS.accentText, { duration: 1400 });
+    this.showDeathRetryFeedback();
     this.run = retryCurrentRoom(this.run);
     this.saveCurrentProgress();
     this.syncWeaponRuntimes();
-    this.time.delayedCall(450, () => {
+    this.time.delayedCall(620, () => {
       this.enterRoom();
+      this.showRespawnFeedback();
       if (DEBUG_ENABLED) this.publishDebug();
     });
+  }
+
+  private showDeathRetryFeedback(): void {
+    ring(this, this.player.x, this.player.y, 0xff6b6b, { from: PLAYER_RADIUS, to: PLAYER_RADIUS + 62, duration: 360, width: 4 });
+    flash(this, this.player.x, this.player.y, PLAYER_RADIUS * 3.2, 0xff6b6b);
+    this.cameras.main.shake(180, 0.004);
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, '의식이 끊어진다', '#ffb4a2', { duration: 900 });
+
+    const veil = this.add
+      .rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x05060a, 0)
+      .setDepth(58)
+      .setScrollFactor(0);
+    this.tweens.add({
+      targets: veil,
+      alpha: 0.72,
+      duration: 180,
+      yoyo: true,
+      hold: 210,
+      ease: 'Quad.easeOut',
+      onComplete: () => veil.destroy(),
+    });
+  }
+
+  private showRespawnFeedback(): void {
+    ring(this, this.player.x, this.player.y, COLORS.accent, { from: 10, to: 84, duration: 520, width: 4 });
+    flash(this, this.player.x, this.player.y, PLAYER_RADIUS * 2.8, COLORS.accent);
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, '구역 시작점에서 재도전', COLORS.accentText, { duration: 1300 });
   }
 
   private guardedPlayerDamage(amount: number): number {
@@ -2662,11 +2690,11 @@ export class PlayScene extends Phaser.Scene {
     };
   }
 
-  private rewardItems(reward: RoomReward): Array<Pick<RewardDrop, 'reward' | 'label' | 'kind' | 'color'>> {
+  private rewardItems(reward: RoomReward): Array<Pick<RewardDrop, 'reward' | 'label' | 'kind' | 'color' | 'iconKey'>> {
     return [
       ...(reward.weapons ?? []).map((id) => {
         const weapon = weaponOf(id);
-        return { reward: { weapons: [id] }, label: weapon.name, kind: 'weapon' as const, color: weapon.color };
+        return { reward: { weapons: [id] }, label: weapon.name, kind: 'weapon' as const, color: weapon.color, iconKey: WEAPON_SPRITE[id] };
       }),
       // **기본스킬 드랍은 빈 껍데기가 아니다.** 예전에는 연출만 하려고 `reward: {}`인
       // 오브젝트를 무기에서 만들어 냈는데, 주워도 보유 상태가 안 늘어 화면이 거짓말을
@@ -2679,6 +2707,7 @@ export class PlayScene extends Phaser.Scene {
               label: weapon.basicSkill.name,
               kind: 'comboSkill' as const,
               color: weapon.color,
+              iconKey: WEAPON_SPRITE[weapon.id],
             }]
           : [];
       }),
@@ -2776,15 +2805,7 @@ export class PlayScene extends Phaser.Scene {
     this.saveCurrentProgress();
     playSfx('reward');
     ring(this, drop.x, drop.y, drop.color, { from: 18, to: 86, duration: 420, width: 4 });
-    floatingText(
-      this,
-      this.player.x,
-      this.player.y - PLAYER_RADIUS - 12,
-      this.rewardPickupText(drop),
-      COLORS.accentText,
-      { duration: 1600 },
-    );
-    this.showRewardPickupHint(drop);
+    this.showRewardPickupBadge(drop);
 
     drop.marker.destroy();
     drop.glow.destroy();
@@ -2794,57 +2815,65 @@ export class PlayScene extends Phaser.Scene {
     if (DEBUG_ENABLED) this.publishDebug();
   }
 
-  /**
-   * 지금은 아직 쓸 수 없는 보상이라는 것을 알린다.
-   *
-   * 1번 방 보상은 무엇을 주든 2번 방에서 쓸 수 없다. 보조형스킬 장착도 R링 교체도
-   * 마을에서 열리는데 마을은 첫 보스 뒤에 나오기 때문이다.
-   *
-   * 예치되는 것 자체는 이상하지 않다. 첫 마을이 게임이 열리는 순간이고 이 드랍은 거기서
-   * 조립할 재료다. 문제는 **주웠는데 아무 일도 안 일어난 이유를 모른다**는 것이라,
-   * 언제 쓸 수 있는지를 말해준다.
-   *
-   * 첫 마을을 한 번이라도 본 뒤에는 안내하지 않는다. 그때부터는 붙이는 곳을 알기 때문에
-   * 같은 문구가 잔소리가 된다.
-   */
-  private rewardPickupText(drop: RewardDrop): string {
-    switch (drop.kind) {
-      case 'comboSkill':
-        return `기본스킬 ${drop.label} 획득`;
-      case 'synergy':
-        return `연계 ${drop.label} 획득`;
-      case 'support':
-        return `보조 ${drop.label} 획득`;
-      case 'weapon':
-      default:
-        return `${drop.label} 획득`;
+  private showRewardPickupBadge(drop: RewardDrop): void {
+    const badge = this.add.container(drop.x, drop.y - 8).setDepth(26);
+    const back = this.add.circle(0, 0, 24, 0x10141f, 0.92).setStrokeStyle(3, drop.color, 0.95);
+    const halo = this.add.circle(0, 0, 31, drop.color, 0.2);
+    badge.add([halo, back]);
+
+    if (drop.iconKey && this.textures.exists(drop.iconKey)) {
+      const icon = this.add.sprite(0, 0, drop.iconKey);
+      icon.setScale(30 / Math.max(icon.width, icon.height));
+      icon.setTint(drop.kind === 'comboSkill' ? drop.color : 0xffffff);
+      badge.add(icon);
+      if (drop.kind === 'comboSkill') {
+        badge.add(this.add.star(15, -14, 5, 3, 7, COLORS.accent, 0.95));
+      }
+    } else if (drop.kind === 'synergy') {
+      badge.add(this.rewardSynergyIcon(drop.color));
+    } else {
+      badge.add(this.rewardSupportIcon(drop.color));
     }
+
+    badge.setScale(0.7);
+    this.tweens.add({
+      targets: badge,
+      y: drop.y - 70,
+      scale: 1.08,
+      duration: 520,
+      ease: 'Back.easeOut',
+    });
+    this.tweens.add({
+      targets: badge,
+      alpha: 0,
+      delay: 780,
+      duration: 340,
+      ease: 'Quad.easeIn',
+      onComplete: () => badge.destroy(),
+    });
   }
 
-  private showRewardPickupHint(drop: RewardDrop): void {
-    if (drop.kind === 'comboSkill') {
-      floatingText(
-        this,
-      this.player.x,
-      this.player.y - PLAYER_RADIUS - 34,
-      '마을에서 첫 소켓에 끼우면 기본 공격이 바뀐다',
-      COLORS.textDim,
-      { duration: 1900 },
-    );
-      return;
-    }
+  private rewardSupportIcon(color: number): Phaser.GameObjects.GameObject {
+    const icon = this.add.container(0, 0);
+    icon.add([
+      this.add.rectangle(0, 0, 11, 30, color, 0.95),
+      this.add.rectangle(0, 0, 30, 11, color, 0.95),
+      this.add.circle(0, 0, 6, 0xffffff, 0.75),
+    ]);
+    return icon;
+  }
 
-    if (this.run.progress.weaponSwitchUnlocked) return;
-    if (drop.kind !== 'support' && drop.kind !== 'synergy') return;
-
-    floatingText(
-      this,
-      this.player.x,
-      this.player.y - PLAYER_RADIUS - 34,
-      '마을에서 무기에 붙일 수 있다',
-      COLORS.textDim,
-      { duration: 1900 },
-    );
+  private rewardSynergyIcon(color: number): Phaser.GameObjects.GameObject {
+    const icon = this.add.container(0, 0);
+    const link = this.add.rectangle(0, 0, 30, 6, color, 0.85).setAngle(-24);
+    icon.add([
+      link,
+      this.add.circle(-12, 7, 9, color, 0.95),
+      this.add.circle(12, -7, 9, color, 0.95),
+      this.add.circle(-12, 7, 4, 0xffffff, 0.75),
+      this.add.circle(12, -7, 4, 0xffffff, 0.75),
+    ]);
+    return icon;
   }
 
   private debugRewardDrop(): { x: number; y: number } | null {
@@ -2906,10 +2935,16 @@ export class PlayScene extends Phaser.Scene {
     };
 
     const hint = this.add
-      .text(screenX(VIEW_WIDTH - 24), screenY(20), 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 무기 교체 · I 인벤토리 · P 메뉴', {
-        fontSize: '13px',
-        color: COLORS.textDim,
-      })
+      .text(
+        screenX(VIEW_WIDTH - 24),
+        screenY(18),
+        'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시\nR 무기 교체 · I 인벤토리 · M 지도 · B 마을 귀환 · P 메뉴',
+        {
+          fontSize: '13px',
+          color: COLORS.textDim,
+          align: 'right',
+        },
+      )
       .setOrigin(1, 0)
       .setDepth(20);
 

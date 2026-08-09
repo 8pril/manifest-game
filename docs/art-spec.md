@@ -51,6 +51,8 @@
 | `enemy-archer.png` | 몰이꾼 | 42px | 128×128 | `#e0b055` 황토색 |
 | `enemy-boss.png` | 문지기 (첫 보스) | 136px | 320×320 | `#ff6b3d` 주황색 |
 | `enemy-boss2.png` | 무너진 문 (최종 보스) | 156px | 320×320 | `#8f7cff` 보라색 |
+| `enemy-boss-warden.png` | 제단지기 (윗길 보스) | 124px | 320×320 | `#6be0a0` 연녹색 |
+| `enemy-boss-glutton.png` | 굴의 포식자 (아랫길 보스) | 172px | 320×320 | `#d9a441` 호박색 |
 | `npc-keeper.png` | 마을 관리인 NPC | 38×58px (세로형) | 128×192 | `#8ea4ff` 연보라 |
 | `drop-item.png` | 보스 바닥 드랍 | 32px | 96×96 | `#ffd166` 금색 |
 
@@ -248,8 +250,9 @@ no shadow, centered
 표시 크기가 사냥개의 **3.4배**(136px vs 40px)다. 캔버스 안에서도 확실히 꽉 차게
 그려야 한다. 잡몹과 비슷한 덩치로 나오면 다시 뽑는다.
 
-> 기획 답변에 **"보스는 한 종류로 하면 절대 안될듯"**이 있었고, 예선 빌드는 보스 2종이다.
-> `enemy-boss.png`(문지기)와 `enemy-boss2.png`(무너진 문) 두 장이 필요하다.
+> 기획 답변에 **"보스는 한 종류로 하면 절대 안될듯"**이 있었다. 예선 빌드는 **보스 4종**이다.
+> `enemy-boss.png`(문지기), `enemy-boss2.png`(무너진 문), `enemy-boss-warden.png`(제단지기),
+> `enemy-boss-glutton.png`(굴의 포식자).
 
 **최종 보스 무너진 문** — 문 형상, 보라색
 
@@ -264,6 +267,43 @@ thick dark hand-drawn outline, chalky grimy texture, muted desaturated
 palette, bold silhouette readable at 40 pixels, transparent background,
 no shadow, centered
 ```
+
+**윗길 보스 제단지기** — 가늘고 날카롭게, 연녹색
+
+```
+a game sprite of a tall gaunt altar sentinel, several times larger than a
+human, lean angular armoured frame with long blade-like limbs, poised to
+lunge, pale green light glowing through the seams of its plating (#6be0a0),
+sharp narrow silhouette that reads as fast and dangerous, the whole creature
+fits inside the canvas with a small margin, nothing cropped, no ground,
+no rock, no scenery,
+three-quarter overhead view: the floor is seen from above but the figure is
+drawn at a slight tilt so clothing and gear stay readable, facing right,
+thick dark hand-drawn outline, chalky grimy texture, muted desaturated
+palette, bold silhouette readable at 40 pixels, transparent background,
+no shadow, centered
+```
+
+**아랫길 보스 굴의 포식자** — 크고 둔중하게, 호박색
+
+```
+a game sprite of an enormous bloated cave devourer, far bulkier and heavier
+than any other creature, sagging armoured hide in thick slabs, squat and low,
+dull amber light glowing between the folds (#d9a441), massive rounded
+silhouette that reads as slow and unkillable, the whole creature fits inside
+the canvas with a small margin, nothing cropped, no ground, no rock,
+no scenery,
+three-quarter overhead view: the floor is seen from above but the figure is
+drawn at a slight tilt so clothing and gear stay readable, facing right,
+thick dark hand-drawn outline, chalky grimy texture, muted desaturated
+palette, bold silhouette readable at 40 pixels, transparent background,
+no shadow, centered
+```
+
+> **보스 4종은 실루엣으로 갈려야 한다.** 제단지기는 가늘고 각지게, 포식자는 크고
+> 둥글게 잡았다. 40픽셀로 줄였을 때 색을 빼고도 어느 쪽인지 알 수 있어야 한다.
+> `nothing cropped, no ground, no rock, no scenery`를 넣은 이유는 첫 시도에서
+> 바닥 바위가 함께 그려지고 사지가 캔버스 밖으로 잘렸기 때문이다.
 
 **마을 관리인 NPC** — 세로형, 적이 아님을 실루엣으로 구분
 
@@ -512,6 +552,8 @@ model=gpt-image-1  size=1024x1024  background=transparent  output_format=png  n=
 | `enemy-brute.png` | gpt-image-1 | 2026-08-03 | 이 문서 `껍데기` 항목 (재생성본) | 없음 |
 | `enemy-boss.png` | gpt-image-1 | 2026-08-03 | 이 문서 `보스` 항목 | 없음 |
 | `enemy-boss2.png` | gpt-image-1 | 2026-08-03 | 이 문서 `최종 보스 무너진 문` 항목 | 없음 |
+| `enemy-boss-warden.png` | gpt-image-1 | 2026-08-10 | 이 문서 `윗길 보스 제단지기` 항목 | 없음 |
+| `enemy-boss-glutton.png` | gpt-image-1 | 2026-08-10 | 이 문서 `아랫길 보스 굴의 포식자` 항목 | 없음 |
 | `npc-keeper.png` | gpt-image-1 | 2026-08-03 | 이 문서 `마을 관리인 NPC` 항목 | 없음 |
 | `drop-item.png` | gpt-image-1 | 2026-08-03 | 이 문서 `바닥 드랍 아이템` 항목 | 없음 |
 | `bolt-sword.png` | gpt-image-1 | 2026-08-03 | 이 문서 `투사체` 항목, 색 `#c9d1e8` | 없음 |
