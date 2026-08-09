@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { configureManifestation, createInitialProgress, setWheelSlot, unlockSupports, unlockWeapons, unlockWeaponSwitch } from '@/game/progression';
-import { clearSavedProgress, loadProgress, PROGRESS_STORAGE_KEY, saveProgress, serializeProgress, parseProgress, type ProgressStore } from '@/game/progress-storage';
+import {
+  clearSavedProgress,
+  loadProgress,
+  loadRunCheckpoint,
+  PROGRESS_STORAGE_KEY,
+  RUN_CHECKPOINT_STORAGE_KEY,
+  saveProgress,
+  saveRunCheckpoint,
+  serializeProgress,
+  parseProgress,
+  parseRunCheckpoint,
+  serializeRunCheckpoint,
+  type ProgressStore,
+  type RunCheckpoint,
+} from '@/game/progress-storage';
 
 function memoryStore(): ProgressStore & { data: Record<string, string> } {
   const data: Record<string, string> = {};
@@ -41,9 +55,77 @@ describe('progress storage', () => {
     expect(loadProgress(store)).toBeNull();
   });
 
+  it('현재 판 체크포인트를 JSON으로 저장하고 복원한다', () => {
+    const progress = unlockWeaponSwitch(unlockWeapons(createInitialProgress(), ['bow', 'shield']));
+    const checkpoint: RunCheckpoint = {
+      phase: 'combat',
+      roomIndex: 3,
+      hp: 62,
+      maxHp: 100,
+      shieldEnergy: 20,
+      potionCharge: 55,
+      progress,
+      roomStartProgress: progress,
+      roomStartKills: 8,
+      kills: 11,
+      gained: { weapons: ['bow'], basicSkills: ['scattershot'], supports: ['linked-momentum'], keys: [] },
+      elapsed: 71.5,
+    };
+
+    expect(parseRunCheckpoint(serializeRunCheckpoint(checkpoint))).toEqual(checkpoint);
+  });
+
+  it('체크포인트 스토리지 입출력을 감싼다', () => {
+    const store = memoryStore();
+    const progress = unlockWeapons(createInitialProgress(), ['bow']);
+    const checkpoint: RunCheckpoint = {
+      phase: 'town',
+      roomIndex: 1,
+      hp: 100,
+      maxHp: 100,
+      shieldEnergy: 45,
+      potionCharge: 70,
+      progress,
+      roomStartProgress: progress,
+      roomStartKills: 4,
+      kills: 4,
+      elapsed: 22,
+    };
+
+    saveRunCheckpoint(checkpoint, store);
+    expect(store.data[RUN_CHECKPOINT_STORAGE_KEY]).toBeTruthy();
+    expect(loadRunCheckpoint(store)).toEqual(checkpoint);
+  });
+
+  it('처음부터 시작은 옛 progress와 새 checkpoint를 모두 지운다', () => {
+    const store = memoryStore();
+    const progress = createInitialProgress();
+    saveProgress(progress, store);
+    saveRunCheckpoint({
+      phase: 'combat',
+      roomIndex: 0,
+      hp: 100,
+      maxHp: 100,
+      shieldEnergy: 45,
+      potionCharge: 70,
+      progress,
+      roomStartProgress: progress,
+      roomStartKills: 0,
+      kills: 0,
+      elapsed: 0,
+    }, store);
+
+    clearSavedProgress(store);
+
+    expect(loadProgress(store)).toBeNull();
+    expect(loadRunCheckpoint(store)).toBeNull();
+  });
+
   it('깨진 데이터는 무시한다', () => {
     expect(parseProgress('{')).toBeNull();
     expect(parseProgress(JSON.stringify({ version: 999, progress: {} }))).toBeNull();
+    expect(parseRunCheckpoint('{')).toBeNull();
+    expect(parseRunCheckpoint(JSON.stringify({ version: 1, checkpoint: {} }))).toBeNull();
   });
 
   it('저장 데이터에 알 수 없는 무기가 있어도 안전한 진행 상태로 복원한다', () => {

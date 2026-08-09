@@ -128,7 +128,7 @@ import {
 } from '@/game/inventory';
 import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboSupport, equippedBasicSkill, unlockSupports, unlockWeapons, setWheelSlot, swapWheelSlots, moveInventoryItem, sortInventory, type Hand, type PlayerProgress } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
-import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
+import { clearSavedProgress, loadRunCheckpoint, saveRunCheckpoint, type RunCheckpoint } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
 import { canApplyCrowdControl } from '@/game/crowd-control';
 
@@ -574,6 +574,7 @@ export class PlayScene extends Phaser.Scene {
    */
   private persistProgress = true;
   private initialProgress: PlayerProgress | null = null;
+  private initialCheckpoint: RunCheckpoint | null = null;
 
   constructor() {
     super('Play');
@@ -598,7 +599,8 @@ export class PlayScene extends Phaser.Scene {
       debugStart.supports !== undefined;
     // 저장을 안 읽는 개발 진입은 저장도 하지 않는다. 안 그러면 실제 진행을 덮어쓴다.
     this.persistProgress = !ignoresSavedProgress;
-    let progress = data?.progress ?? (ignoresSavedProgress ? null : loadProgress()) ?? createInitialProgress();
+    this.initialCheckpoint = ignoresSavedProgress ? null : loadRunCheckpoint();
+    let progress = data?.progress ?? this.initialCheckpoint?.progress ?? createInitialProgress();
     // 개발용: `?combo=`면 콤보 계열 연계를 미리 물려 콤보 빌드로 시작한다.
     // `?left=`/`?right=`로 지정한 무기까지 해금해야 그 무기에도 보조가 붙는다.
     // 콤보는 양손을 오가며 성립하므로, 두 파라미터를 같이 쓰는 것이 기본 사용법이다.
@@ -610,7 +612,7 @@ export class PlayScene extends Phaser.Scene {
     // 마을에서 직접 붙여 보는 것이 이 파라미터를 쓰는 이유이기 때문이다.
     if (debugStart.supports) progress = unlockSupports(progress, debugStart.supports);
     // 콤보 보조를 물렸으면 그 진행을 살려야 한다. 무기만 지정한 경우에는 예전대로 버린다.
-    this.initialProgress = hasDebugWeapons && !debugStart.combo ? null : progress;
+    this.initialProgress = this.initialCheckpoint ? null : hasDebugWeapons && !debugStart.combo ? null : progress;
     // 저장된 진행이 있어도 손에 든 무기는 이어받지 않는다. 항상 초기값으로 시작한다.
     // 자세한 이유는 createRun 참고.
     const fresh = createInitialProgress();
@@ -644,7 +646,9 @@ export class PlayScene extends Phaser.Scene {
     this.arcaneFlowUntil = 0;
     this.shieldGuardUntil = 0;
 
-    this.run = { ...createRun(this.weapons.left, this.weapons.right, this.initialProgress ?? undefined), roomIndex: this.startRoomIndex };
+    this.run = this.initialCheckpoint
+      ? this.restoreCheckpoint(this.initialCheckpoint)
+      : { ...createRun(this.weapons.left, this.weapons.right, this.initialProgress ?? undefined), roomIndex: this.startRoomIndex };
     if (this.startInTown) this.run = this.fastForwardToTown(this.run);
     this.left = { weapon: leftWeapon(this.run.loadout), hand: 'left', readyAt: 0 };
     const right = rightWeapon(this.run.loadout);
@@ -692,7 +696,8 @@ export class PlayScene extends Phaser.Scene {
     this.bindInput();
     // `?town=1`로 시작하면 첫 진입부터 마을이다. 무조건 enterRoom을 부르면
     // 상태는 마을인데 화면은 전투 방이 되어, 적이 스폰되고 NPC는 없는 잡탕이 된다.
-    if (this.run.phase === 'town') this.enterTownRoom();
+    if (this.run.phase === 'won') this.showResult(true);
+    else if (this.run.phase === 'town') this.enterTownRoom();
     else this.enterRoom();
   }
 
@@ -718,7 +723,7 @@ export class PlayScene extends Phaser.Scene {
       // 빠져나갈 방법이 없다. 결과 화면이 R을 안내하는데 아무 반응이 없었다.
       // 일시정지 중에도 같은 길을 연다.
       if (isOver(this.run) || this.paused) {
-        if (this.keys.shift.isDown) clearSavedProgress();
+        if (this.keys.shift.isDown || isOver(this.run)) clearSavedProgress();
         this.scene.start('Play');
         return;
       }
@@ -4544,7 +4549,33 @@ export class PlayScene extends Phaser.Scene {
 
   private saveCurrentProgress(): void {
     if (!this.persistProgress) return;
-    saveProgress(this.run.progress);
+    saveRunCheckpoint(this.checkpointFromRun(this.run));
+  }
+
+  private checkpointFromRun(run: RunState): RunCheckpoint {
+    return {
+      phase: run.phase,
+      roomIndex: run.roomIndex,
+      hp: run.hp,
+      maxHp: run.maxHp,
+      shieldEnergy: run.shieldEnergy,
+      potionCharge: run.potionCharge,
+      progress: run.progress,
+      roomStartProgress: run.roomStartProgress,
+      roomStartKills: run.roomStartKills,
+      kills: run.kills,
+      gained: run.gained,
+      elapsed: run.elapsed,
+    };
+  }
+
+  private restoreCheckpoint(checkpoint: RunCheckpoint): RunState {
+    return {
+      ...checkpoint,
+      phase: checkpoint.phase === 'lost' ? 'combat' : checkpoint.phase,
+      loadout: loadoutFromProgress(checkpoint.progress),
+      invulnerable: 0,
+    };
   }
 
   private closeTopOverlayByEscape(): boolean {
@@ -4784,7 +4815,7 @@ export class PlayScene extends Phaser.Scene {
         .text(
           VIEW_WIDTH / 2,
           VIEW_HEIGHT / 2 + 80,
-          'P / Esc 이어하기\nR 이 판만 다시 시작 (해금 유지)\nShift+R 기록 지우고 처음부터',
+          'P / Esc 이어하기\nR 체크포인트에서 다시 시작\nShift+R 처음부터 시작',
           { fontSize: '18px', color: COLORS.textDim, align: 'center', lineSpacing: 10 },
         )
         .setOrigin(0.5),
@@ -4834,7 +4865,7 @@ export class PlayScene extends Phaser.Scene {
     );
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 다시 시작\nShift+R 기록 지우고 처음부터', {
+        .text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 처음부터 시작\nShift+R 기록 지우고 처음부터', {
           fontSize: '18px',
           color: COLORS.textDim,
           align: 'center',

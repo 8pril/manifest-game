@@ -6135,6 +6135,33 @@ DPS 벤치를 돌려 보니 강화기술은 기본 공격 대비 **단일 1.65~1
 - 관련 파일: `src/scenes/PlayScene.ts`
 - 남은 이슈: 실제 플레이에서 기본스킬을 장착한 검/활/방패/비전이 각각 콤보형 연계 배지를 정상적으로 올리는지 확인 필요
 
+### 2026-08-10 - localStorage 저장을 영구 해금에서 체크포인트로 전환
+
+- 사용 도구: Codex
+- 입력 프롬프트 / 지시: 로그라이트가 아니라 죽으면 그 방부터 시작하는 구조가 됐으니, 브라우저에 획득 상태를 영구 저장하는 것이 맞는지 논의한 뒤 사용자가 체크포인트 저장 구조로 진행하라고 결정
+- 활용 유형: 저장 구조 재설계 및 구현
+
+#### 반영한 내용
+
+- 기존 `nan2026.progress.v1` 진행 저장과 별도로 `nan2026.run-checkpoint.v2` 체크포인트 저장을 추가했다.
+- 새로고침/재접속 시 마지막 구역 또는 마을 체크포인트에서 이어지도록 `PlayScene` 시작 경로를 변경했다.
+- 저장 대상은 현재 판의 `phase`, `roomIndex`, 체력, 보호막, 물약 충전, 진행 상태, 방 시작 진행 상태, 처치 수, 획득 요약 등으로 확장했다.
+- 사망 후 재도전은 현재 구역 시작 상태로 롤백되고, 그 롤백 상태가 체크포인트로 저장된다.
+- `처음부터` 동작은 v1 progress 저장과 v2 checkpoint 저장을 모두 지운다.
+- 승리 화면에서 `R`로 다시 시작할 때 v2 체크포인트 때문에 승리 화면으로 되돌아오는 문제를 막기 위해, 판 종료 상태의 `R`도 명시적인 새 시작으로 처리했다.
+- 저장 구조 설명을 제출용 게임 설명서, 기획 범위 문서, 플레이테스트 브리프, 컨셉 브리프, 구현 플랜, 액션 트래커에 반영했다.
+
+#### 검증
+
+- `npm test -- --run src/game/progress-storage.test.ts src/game/run.test.ts`: 57개 테스트 통과
+- `npm test -- --run`: 26개 파일, 355개 테스트 통과
+- `npm run build`: `tsc --noEmit` 및 Vite 빌드 통과
+- `git diff --check`: 공백 오류 없음
+
+- 게임/문서 반영 여부: 게임 코드와 문서에 반영
+- 관련 파일: `src/game/progress-storage.ts`, `src/game/progress-storage.test.ts`, `src/scenes/PlayScene.ts`, `submission/game-description.md`, `docs/playtest-brief.md`, `docs/game-scope.md`, `docs/concept-brief.md`, `docs/full-concept-implementation-plan.md`, `docs/action-tracker.md`
+- 남은 이슈: 실제 브라우저에서 새로고침 후 구역/마을 복원, 사망 후 체크포인트 저장, 결과 화면 R 재시작을 직접 확인 필요
+
 ### 2026-08-10 - 새 보스 2종 아트 생성
 
 - 사용 도구: OpenAI `gpt-image-1` (Claude Code가 호출)

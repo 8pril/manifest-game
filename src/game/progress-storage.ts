@@ -3,10 +3,36 @@ import { reconcileLayout } from '@/game/inventory';
 import { createInitialProgress, type ManifestationConfig, type PlayerProgress, type WheelSlot } from '@/game/progression';
 
 export const PROGRESS_STORAGE_KEY = 'nan2026.progress.v1';
+export const RUN_CHECKPOINT_STORAGE_KEY = 'nan2026.run-checkpoint.v2';
 
 interface ProgressSnapshot {
   version: 1;
   progress: PlayerProgress;
+}
+
+export interface RunCheckpoint {
+  phase: 'combat' | 'town' | 'won' | 'lost';
+  roomIndex: number;
+  hp: number;
+  maxHp: number;
+  shieldEnergy: number;
+  potionCharge: number;
+  progress: PlayerProgress;
+  roomStartProgress: PlayerProgress;
+  roomStartKills: number;
+  kills: number;
+  gained?: {
+    weapons?: readonly WeaponId[];
+    basicSkills?: readonly string[];
+    supports?: readonly string[];
+    keys?: readonly string[];
+  };
+  elapsed: number;
+}
+
+interface RunCheckpointSnapshot {
+  version: 2;
+  checkpoint: RunCheckpoint;
 }
 
 export interface ProgressStore {
@@ -43,6 +69,33 @@ export function saveProgress(progress: PlayerProgress, store: ProgressStore | un
 
 export function clearSavedProgress(store: ProgressStore | undefined = browserStorage()): void {
   store?.removeItem(PROGRESS_STORAGE_KEY);
+  store?.removeItem(RUN_CHECKPOINT_STORAGE_KEY);
+}
+
+export function serializeRunCheckpoint(checkpoint: RunCheckpoint): string {
+  return JSON.stringify({ version: 2, checkpoint } satisfies RunCheckpointSnapshot);
+}
+
+export function parseRunCheckpoint(value: string | null): RunCheckpoint | null {
+  if (!value) return null;
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed) || parsed.version !== 2 || !isRecord(parsed.checkpoint)) return null;
+    return sanitizeRunCheckpoint(parsed.checkpoint);
+  } catch {
+    return null;
+  }
+}
+
+export function loadRunCheckpoint(store: ProgressStore | undefined = browserStorage()): RunCheckpoint | null {
+  if (!store) return null;
+  return parseRunCheckpoint(store.getItem(RUN_CHECKPOINT_STORAGE_KEY));
+}
+
+export function saveRunCheckpoint(checkpoint: RunCheckpoint, store: ProgressStore | undefined = browserStorage()): void {
+  if (!store) return;
+  store.setItem(RUN_CHECKPOINT_STORAGE_KEY, serializeRunCheckpoint(checkpoint));
 }
 
 function sanitizeProgress(raw: Record<string, unknown>): PlayerProgress {
@@ -85,6 +138,58 @@ function sanitizeProgress(raw: Record<string, unknown>): PlayerProgress {
   // 보유하고 있어도 인벤토리 격자가 텅 빈 채로 보인다. 손상된 배치도 마찬가지다.
   // 보유 목록에 맞춰 정리해야 새로 얻은 것이 빈 칸에 들어가고 없는 것이 빠진다.
   return { ...parsed, inventory: reconcileLayout(parsed, parsed.inventory) };
+}
+
+function sanitizeRunCheckpoint(raw: Record<string, unknown>): RunCheckpoint {
+  const progress = sanitizeProgress(isRecord(raw.progress) ? raw.progress : {});
+  const roomStartProgress = isRecord(raw.roomStartProgress) ? sanitizeProgress(raw.roomStartProgress) : progress;
+  const maxHp = positiveNumber(raw.maxHp, 100);
+
+  return {
+    phase: runPhase(raw.phase),
+    roomIndex: nonNegativeInteger(raw.roomIndex, 0),
+    hp: clampNumber(raw.hp, 0, maxHp, maxHp),
+    maxHp,
+    shieldEnergy: clampNumber(raw.shieldEnergy, 0, 45, 45),
+    potionCharge: clampNumber(raw.potionCharge, 0, 70, 70),
+    progress,
+    roomStartProgress,
+    roomStartKills: nonNegativeInteger(raw.roomStartKills, 0),
+    kills: nonNegativeInteger(raw.kills, 0),
+    gained: roomReward(raw.gained),
+    elapsed: Math.max(0, numberOr(raw.elapsed, 0)),
+  };
+}
+
+function runPhase(value: unknown): RunCheckpoint['phase'] {
+  return value === 'town' || value === 'won' || value === 'lost' ? value : 'combat';
+}
+
+function roomReward(value: unknown): RunCheckpoint['gained'] {
+  if (!isRecord(value)) return undefined;
+  return {
+    weapons: weaponIds(value.weapons),
+    basicSkills: stringIds(value.basicSkills, []),
+    supports: stringIds(value.supports, []),
+    keys: stringIds(value.keys, []),
+  };
+}
+
+function nonNegativeInteger(value: unknown, fallback: number): number {
+  return Math.max(0, Math.floor(numberOr(value, fallback)));
+}
+
+function positiveNumber(value: unknown, fallback: number): number {
+  const n = numberOr(value, fallback);
+  return n > 0 ? n : fallback;
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  return Math.max(min, Math.min(max, numberOr(value, fallback)));
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
 function configFor(raw: unknown, fallback: ManifestationConfig): ManifestationConfig {
