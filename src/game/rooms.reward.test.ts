@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { ROOMS } from '@/game/rooms';
 import { weaponOf, WEAPON_IDS } from '@/data/weapons';
 import { findSupport } from '@/data/supports';
-import { findSkill } from '@/data/skills';
 
 /**
  * 방 보상이 화면 문구로 풀리는지 고정한다.
@@ -15,7 +14,7 @@ describe('방 보상', () => {
   const rewards = ROOMS.flatMap((room) => (room.reward ? [{ label: room.label, reward: room.reward }] : []));
 
   it('보상이 있는 방이 존재한다', () => {
-    expect(rewards.map((r) => r.label)).toEqual(['흐린 입구', '첫 문지기', '무너진 문']);
+    expect(rewards.map((r) => r.label)).toEqual(['첫 문지기', '윗길 제단', '아랫길 굴', '무너진 문']);
   });
 
   for (const { label, reward } of rewards) {
@@ -27,27 +26,39 @@ describe('방 보상', () => {
       for (const id of reward.supports ?? []) {
         expect(findSupport(id), `보조형 ${id}`).toBeTruthy();
       }
-      for (const id of reward.comboSkills ?? []) {
-        expect(findSkill(id), `강화기술 ${id}`).toBeTruthy();
-      }
     });
   }
 
-  it('흐린 입구 보상 문구', () => {
-    const r = ROOMS[0].reward!;
-    expect(r.comboSkills?.map((id) => findSkill(id)!.name).join(' / ')).toBe('멸검');
+  it('첫 방은 아이템을 드랍하지 않는다', () => {
+    expect(ROOMS[0].reward).toBeUndefined();
   });
 
-  it('첫 문지기 보상 문구', () => {
+  it('첫 보스는 무기 2종과 기본스킬 3종을 준다', () => {
     const r = ROOMS[1].reward!;
     expect(r.weapons?.map((id) => weaponOf(id).name).join(' / ')).toBe('활 / 방패');
-    expect(r.comboSkills?.map((id) => findSkill(id)!.name).join(' / ')).toBe('연사 / 균열 파동');
-    expect(r.supports ?? []).toEqual(['combo-imprint']);
+    // **검의 것까지 준다.** 기본스킬은 무기에 딸려 오지 않으므로, 여기서 주지 않으면
+    // 시작 무기인 검은 소켓을 영영 채울 수 없다.
+    expect(r.basicSkills).toEqual(['thrust', 'scattershot', 'shield-slam']);
+    // **보조형스킬은 두 번째 보스 몫이다.** 확정도 랜덤도 여기서는 주지 않는다.
+    expect(r.supports ?? []).toEqual([]);
+    expect(r.randomSupports).toBeUndefined();
   });
 
-  it('최종 보스 보상 문구', () => {
+  it('기본스킬 보상 id가 전부 무기의 것과 맞는다', () => {
+    const owned = new Set(WEAPON_IDS.map((id) => weaponOf(id).basicSkill.id));
+    for (const room of ROOMS) {
+      for (const id of room.reward?.basicSkills ?? []) {
+        expect(owned, `기본스킬 ${id}`).toContain(id);
+      }
+    }
+  });
+
+  it('최종 보스는 보조와 연계를 1종씩 랜덤으로 준다', () => {
     const r = ROOMS[ROOMS.length - 1].reward!;
     expect(r.weapons?.map((id) => weaponOf(id).name).join(' / ')).toBe('비전');
-    expect(r.supports?.map((id) => findSupport(id)!.name).join(' / ')).toBe('연쇄 / 찌릿거리는 지대');
+    expect(r.supports ?? []).toEqual([]);
+    // 보조 1종과 연계 1종을 랜덤으로. 보조형스킬의 유일한 출처다.
+    expect(r.randomSupports).toEqual({ primary: 1, synergy: 1 });
+    expect(r.supports ?? []).toEqual([]);
   });
 });

@@ -15,7 +15,7 @@ import { createStatusHost, type StatusHost } from '@/engine/status';
  * 때문이다. 거리를 벌리는 행동에 대가를 만든다.
  */
 
-export type EnemyKind = 'chaser' | 'brute' | 'archer' | 'gatekeeper' | 'collapsedDoor';
+export type EnemyKind = 'chaser' | 'brute' | 'archer' | 'gatekeeper' | 'collapsedDoor' | 'warden' | 'glutton';
 export type EnemyBehavior = 'chase' | 'ranged';
 
 export interface EnemyStats {
@@ -89,6 +89,38 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
     contactDamage: 22,
     contactCooldown: 0.9,
     color: 0xff6b3d,
+    behavior: 'chase',
+  },
+  /**
+   * 윗길 제단의 보스. **기믹이 까다로운 쪽**이다.
+   *
+   * 문지기와 같은 돌진 패턴을 쓰되 예고가 짧고 다시 오는 주기가 빠르다. 체력은
+   * 오히려 낮다 — 오래 버티는 싸움이 아니라 **읽고 피하는** 싸움이어야 한다.
+   */
+  warden: {
+    label: '제단지기',
+    hp: 1500,
+    speed: 96,
+    radius: 62,
+    contactDamage: 26,
+    contactCooldown: 0.8,
+    color: 0x6be0a0,
+    behavior: 'chase',
+  },
+  /**
+   * 아랫길 굴의 보스. **기믹은 단순하고 체력이 많은 쪽**이다.
+   *
+   * 느리고 예고가 길어 피하기 쉽지만 좀처럼 죽지 않는다. 화력이 부족한 빌드는
+   * 여기서 시간이 걸린다 — 소켓과 보조를 제대로 채웠는지 묻는 방이다.
+   */
+  glutton: {
+    label: '굴의 포식자',
+    hp: 4200,
+    speed: 40,
+    radius: 86,
+    contactDamage: 16,
+    contactCooldown: 1.1,
+    color: 0xd9a441,
     behavior: 'chase',
   },
   collapsedDoor: {
@@ -180,14 +212,24 @@ export function createEnemy(kind: EnemyKind, x: number, y: number): Enemy {
   };
 }
 
+const BOSS_KINDS: readonly EnemyKind[] = ['gatekeeper', 'collapsedDoor', 'warden', 'glutton'];
+
 export function isBossKind(kind: EnemyKind): boolean {
-  return kind === 'gatekeeper' || kind === 'collapsedDoor';
+  return BOSS_KINDS.includes(kind);
 }
+
+/** 충격파(원거리 예고) 패턴을 쓰는 보스. 나머지는 돌진 패턴이다. */
+const SHOCK_BOSSES: readonly EnemyKind[] = ['collapsedDoor', 'glutton'];
 
 function createBossState(kind: EnemyKind): BossState {
   return {
     phase: 'idle',
-    chargeCooldown: kind === 'collapsedDoor' ? BOSS_SHOCK_COOLDOWN : BOSS_CHARGE_COOLDOWN,
+    // 제단지기는 같은 돌진 패턴을 **더 자주** 건다. 읽는 눈을 시험하는 쪽이다.
+    chargeCooldown: SHOCK_BOSSES.includes(kind)
+      ? BOSS_SHOCK_COOLDOWN
+      : kind === 'warden'
+        ? BOSS_CHARGE_COOLDOWN * 0.6
+        : BOSS_CHARGE_COOLDOWN,
     telegraphRemaining: 0,
     chargeRemaining: 0,
     staggerRemaining: 0,

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SUPPORTS } from '@/data/supports';
 import { SKILLS, findSkill } from '@/data/skills';
-import { WEAPON_LIST, awakenedAttackInterval, deliveryOf } from '@/data/weapons';
+import { WEAPON_LIST, attackIntervalFor, deliveryOf } from '@/data/weapons';
 import { canAttach, resolveSkill, supportSlotType } from '@/engine/support';
 import { TAGS } from '@/engine/tags';
 
@@ -65,8 +65,7 @@ describe('보조능력 데이터 무결성', () => {
 
     expect(primary.length).toBeGreaterThan(0);
     expect(synergy.map((support) => support.id)).toEqual([
-      // 콤보 계열 3종. 조건과 효과가 각자 다르다.
-      'combo-imprint',
+      // 콤보 계열 2종. 조건과 효과가 각자 다르다.
       'linked-momentum',
       'combo-release',
       // 상태이상 시너지 3종.
@@ -79,7 +78,7 @@ describe('보조능력 데이터 무결성', () => {
   it('연계는 조건부 거동을 갖는다', () => {
     // 연계는 수치를 그냥 올려주는 것이 아니라 **조건이 붙은** 효과여야 한다.
     // 상태이상 대상일 때(statusDamage)이거나 연속 명중했을 때(combo)다.
-    // 콤보를 기본 규칙에서 빼면서 `콤보 개방`이 여기 들어왔고, 그래서 조건이
+    // 콤보를 기본 규칙에서 빼면서 `강화 개방`이 여기 들어왔고, 그래서 조건이
     // 상태이상 하나로 고정되지 않는다.
     const synergy = SUPPORTS.filter((support) => supportSlotType(support) === 'synergy');
     const conditional = ['statusDamage', 'combo'];
@@ -220,10 +219,10 @@ describe('무기 데이터 무결성', () => {
 
     expect(deliveryOf(sword.combo)).toBe('area');
     expect(deliveryOf(shield.combo)).toBe('area');
-    expect(awakenedAttackInterval(sword)).toBe(sword.comboInterval);
-    expect(awakenedAttackInterval(shield)).toBe(shield.comboInterval);
-    expect(awakenedAttackInterval(sword)).toBeGreaterThan(sword.cooldown);
-    expect(awakenedAttackInterval(shield)).toBeGreaterThan(shield.cooldown);
+    expect(attackIntervalFor(sword, sword.combo)).toBe(sword.comboInterval);
+    expect(attackIntervalFor(shield, shield.combo)).toBe(shield.comboInterval);
+    expect(attackIntervalFor(sword, sword.combo)).toBeGreaterThan(sword.cooldown);
+    expect(attackIntervalFor(shield, shield.combo)).toBeGreaterThan(shield.cooldown);
   });
 
   it('각성 대체 발동에서 투사체형은 기본 무기 쿨다운을 쓴다', () => {
@@ -232,7 +231,7 @@ describe('무기 데이터 무결성', () => {
 
     expect(deliveryOf(bow.combo)).toBe('projectile');
     expect(deliveryOf(arcane.combo)).toBe('projectile');
-    expect(awakenedAttackInterval(bow)).toBe(bow.cooldown);
-    expect(awakenedAttackInterval(arcane)).toBe(arcane.cooldown);
+    expect(attackIntervalFor(bow, bow.combo)).toBe(bow.cooldown);
+    expect(attackIntervalFor(arcane, arcane.combo)).toBe(arcane.cooldown);
   });
 });

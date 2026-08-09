@@ -1,4 +1,5 @@
 import { WEAPON_IDS, type WeaponId } from '@/data/weapons';
+import { reconcileLayout } from '@/game/inventory';
 import { createInitialProgress, type ManifestationConfig, type PlayerProgress, type WheelSlot } from '@/game/progression';
 
 export const PROGRESS_STORAGE_KEY = 'nan2026.progress.v1';
@@ -57,10 +58,14 @@ function sanitizeProgress(raw: Record<string, unknown>): PlayerProgress {
     right: right && unlockedWeapons.includes(right) ? right : null,
   };
 
-  return {
+  const parsed: PlayerProgress = {
     unlockedWeapons,
-    ownedComboSkills: stringIds(raw.ownedComboSkills, fallback.ownedComboSkills),
+    inventory: Array.isArray(raw.inventory)
+      ? raw.inventory.map((id) => (typeof id === 'string' ? id : null))
+      : fallback.inventory,
+    ownedBasicSkills: stringIds(raw.ownedBasicSkills, fallback.ownedBasicSkills),
     ownedSupports: stringIds(raw.ownedSupports, fallback.ownedSupports),
+    ownedKeys: stringIds(raw.ownedKeys, fallback.ownedKeys),
     weaponSwitchUnlocked: raw.weaponSwitchUnlocked === true,
     active,
     wheel: {
@@ -74,12 +79,18 @@ function sanitizeProgress(raw: Record<string, unknown>): PlayerProgress {
       ]),
     ) as PlayerProgress['configs'],
   };
+
+  // **저장된 배치를 그대로 쓰면 안 된다.**
+  // `inventory` 필드가 없던 시절의 저장에는 배치가 통째로 비어 있어서, 활·방패를
+  // 보유하고 있어도 인벤토리 격자가 텅 빈 채로 보인다. 손상된 배치도 마찬가지다.
+  // 보유 목록에 맞춰 정리해야 새로 얻은 것이 빈 칸에 들어가고 없는 것이 빠진다.
+  return { ...parsed, inventory: reconcileLayout(parsed, parsed.inventory) };
 }
 
 function configFor(raw: unknown, fallback: ManifestationConfig): ManifestationConfig {
   if (!isRecord(raw)) return fallback;
   return {
-    comboSkillId: typeof raw.comboSkillId === 'string' ? raw.comboSkillId : fallback.comboSkillId,
+    basicSkillId: nullableString(raw.basicSkillId),
     primarySupportId: nullableString(raw.primarySupportId),
     synergySupportId: nullableString(raw.synergySupportId),
   };

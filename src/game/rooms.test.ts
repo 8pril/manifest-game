@@ -16,12 +16,13 @@ describe('room composition', () => {
     }
   });
 
-  it('첫 보스와 최종 보스는 서로 다른 종류다', () => {
+  it('보스는 방마다 서로 다른 종류다', () => {
     const bossKinds = ROOMS
       .map((room) => room.spawns.find((spawn) => isBossKind(spawn.kind) && spawn.count > 0)?.kind)
       .filter(Boolean);
 
-    expect(bossKinds).toEqual(['gatekeeper', 'collapsedDoor']);
+    // 보스 4종이 전부 다른 종류다. 같은 패턴을 두 번 보여 주면 방이 늘어난 의미가 없다.
+    expect(bossKinds).toEqual(['gatekeeper', 'warden', 'glutton', 'collapsedDoor']);
     expect(new Set(bossKinds).size).toBe(bossKinds.length);
   });
 });

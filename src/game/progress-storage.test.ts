@@ -65,4 +65,78 @@ describe('progress storage', () => {
     expect(restored?.wheel.left).toEqual(['sword', 'sword']);
     expect(restored?.wheel.right).toEqual([null, null]);
   });
+
+  it('없어진 강화기술 보유 필드가 남아 있어도 조용히 버린다', () => {
+    // 강화기술을 따로 줍던 시절의 저장에는 `ownedComboSkills`와 `configs.*.comboSkillId`가
+    // 들어 있다. 이제 강화기술은 무기에 딸려 오므로 둘 다 읽지 않는다. 남은 키 때문에
+    // 복원이 실패하면 그 기록으로 플레이하던 사람의 진행이 통째로 날아간다.
+    const restored = parseProgress(JSON.stringify({
+      version: 1,
+      progress: {
+        unlockedWeapons: ['sword', 'bow'],
+        ownedComboSkills: ['annihilation', 'volley'],
+        ownedSupports: ['combo-imprint'],
+        weaponSwitchUnlocked: true,
+        active: { left: 'sword', right: 'bow' },
+        wheel: { left: ['sword', null], right: ['bow', null] },
+        configs: { sword: { comboSkillId: 'annihilation', primarySupportId: null, synergySupportId: 'combo-imprint' } },
+      },
+    }));
+
+    expect(restored?.unlockedWeapons).toEqual(['sword', 'bow']);
+    expect(restored?.ownedSupports).toEqual(['combo-imprint']);
+    // 설정에서 남은 키는 사라지고 소켓 세 칸만 남는다.
+    expect(restored?.configs.sword).toEqual({
+      basicSkillId: null,
+      primarySupportId: null,
+      synergySupportId: 'combo-imprint',
+    });
+    expect(restored).not.toHaveProperty('ownedComboSkills');
+  });
+});
+
+describe('인벤토리 배치 복원', () => {
+  it('`inventory` 필드가 없던 옛 저장도 격자가 채워진다', () => {
+    // 필드를 추가하기 전에 저장된 기록에는 배치가 통째로 없다. 그대로 읽으면
+    // 활·방패를 보유하고 있어도 마을 인벤토리가 텅 빈 채로 보인다.
+    const old = JSON.stringify({
+      version: 1,
+      progress: {
+        unlockedWeapons: ['sword', 'bow', 'shield'],
+        ownedBasicSkills: ['thrust', 'scattershot', 'shield-slam'],
+        ownedSupports: ['multiple-projectiles'],
+        weaponSwitchUnlocked: true,
+        active: { left: 'sword', right: null },
+      },
+    });
+
+    const restored = parseProgress(old);
+
+    // 무기 → 각 무기의 기본스킬 → 보조형스킬 순서로 채워진다.
+    expect(restored?.inventory.filter((id) => id !== null)).toEqual([
+      'sword',
+      'bow',
+      'shield',
+      'thrust',
+      'scattershot',
+      'shield-slam',
+      'multiple-projectiles',
+    ]);
+  });
+
+  it('보유하지 않은 것이 배치에 남아 있으면 지운다', () => {
+    const broken = JSON.stringify({
+      version: 1,
+      progress: {
+        unlockedWeapons: ['sword'],
+        active: { left: 'sword', right: null },
+        inventory: ['arcane', 'sword'],
+      },
+    });
+
+    const restored = parseProgress(broken);
+
+    expect(restored?.inventory).not.toContain('arcane');
+    expect(restored?.inventory).toContain('sword');
+  });
 });

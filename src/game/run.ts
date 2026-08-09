@@ -5,7 +5,9 @@ import {
   createInitialProgress,
   equipFirstWheelSlots,
   setWheelSlot,
-  unlockComboSkills,
+  hasAllKeys,
+  unlockBasicSkills,
+  unlockKeys,
   unlockSupports,
   unlockWeapons,
   unlockWeaponSwitch,
@@ -160,7 +162,8 @@ function mergeRoomRewards(a?: RoomReward, b?: RoomReward): RoomReward | undefine
 
   return {
     weapons: orderedUnique([...(a.weapons ?? []), ...(b.weapons ?? [])]),
-    comboSkills: orderedUnique([...(a.comboSkills ?? []), ...(b.comboSkills ?? [])]),
+    basicSkills: orderedUnique([...(a.basicSkills ?? []), ...(b.basicSkills ?? [])]),
+    keys: orderedUnique([...(a.keys ?? []), ...(b.keys ?? [])]),
     supports: orderedUnique([...(a.supports ?? []), ...(b.supports ?? [])]),
   };
 }
@@ -181,20 +184,34 @@ export function newPartsOfReward(progress: PlayerProgress, reward?: RoomReward):
   if (!reward) return undefined;
 
   const weapons = reward.weapons?.filter((id) => !progress.unlockedWeapons.includes(id)) ?? [];
-  const comboSkills = reward.comboSkills?.filter((id) => !progress.ownedComboSkills.includes(id)) ?? [];
+  const basicSkills = reward.basicSkills?.filter((id) => !progress.ownedBasicSkills.includes(id)) ?? [];
   const supports = reward.supports?.filter((id) => !progress.ownedSupports.includes(id)) ?? [];
+  const keys = reward.keys?.filter((id) => !progress.ownedKeys.includes(id)) ?? [];
 
-  if (!weapons.length && !comboSkills.length && !supports.length) return undefined;
-  return { weapons, comboSkills, supports };
+  if (!weapons.length && !basicSkills.length && !supports.length && !keys.length) return undefined;
+  return { weapons, basicSkills, supports, keys };
 }
 
 function applyRoomReward(progress: PlayerProgress, reward?: RoomReward): PlayerProgress {
   if (!reward) return progress;
   let next = progress;
   if (reward.weapons?.length) next = unlockWeapons(next, reward.weapons);
-  if (reward.comboSkills?.length) next = unlockComboSkills(next, reward.comboSkills);
+  if (reward.basicSkills?.length) next = unlockBasicSkills(next, reward.basicSkills);
+  if (reward.keys?.length) next = unlockKeys(next, reward.keys);
   if (reward.supports?.length) next = unlockSupports(next, reward.supports);
+  // 인벤토리 배치는 `unlockWeapons`/`unlockSupports`가 알아서 맞춘다.
   return next;
+}
+
+/**
+ * 이 방의 출구가 열릴 수 있는지.
+ *
+ * 적을 다 정리해도 봉인된 문은 열쇠가 없으면 열리지 않는다. 열쇠를 다 모으기 전에
+ * 지나가 버리면 뒤에 있는 방을 볼 수 없으므로, 규칙으로 막고 화면에서 이유를 말한다.
+ */
+export function exitUnlocked(run: RunState): boolean {
+  const required = roomAt(run.roomIndex)?.requiresKeys;
+  return !required?.length || hasAllKeys(run.progress, required);
 }
 
 /** 마을을 나와 다음 전투 방으로 이동한다. */

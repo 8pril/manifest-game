@@ -65,11 +65,11 @@ describe('콤보 빌드 파라미터', () => {
   // 콤보는 첫 보스 보상을 마을에서 붙여야 켜진다. 콤보 유무를 비교하려면 매번
   // 방 두 개를 클리어해야 해서, 검증과 플레이 테스트 양쪽에서 비용이 크다.
   it('?combo=1 이면 기본 보조가 켜진다', () => {
-    expect(parseDebugStart('?combo=1', 5).combo).toBe('combo-imprint');
+    expect(parseDebugStart('?combo=1', 5).combo).toBe('linked-momentum');
   });
 
   it('?combo 만 있어도 켜진다', () => {
-    expect(parseDebugStart('?combo', 5).combo).toBe('combo-imprint');
+    expect(parseDebugStart('?combo', 5).combo).toBe('linked-momentum');
   });
 
   it('보조 id를 직접 줄 수 있다', () => {
@@ -79,7 +79,7 @@ describe('콤보 빌드 파라미터', () => {
   });
 
   it('모르는 id는 기본 보조로 떨어진다', () => {
-    expect(parseDebugStart('?combo=nope', 5).combo).toBe('combo-imprint');
+    expect(parseDebugStart('?combo=nope', 5).combo).toBe('linked-momentum');
   });
 
   it('?combo=0 이면 꺼진다', () => {
@@ -92,6 +92,29 @@ describe('콤보 빌드 파라미터', () => {
 
   it('다른 파라미터와 함께 쓸 수 있다', () => {
     const parsed = parseDebugStart('?wave=3&left=bow&combo=1', 5);
-    expect(parsed).toEqual({ left: 'bow', right: undefined, roomIndex: 2, town: false, combo: 'combo-imprint' });
+    expect(parsed).toEqual({
+      left: 'bow',
+      right: undefined,
+      roomIndex: 2,
+      town: false,
+      combo: 'linked-momentum',
+      supports: undefined,
+    });
+  });
+});
+
+describe('?supports=', () => {
+  it('쉼표로 나눠 보유시킨다', () => {
+    expect(parseDebugStart('?supports=chain,earthquake', 5).supports).toEqual(['chain', 'earthquake']);
+  });
+
+  it('공백과 빈 항목은 버린다', () => {
+    expect(parseDebugStart('?supports= chain , ,earthquake ', 5).supports).toEqual(['chain', 'earthquake']);
+  });
+
+  it('없거나 비어 있으면 undefined다', () => {
+    expect(parseDebugStart('?wave=2', 5).supports).toBeUndefined();
+    expect(parseDebugStart('?supports=', 5).supports).toBeUndefined();
+    expect(parseDebugStart('?supports=,,', 5).supports).toBeUndefined();
   });
 });

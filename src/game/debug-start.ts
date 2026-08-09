@@ -12,12 +12,21 @@ export interface DebugStart {
    *
    * 콤보는 이제 기본 규칙이 아니라 연계를 붙였을 때만 켜진다. 그런데 그 보조는
    * 첫 보스 보상이고 장착은 마을에서만 되므로, 콤보가 걸린 상태를 보려면 매번
-   * 두 방을 클리어해야 한다. 콤보 유무를 비교하는 데 그 비용이 너무 크다.
+   * 첫 방과 첫 보스를 지나야 한다. 콤보 유무를 비교하는 데 그 비용이 너무 크다.
    *
    * 콤보 계열이 셋이고 조건이 각자 달라서 어느 것을 볼지 고를 수 있어야 한다.
-   * `?combo=1`은 기본값인 `콤보 개방`이다.
+   * `?combo=1`은 기본값인 `연결 가속`이다.
    */
   combo?: ComboSupportId | null;
+  /**
+   * 보조형스킬을 미리 보유한 채 시작한다. `?supports=chain,wound-seeker`.
+   *
+   * 보조는 최종 보스 보상뿐이라, 인벤토리에 보조와 연계가 함께 있는 상태를 보려면
+   * 판을 끝까지 깨고 다음 판으로 넘어가야 한다. 마을 UI 검증이 그 비용에 계속 막혔다.
+   * id 검증은 하지 않는다. 없는 id는 `unlockSupports` 뒤 보유 목록에 남아도
+   * `findSupport`에서 걸러진다.
+   */
+  supports?: readonly string[];
 }
 
 const WEAPON_SET = new Set<WeaponId>(WEAPON_IDS);
@@ -36,7 +45,13 @@ function parseRightWeapon(value: string | null): WeaponId | null | undefined {
 function parseCombo(value: string | null): ComboSupportId | null {
   if (value === null || value === '0') return null;
   const found = COMBO_SUPPORT_IDS.find((id) => id === value);
-  return found ?? 'combo-imprint';
+  return found ?? 'linked-momentum';
+}
+
+function parseSupports(value: string | null): readonly string[] | undefined {
+  if (!value) return undefined;
+  const ids = value.split(',').map((id) => id.trim()).filter((id) => id.length > 0);
+  return ids.length ? ids : undefined;
 }
 
 export function parseDebugStart(search: string, totalRooms: number): DebugStart {
@@ -51,5 +66,6 @@ export function parseDebugStart(search: string, totalRooms: number): DebugStart 
     roomIndex: town ? undefined : roomIndex,
     town,
     combo: parseCombo(params.get('combo')),
+    supports: parseSupports(params.get('supports')),
   };
 }

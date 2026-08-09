@@ -92,6 +92,19 @@ export function sustainCombo(combo: ComboState, hand: Hand, stats: StatBlock): C
   return { ...combo, remaining: stats.comboDuration ?? COMBO_BASE_DURATION, lastHand: hand };
 }
 
+/**
+ * 지속시간만 다시 채운다. 손도 쌓아 둔 교차도 건드리지 않는다.
+ *
+ * 지대 지속피해가 이걸 쓴다. 예전에는 지대 틱도 `sustainCombo`를 불러 `직전 손`을
+ * 계속 자기 손으로 덮어썼다. 지대가 도는 동안 반대손이 영구히 준비 상태가 되고,
+ * 교차 연속은 같은 손 명중이 반복되는 것으로 읽혀 오르지 못했다.
+ * 지대 틱은 플레이어가 손으로 친 것이 아니므로 리듬 판정에 끼어들면 안 된다.
+ */
+export function refreshCombo(combo: ComboState, stats: StatBlock): ComboState {
+  if (comboTotal(combo) === 0) return combo;
+  return { ...combo, remaining: stats.comboDuration ?? COMBO_BASE_DURATION };
+}
+
 export function tickCombo(combo: ComboState, deltaSeconds: number): ComboState {
   if (comboTotal(combo) === 0) return combo;
 
@@ -122,16 +135,32 @@ export function breakCombo(): ComboState {
  */
 export function comboTriggerMet(combo: ComboState, hand: Hand, trigger: ComboTrigger): boolean {
   switch (trigger.reads) {
-    // 직전 명중이 반대손이면 성립한다. 세지 않고 직전 한 번만 본다.
-    // 같은 손을 연달아 치면 끊긴다.
-    case 'alternate':
-      return combo.lastHand !== null && combo.lastHand !== hand;
     case 'self':
       return comboOf(combo, hand) >= trigger.required;
     case 'other':
       return comboOf(combo, otherHand(hand)) >= trigger.required;
     case 'total':
       return comboTotal(combo) >= trigger.required;
+  }
+}
+
+/**
+ * 이 조건을 화면에 어떻게 보여줄 것인가.
+ *
+ * **조건이 연계마다 다르므로 표시도 달라야 한다.** 세지 않는 조건에 카운터를 띄우면
+ * "채워야 하는" 것으로 잘못 읽힌다. 실제로 옛 게이지 UI를 그대로 들고 왔다가 그랬다.
+ */
+/** 남은 하나. 조건이 전부 수치를 세는 것이라 표시도 수치 하나다. */
+export type ComboReadout = { kind: 'count'; value: number; required: number; label: string };
+
+export function comboReadout(combo: ComboState, hand: Hand, trigger: ComboTrigger): ComboReadout {
+  switch (trigger.reads) {
+    case 'self':
+      return { kind: 'count', value: comboOf(combo, hand), required: trigger.required, label: '이 손' };
+    case 'other':
+      return { kind: 'count', value: comboOf(combo, otherHand(hand)), required: trigger.required, label: '반대손' };
+    case 'total':
+      return { kind: 'count', value: comboTotal(combo), required: trigger.required, label: '합계' };
   }
 }
 

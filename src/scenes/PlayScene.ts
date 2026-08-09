@@ -13,10 +13,11 @@ import {
 import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
-import { awakenedAttackInterval, deliveryOf, weaponOf, WEAPON_IDS, type Weapon, type WeaponId } from '@/data/weapons';
-import { findSupport } from '@/data/supports';
-import { findSkill } from '@/data/skills';
+import { attackIntervalFor, deliveryOf, weaponOf, WEAPON_IDS, type Weapon, type WeaponId } from '@/data/weapons';
+import { SUPPORTS, findSupport } from '@/data/supports';
+import { missingKeys } from '@/data/keys';
 import { canAttach, findBehavior, resolveSkill, supportSlotType, type Behavior, type Skill, type Support } from '@/engine/support';
+import type { Stat } from '@/engine/modifiers';
 import {
   spawnProjectiles,
   advance,
@@ -27,7 +28,6 @@ import {
 } from '@/engine/projectile';
 import { targetsInArc } from '@/engine/melee';
 import { applyKnockback } from '@/engine/knockback';
-import type { Stat } from '@/engine/modifiers';
 import {
   createArea,
   tickArea,
@@ -80,17 +80,17 @@ import {
   type RoomTone,
 } from '@/game/rooms';
 import { loreFor, LORE_RADIUS } from '@/data/lore';
-import { leftWeapon, rightWeapon, resolveFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
+import { leftWeapon, rightWeapon, resolveFor, supportsFor, describeByHand, loadoutFromProgress } from '@/game/loadout';
 import {
   createCombo,
   gainCombo,
   sustainCombo,
+  refreshCombo,
   tickCombo,
   consumeCombo,
   comboRulesOf,
   comboTriggerMet,
-  comboTotal,
-  comboOf,
+  comboReadout,
   otherHand,
   COMBO_REQUIRED,
   type ComboState,
@@ -105,12 +105,21 @@ import {
   addKill,
   advanceTime,
   hasActiveShield,
+  exitUnlocked,
   isOver,
   newPartsOfReward,
   SHIELD_ENERGY_MAX,
   type RunState,
 } from '@/game/run';
-import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboSupport, hasComboSkill, unlockWeapons, setWheelSlot, type Hand, type PlayerProgress, type WheelSlot } from '@/game/progression';
+import {
+  basicSkillItem,
+  cellsOf,
+  INVENTORY_COLUMNS,
+  INVENTORY_ROWS,
+  type InventoryFilter,
+  type InventoryItem,
+} from '@/game/inventory';
+import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboSupport, equippedBasicSkill, unlockSupports, unlockWeapons, setWheelSlot, moveInventoryItem, sortInventory, type Hand, type PlayerProgress } from '@/game/progression';
 import { parseDebugStart } from '@/game/debug-start';
 import { clearSavedProgress, loadProgress, saveProgress } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
@@ -127,6 +136,42 @@ const WALL = 24;
 const EXIT_SIZE = 140;
 /** 미니맵이 차지하는 정사각 영역의 한 변(px). 방은 이 안에 비율을 지켜 들어간다. */
 const MINIMAP_MAX = 132;
+
+/**
+ * 마을 설정 패널 배치.
+ *
+ * 기획서(`UI구성.pptx`)의 도형 좌표를 그대로 옮겼다. 원본이 960×540 슬라이드라
+ * 논리 해상도 1280×720에 맞춰 4/3배 했다.
+ *
+ * ```
+ * ┌ 패널 ────────────────────────────────────┐
+ * │ [탭1]  좌: 탭 내용        우: 인벤토리      │
+ * │ [탭2]                      [전체][무기][보조]│
+ * │                            7×7 격자         │
+ * │                            [자동정렬]       │
+ * └──────────────────────────────────────────┘
+ * ```
+ */
+const TOWN_UI = {
+  panel: { x: 45, y: 47, w: 1180, h: 635 },
+  /** 좌측 세로 메인 탭. 무기 설정 / 기술 설정. */
+  mainTab: { x: 75, y: 127, w: 92, h: 40, gap: 8 },
+  /** 좌측 탭 내용 영역. */
+  content: { x: 181, y: 127, w: 452, h: 544 },
+  /** 우측 인벤토리 필터 탭 3개. */
+  filterTab: { x: 651, y: 127, w: 100, h: 40, gap: 8 },
+  /** 우측 인벤토리 본체. 격자 7×7과 하단 자동정렬 버튼이 함께 들어가야 한다. */
+  inventory: { x: 651, y: 176, w: 484, h: 490 },
+  /**
+   * 격자 칸 한 변과 간격.
+   *
+   * 7×7이 인벤토리 안에 들어가야 한다. 처음에 56으로 잡았더니 세로가 2px 모자라
+   * 마지막 줄이 잘리고 자동정렬 버튼과 겹쳤다. `칸×7 + 간격×6 + 여백`이 높이보다
+   * 작은지 확인하고 정할 것.
+   */
+  cell: 52,
+  cellGap: 6,
+} as const;
 const STATUS_ORDER: StatusKind[] = ['wound', 'exposed', 'brand', 'fracture'];
 /** 벽까지 밀린 적이 받는 추가 피해. */
 const WALL_SLAM_DAMAGE = 40;
@@ -242,6 +287,9 @@ const ENEMY_SPRITE: Record<EnemyKind, string> = {
   archer: 'enemy-archer',
   brute: 'enemy-brute',
   gatekeeper: 'enemy-boss',
+  // 새 보스 둘은 전용 스프라이트가 없다. 성격이 가까운 것을 빌려 쓰고 색으로 가른다.
+  warden: 'enemy-boss1',
+  glutton: 'enemy-boss2',
   collapsedDoor: 'enemy-boss2',
 };
 
@@ -292,6 +340,19 @@ interface WeaponWheelMenu {
 
 type OverlayKind = 'town-dialogue' | 'town-config' | 'pause' | 'result';
 
+/**
+ * 마을 패널에서 채우기를 기다리는 칸.
+ *
+ * 칸마다 넣을 수 있는 것이 다르다. R링 후보에는 무기가, 보조·연계 칸에는 그 무기에
+ * 태그가 맞는 보조형스킬만 들어간다. 어떤 칸인지 알아야 인벤토리에서 무엇을
+ * 점멸시킬지 정할 수 있다.
+ */
+type TownSlotTarget =
+  | { kind: 'wheel'; hand: Hand; index: 0 | 1 }
+  /** 첫 소켓. 끼우면 그 무기의 기본 공격이 이 스킬로 바뀐다. */
+  | { kind: 'basic'; weapon: WeaponId }
+  | { kind: 'support'; weapon: WeaponId; slot: 'primary' | 'synergy' };
+
 interface ComboBadge {
   back: Phaser.GameObjects.Rectangle;
   title: Phaser.GameObjects.Text;
@@ -303,6 +364,7 @@ interface ComboBadge {
 interface RewardDrop {
   reward: RoomReward;
   label: string;
+  kind: 'weapon' | 'comboSkill' | 'support' | 'synergy';
   color: number;
   x: number;
   y: number;
@@ -349,6 +411,14 @@ export class PlayScene extends Phaser.Scene {
   private combo: ComboState = createCombo();
   /** 콤보를 소모해 얻은 한시적 손 강화. 콤보와 수명이 달라 따로 둔다. */
   private empower: EmpowerByHand = {};
+  /**
+   * 이름을 이미 띄워 본 강화기술.
+   *
+   * 강화기술이 나갔다는 것을 글자로도 알려야 하는데, 교차만 지키면 매 타가
+   * 강화기술이라 매번 띄우면 화면이 글자로 뒤덮인다. 무기마다 **처음 한 번만**
+   * 띄워 이름을 가르치고 그 뒤로는 연출로만 구분한다.
+   */
+  private announcedCombos = new Set<string>();
   private comboRings!: { left: ShapeOrSprite; right: ShapeOrSprite };
   /** 링의 기준 지름. 맥동은 이 값에 배율을 곱해 만든다. */
   private comboRingSize = { left: 0, right: 0 };
@@ -361,6 +431,33 @@ export class PlayScene extends Phaser.Scene {
   private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
   private overlayKind: OverlayKind | null = null;
+
+  // ── 마을 설정 패널 상태 (기획서 `UI구성.pptx`)
+  /** 좌측 세로 탭. 1 = 무기 설정, 2 = 기술 설정. */
+  private townTab: 1 | 2 = 1;
+  /** 인벤토리 필터 탭. 1 = 전체, 2 = 실체화 무기만, 3 = 보조형스킬만. */
+  private townFilter: InventoryFilter = 'all';
+  /**
+   * 지금 채우기를 기다리는 칸.
+   *
+   * 칸을 클릭하면 여기에 담기고, 인벤토리에서 넣을 수 있는 것만 점멸한다.
+   * 그중 하나를 클릭하면 장착되고 비워진다.
+   */
+  private townPendingSlot: TownSlotTarget | null = null;
+  /**
+   * 패널을 보기만 하는 중인가.
+   *
+   * 전투 지역에서 `I`로 연 인벤토리가 이 상태다. 열쇠를 몇 개 모았는지, 무엇을
+   * 끼워 뒀는지 확인은 되지만 **바꾸지는 못한다.** 장비를 아무 데서나 갈아 끼우면
+   * 마을에 들르는 이유가 없어지고, 보스 앞에서 세팅을 바꾸는 것이 정답이 된다.
+   */
+  private townReadOnly = false;
+  /** 인벤토리에서 드래그 중인 칸 번호. 드롭 지점에서 무엇을 옮길지 판단한다. */
+  private townDragFrom: number | null = null;
+  /** 화면 최하단 안내. 패널을 다시 그려도 살아남도록 오버레이 밖에 둔다. */
+  private townToast: Phaser.GameObjects.Text | null = null;
+  /** 인벤토리 항목에 마우스를 올렸을 때 뜨는 설명. */
+  private townTip: Phaser.GameObjects.Container | null = null;
   private transientOverlays: Phaser.GameObjects.GameObject[] = [];
   private rewardDrops: RewardDrop[] = [];
   private townNpc: TownNpc | null = null;
@@ -441,7 +538,8 @@ export class PlayScene extends Phaser.Scene {
       hasDebugWeapons ||
       debugStart.roomIndex !== undefined ||
       debugStart.town === true ||
-      debugStart.combo !== null;
+      debugStart.combo !== null ||
+      debugStart.supports !== undefined;
     // 저장을 안 읽는 개발 진입은 저장도 하지 않는다. 안 그러면 실제 진행을 덮어쓴다.
     this.persistProgress = !ignoresSavedProgress;
     let progress = data?.progress ?? (ignoresSavedProgress ? null : loadProgress()) ?? createInitialProgress();
@@ -452,6 +550,9 @@ export class PlayScene extends Phaser.Scene {
       const forced = [debugStart.left, debugStart.right].filter((id): id is WeaponId => !!id);
       progress = grantComboSupport(unlockWeapons(progress, forced), debugStart.combo);
     }
+    // 개발용: `?supports=`로 보조형스킬을 미리 보유시킨다. 장착은 하지 않는다 —
+    // 마을에서 직접 붙여 보는 것이 이 파라미터를 쓰는 이유이기 때문이다.
+    if (debugStart.supports) progress = unlockSupports(progress, debugStart.supports);
     // 콤보 보조를 물렸으면 그 진행을 살려야 한다. 무기만 지정한 경우에는 예전대로 버린다.
     this.initialProgress = hasDebugWeapons && !debugStart.combo ? null : progress;
     // 저장된 진행이 있어도 손에 든 무기는 이어받지 않는다. 항상 초기값으로 시작한다.
@@ -576,6 +677,15 @@ export class PlayScene extends Phaser.Scene {
       }
       this.openWeaponWheel();
     });
+    keyboard.on('keydown-I', () => {
+      if (isOver(this.run) || this.paused || this.weaponWheel) return;
+      if (this.overlay) {
+        this.closeOverlay();
+        return;
+      }
+      // 마을에서는 관리인 패널과 같다. 전투 지역에서는 보기 전용으로 연다.
+      this.showTown(this.run.phase !== 'town');
+    });
     keyboard.on('keydown-F', () => {
       if (this.overlayKind === 'town-dialogue') {
         this.showTown();
@@ -608,6 +718,7 @@ export class PlayScene extends Phaser.Scene {
     keyboard.on('keydown-ESC', togglePause);
 
     this.input.mouse?.disableContextMenu();
+    this.setupTownDragAndDrop();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.weaponWheel) return;
       if (this.paused) return;
@@ -668,13 +779,14 @@ export class PlayScene extends Phaser.Scene {
     if (this.time.now < runtime.readyAt) return;
 
     this.openShieldProtection(runtime);
-    if (this.canUseComboSkill(runtime)) {
-      runtime.readyAt = this.time.now + awakenedAttackInterval(runtime.weapon);
-      this.useSkill(runtime, runtime.weapon.combo, angle, false);
-    } else {
-      runtime.readyAt = this.time.now + runtime.weapon.cooldown;
-      this.useSkill(runtime, runtime.weapon.basic, angle, true);
-    }
+    // **첫 소켓에 끼운 기본스킬이 곧 기본 공격이다.** 조건도 전환도 없다.
+    // 끼웠으면 계속 그것이 나가고, 비웠으면 무기 본래의 공격이 나간다.
+    const skill = equippedBasicSkill(this.run.progress, runtime.weapon.id);
+    const transformed = skill.id !== runtime.weapon.basic.id;
+    // 형태가 바뀌면 간격도 그 스킬의 것을 쓴다. 지대형은 겹치면 피해가 곱으로
+    // 불어나므로 `comboInterval`로 늦춘다. 그 이유는 `attackIntervalFor` 참고.
+    runtime.readyAt = this.time.now + attackIntervalFor(runtime.weapon, skill);
+    this.useSkill(runtime, skill, angle, !transformed);
     this.refreshHud();
   }
 
@@ -684,26 +796,24 @@ export class PlayScene extends Phaser.Scene {
   }
 
   /**
-   * 이 무기에 콤보 전환이 열려 있는지.
+   * 이 무기에 붙은 콤보 규칙.
    *
-   * 기본 공격에 `콤보 개방` 연계가 붙어 있어야만 열린다. 콤보는 더 이상
-   * 모든 무기의 기본 규칙이 아니라 골라서 얹는 것이다.
+   * **지금 실제로 나가는 공격**을 기준으로 읽는다. 첫 소켓에 기본스킬을 끼웠으면
+   * 보조와 연계도 그 스킬에 붙기 때문이다.
    */
   private comboRulesFor(runtime: WeaponRuntime) {
-    return comboRulesOf(resolveFor(this.run.loadout, runtime.weapon.basic).behaviors);
+    const skill = equippedBasicSkill(this.run.progress, runtime.weapon.id);
+    return comboRulesOf(resolveFor(this.run.loadout, skill).behaviors);
+  }
+
+  /** 이 무기의 기본 공격이 기본스킬로 바뀌어 있는가. 첫 소켓이 채워졌다는 뜻이다. */
+  private isTransformed(runtime: WeaponRuntime): boolean {
+    return equippedBasicSkill(this.run.progress, runtime.weapon.id).id !== runtime.weapon.basic.id;
   }
 
   /** 이 무기가 콤보를 쓰는가. 콤보를 읽는 연계가 하나라도 붙어 있으면 그렇다. */
   private usesCombo(runtime: WeaponRuntime): boolean {
     return this.comboRulesFor(runtime).length > 0;
-  }
-
-  private canUseComboSkill(runtime: WeaponRuntime): boolean {
-    if (!hasComboSkill(this.run.progress, runtime.weapon.combo.id)) return false;
-    return this.comboRulesFor(runtime).some(
-      ({ trigger, effect }) =>
-        effect.kind === 'comboSkill' && comboTriggerMet(this.combo, runtime.hand, trigger),
-    );
   }
 
   /**
@@ -767,6 +877,7 @@ export class PlayScene extends Phaser.Scene {
   private useSkill(runtime: WeaponRuntime, skill: Skill, angle: number, basic: boolean): void {
     const resolved = resolveFor(this.run.loadout, skill);
     playSfx(basic ? 'attack' : 'combo');
+    if (!basic) this.announceComboSkill(runtime, skill);
 
     switch (deliveryOf(skill)) {
       case 'projectile':
@@ -781,6 +892,29 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * 강화기술이 나갔다는 것을 손에서 알린다.
+   *
+   * **투사체 무기는 기본 공격과 강화기술이 똑같이 생겼었다.** 검과 방패는 강화기술이
+   * 지대를 깔아서 한눈에 다르지만, 활과 비전은 화살이 1발에서 5발로 늘 뿐이고
+     * 부채가 좁아 그 차이가 안 읽힌다. 실제로 "그냥 활 쏘는 거랑 일제 사격이 무슨 차이인지
+   * 모르겠다"는 말을 들었다.
+   *
+   * 손에서 고리가 퍼지는 것은 매번, 이름은 무기마다 처음 한 번만 띄운다.
+   */
+  private announceComboSkill(runtime: WeaponRuntime, skill: Skill): void {
+    ring(this, this.player.x, this.player.y, runtime.weapon.color, {
+      from: 12,
+      to: 58,
+      duration: 260,
+      width: 3,
+    });
+    if (this.announcedCombos.has(skill.id)) return;
+
+    this.announcedCombos.add(skill.id);
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, skill.name, COLORS.accentText);
+  }
+
   private fireProjectiles(
     weapon: Weapon,
     _skill: Skill,
@@ -789,10 +923,16 @@ export class PlayScene extends Phaser.Scene {
     angle: number,
     basic: boolean,
   ): void {
+    // 강화기술 투사체는 더 크게 그린다. 개수만으로는 기본 공격과 구분되지 않는다.
+    //
+    // 발광 효과(`postFX.addGlow`)를 쓰지 않는 이유는 `render.ts`에 적힌 것과 같다.
+    // Canvas 렌더러에서 조용히 무시되고, 도형(`Arc`)에는 아예 없다. 스프라이트가
+    // 없는 환경에서 대체로 그리는 원까지 함께 커지려면 크기로 다뤄야 한다.
+    const size = basic ? 22 : 32;
     for (const state of spawnProjectiles(stats, behaviors, { x: this.player.x, y: this.player.y }, angle)) {
       this.projectiles.push({
         state,
-        view: this.createBoltView(BOLT_SPRITE[weapon.id], state.x, state.y, 22, state.angle, weapon.color),
+        view: this.createBoltView(BOLT_SPRITE[weapon.id], state.x, state.y, size, state.angle, weapon.color),
         weapon,
         basic,
         behaviors,
@@ -1009,6 +1149,7 @@ export class PlayScene extends Phaser.Scene {
           ? gainCombo(this.combo, runtime.hand, stats)
           : // 강화기술 명중은 수치를 올리지 않고 지속시간과 직전 손만 갱신한다.
             // 직전 손을 갱신해야 강화기술이 나가는 동안에도 교차 판정이 이어진다.
+            // 다만 쌓아 둔 교차 연속은 여기서 턴다. 쓰면 없어져야 쌓는 의미가 생긴다.
             sustainCombo(this.combo, runtime.hand, stats);
         this.applyComboEffects(runtime);
       }
@@ -1044,6 +1185,15 @@ export class PlayScene extends Phaser.Scene {
   private enterRoom(): void {
     const room = ROOMS[this.run.roomIndex];
     if (!room) return;
+
+    // 방이 무엇을 요구하는지 들어오는 순간 한 번 말한다. 봉인된 문 앞에서
+    // 이유를 모르면 방을 헤매게 된다. 전투가 시작되기 전에 읽히도록 조금 늦춘다.
+    if (room.hint) {
+      this.time.delayedCall(900, () => {
+        if (this.run.phase !== 'combat') return;
+        floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 30, room.hint!, COLORS.accentText);
+      });
+    }
 
     this.clearTransientOverlays();
     this.rewardDrops = [];
@@ -1558,6 +1708,22 @@ export class PlayScene extends Phaser.Scene {
     }
 
     const room = ROOMS[this.run.roomIndex];
+
+    // **봉인된 문은 적을 다 정리해도 열리지 않는다.** 열쇠가 부족하면 무엇이 없는지
+    // 말해 준다. 이유 없이 안 열리면 버그로 보이고, 플레이어는 방을 헤맨다.
+    if (!exitUnlocked(this.run)) {
+      const missing = missingKeys(this.run.progress.ownedKeys).map((key) => key.name);
+      this.exitLabel.setText('봉인됨');
+      floatingText(
+        this,
+        this.player.x,
+        this.player.y - PLAYER_RADIUS - 30,
+        `${missing.join(' · ')}이 필요하다`,
+        '#ffb4a2',
+      );
+      return;
+    }
+
     this.exitOpen = true;
     tintView(this.exit, COLORS.accent);
     this.exitLabel.setText(room?.entersTown ? '마을 →' : '출구 →');
@@ -1686,9 +1852,10 @@ export class PlayScene extends Phaser.Scene {
         right: this.combo.right,
         required: COMBO_REQUIRED,
       },
+      // 기본 공격이 기본스킬로 바뀌어 있는지. 예전의 `콤보 발동 가능`을 대신한다.
       comboSkill: {
-        left: this.canUseComboSkill(this.left),
-        right: this.right ? this.canUseComboSkill(this.right) : false,
+        left: this.isTransformed(this.left),
+        right: this.right ? this.isTransformed(this.right) : false,
       },
       empower: {
         left: empowerMore(this.empower, 'left'),
@@ -1783,9 +1950,10 @@ export class PlayScene extends Phaser.Scene {
         ring.setVisible(false);
         continue;
       }
-      // 강화기술을 아직 못 얻은 무기는 게이지가 차도 발동하지 않는다.
-      // 링만 준비 완료로 돌면 배지의 `잠김`과 서로 다른 말을 하게 된다.
-      const ready = this.canUseComboSkill(runtime);
+      // 예전에는 `강화기술이 지금 나갈 수 있다`를 알렸는데, 기본스킬이 소켓으로
+      // 옮겨가면서 그런 순간이 없어졌다(끼웠으면 늘 나간다). 지금은 연계가 걸어 준
+      // **한시적 강화**를 알린다 — 짧게 스쳐 지나가서 배지 글자만으로는 놓치기 쉽다.
+      const ready = empowerMore(this.empower, runtime.hand) > 0;
       ring.setVisible(ready);
       if (!ready) continue;
 
@@ -2102,7 +2270,8 @@ export class PlayScene extends Phaser.Scene {
 
       // 지대형 발동 스킬도 지속피해가 들어가는 동안은 콤보를 유지시킨다.
       if (damagedSomething && owner && this.usesCombo(owner)) {
-        this.combo = sustainCombo(this.combo, owner.hand, resolveFor(this.run.loadout, owner.weapon.basic).stats);
+        // 지속시간만 늘린다. `직전 손`과 교차 연속은 플레이어가 친 것만 움직인다.
+        this.combo = refreshCombo(this.combo, resolveFor(this.run.loadout, owner.weapon.basic).stats);
       }
 
       view.setAlpha(0.15 + 0.35 * remainingRatio(state));
@@ -2190,7 +2359,7 @@ export class PlayScene extends Phaser.Scene {
 
     // 이 시점에는 아직 clearRoom이 보상을 적용하지 않았으므로 현재 보유와 비교할 수 있다.
     // 이미 가진 것을 다시 `획득`이라고 띄우면 두 번째 판에서 거짓말이 된다.
-    const reward = newPartsOfReward(this.run.progress, ROOMS[this.run.roomIndex]?.reward);
+    const reward = newPartsOfReward(this.run.progress, this.resolveRoomRewardForDrop(ROOMS[this.run.roomIndex]?.reward));
     if (!reward) return false;
 
     const items = this.rewardItems(reward);
@@ -2282,21 +2451,86 @@ export class PlayScene extends Phaser.Scene {
     };
   }
 
-  private rewardItems(reward: RoomReward): Array<Pick<RewardDrop, 'reward' | 'label' | 'color'>> {
+  private rewardItems(reward: RoomReward): Array<Pick<RewardDrop, 'reward' | 'label' | 'kind' | 'color'>> {
     return [
       ...(reward.weapons ?? []).map((id) => {
         const weapon = weaponOf(id);
-        return { reward: { weapons: [id] }, label: weapon.name, color: weapon.color };
+        return { reward: { weapons: [id] }, label: weapon.name, kind: 'weapon' as const, color: weapon.color };
       }),
-      ...(reward.comboSkills ?? []).map((id) => {
-        const skill = findSkill(id);
-        return { reward: { comboSkills: [id] }, label: skill?.name ?? id, color: BOSS_PATTERN_COLOR };
+      // **기본스킬 드랍은 빈 껍데기가 아니다.** 예전에는 연출만 하려고 `reward: {}`인
+      // 오브젝트를 무기에서 만들어 냈는데, 주워도 보유 상태가 안 늘어 화면이 거짓말을
+      // 하고 있었다. 이제 방 보상에 실제로 적힌 것을 그대로 떨어뜨린다.
+      ...(reward.basicSkills ?? []).flatMap((id) => {
+        const weapon = WEAPON_IDS.map(weaponOf).find((w) => w.basicSkill.id === id);
+        return weapon
+          ? [{
+              reward: { basicSkills: [id] },
+              label: weapon.basicSkill.name,
+              kind: 'comboSkill' as const,
+              color: weapon.color,
+            }]
+          : [];
       }),
       ...(reward.supports ?? []).flatMap((id) => {
         const support = findSupport(id);
-        return support ? [{ reward: { supports: [id] }, label: support.name, color: COLORS.accent }] : [];
+        return support
+          ? [{
+              reward: { supports: [id] },
+              label: support.name,
+              kind: supportSlotType(support) === 'synergy' ? 'synergy' as const : 'support' as const,
+              color: COLORS.accent,
+            }]
+          : [];
       }),
     ];
+  }
+
+  private resolveRoomRewardForDrop(reward: RoomReward | undefined): RoomReward | undefined {
+    if (!reward) return undefined;
+    const randomSupports = this.randomSupportRewards(reward);
+    if (!randomSupports.length) return reward;
+
+    return {
+      ...reward,
+      supports: [...(reward.supports ?? []), ...randomSupports],
+      randomSupports: undefined,
+    };
+  }
+
+  /**
+   * 이 방이 뽑아 줄 보조형스킬.
+   *
+   * `forWeapon`이 적혀 있으면 **그 무기에 실제로 붙는 것만** 뽑는다. 특정 보스가
+   * 특정 무기를 키워 주는 자리라는 것을 드랍으로 말하기 위한 것이다. 태그로 거르므로
+   * `검 전용`이라는 표시를 데이터에 따로 둘 필요가 없다.
+   *
+   * 후보가 없으면 조용히 건너뛴다. **거르다 아무것도 안 나오면 아무것도 안 주는 것이
+   * 맞다** — 태그가 안 맞는 것을 억지로 끼워 주면 그 칸은 어차피 죽는다.
+   */
+  private randomSupportRewards(reward: RoomReward): string[] {
+    const rule = reward.randomSupports;
+    if (!rule) return [];
+
+    const weapon = rule.forWeapon ? weaponOf(rule.forWeapon) : null;
+    const target = weapon ? weapon[rule.forSkillOf ?? 'basic'] : null;
+
+    const selected: string[] = [];
+    const take = (slot: 'primary' | 'synergy', count = 0): void => {
+      for (let i = 0; i < count; i++) {
+        const candidates = SUPPORTS.filter((support) => (
+          supportSlotType(support) === slot
+          && !this.run.progress.ownedSupports.includes(support.id)
+          && !selected.includes(support.id)
+          && (target === null || canAttach(target, support, []).ok)
+        ));
+        if (!candidates.length) return;
+        selected.push(Phaser.Utils.Array.GetRandom(candidates).id);
+      }
+    };
+
+    take('primary', rule.primary);
+    take('synergy', rule.synergy);
+    return selected;
   }
 
   private updateRewardDropPrompt(): void {
@@ -2331,8 +2565,15 @@ export class PlayScene extends Phaser.Scene {
     this.saveCurrentProgress();
     playSfx('reward');
     ring(this, drop.x, drop.y, drop.color, { from: 18, to: 86, duration: 420, width: 4 });
-    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 12, `${drop.label} 획득`, COLORS.accentText);
-    this.showPendingHint(drop);
+    floatingText(
+      this,
+      this.player.x,
+      this.player.y - PLAYER_RADIUS - 12,
+      this.rewardPickupText(drop),
+      COLORS.accentText,
+      { duration: 1600 },
+    );
+    this.showRewardPickupHint(drop);
 
     drop.marker.destroy();
     drop.glow.destroy();
@@ -2346,27 +2587,52 @@ export class PlayScene extends Phaser.Scene {
    * 지금은 아직 쓸 수 없는 보상이라는 것을 알린다.
    *
    * 1번 방 보상은 무엇을 주든 2번 방에서 쓸 수 없다. 보조형스킬 장착도 R링 교체도
-   * 마을에서 열리는데 마을은 첫 보스 뒤에 나오기 때문이다. 전에는 강화기술만 예외라
-   * 주우면 바로 나갔는데, 콤보가 `콤보 개방`을 요구하게 되면서 그 예외가 사라졌다.
+   * 마을에서 열리는데 마을은 첫 보스 뒤에 나오기 때문이다.
    *
    * 예치되는 것 자체는 이상하지 않다. 첫 마을이 게임이 열리는 순간이고 이 드랍은 거기서
    * 조립할 재료다. 문제는 **주웠는데 아무 일도 안 일어난 이유를 모른다**는 것이라,
    * 언제 쓸 수 있는지를 말해준다.
+   *
+   * 첫 마을을 한 번이라도 본 뒤에는 안내하지 않는다. 그때부터는 붙이는 곳을 알기 때문에
+   * 같은 문구가 잔소리가 된다.
    */
-  private showPendingHint(drop: RewardDrop): void {
-    const pending = (drop.reward.comboSkills ?? []).filter((id) => {
-      const weapon = WEAPON_IDS.map(weaponOf).find((w) => w.combo.id === id);
-      // 그 무기에 `콤보 개방`이 붙어 있으면 바로 쓸 수 있으므로 안내하지 않는다.
-      return weapon ? comboRulesOf(resolveFor(this.run.loadout, weapon.basic).behaviors).length === 0 : false;
-    });
-    if (!pending.length) return;
+  private rewardPickupText(drop: RewardDrop): string {
+    switch (drop.kind) {
+      case 'comboSkill':
+        return `기본스킬 ${drop.label} 획득`;
+      case 'synergy':
+        return `연계 ${drop.label} 획득`;
+      case 'support':
+        return `보조 ${drop.label} 획득`;
+      case 'weapon':
+      default:
+        return `${drop.label} 획득`;
+    }
+  }
+
+  private showRewardPickupHint(drop: RewardDrop): void {
+    if (drop.kind === 'comboSkill') {
+      floatingText(
+        this,
+      this.player.x,
+      this.player.y - PLAYER_RADIUS - 34,
+      '마을에서 첫 소켓에 끼우면 기본 공격이 바뀐다',
+      COLORS.textDim,
+      { duration: 1900 },
+    );
+      return;
+    }
+
+    if (this.run.progress.weaponSwitchUnlocked) return;
+    if (drop.kind !== 'support' && drop.kind !== 'synergy') return;
 
     floatingText(
       this,
       this.player.x,
       this.player.y - PLAYER_RADIUS - 34,
-      '콤보 개방을 붙이면 쓸 수 있다',
+      '마을에서 무기에 붙일 수 있다',
       COLORS.textDim,
+      { duration: 1900 },
     );
   }
 
@@ -2429,7 +2695,7 @@ export class PlayScene extends Phaser.Scene {
     };
 
     const hint = this.add
-      .text(screenX(VIEW_WIDTH - 24), screenY(20), 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 무기 교체 · P 메뉴', {
+      .text(screenX(VIEW_WIDTH - 24), screenY(20), 'WASD 이동 · 좌클릭 왼손 · 우클릭/Shift 오른손 · Space 대시 · R 무기 교체 · I 인벤토리 · P 메뉴', {
         fontSize: '13px',
         color: COLORS.textDim,
       })
@@ -2587,41 +2853,88 @@ export class PlayScene extends Phaser.Scene {
   private updateComboBadge(badge: ComboBadge, runtime: WeaponRuntime | null): void {
     // 콤보를 쓰지 않는 무기는 배지 자체를 숨긴다. 콤보를 읽는 연계를 안 붙였으면
     // 수치가 돌지 않으므로 0으로 굳은 눈금을 보여줄 이유가 없다.
-    const visible = runtime !== null && this.usesCombo(runtime);
+    const rules = runtime ? this.comboRulesFor(runtime) : [];
+    const visible = runtime !== null && rules.length > 0;
     for (const object of this.comboBadgeObjects(badge)) object.setVisible(visible);
     if (!runtime || !visible) return;
 
     const hand = runtime.hand;
-    const count = comboOf(this.combo, hand);
-    const unlocked = hasComboSkill(this.run.progress, runtime.weapon.combo.id);
-    const firing = this.canUseComboSkill(runtime);
     const more = empowerMore(this.empower, hand);
+    // 연계는 무기당 한 칸이므로 규칙도 하나다. 여러 개면 첫 번째를 보여준다.
+    const readout = comboReadout(this.combo, hand, rules[0].trigger);
 
     // 지금 무슨 일이 일어나고 있는지를 한 단어로 알린다.
-    // 강화가 강화기술보다 앞이다. 배율이 붙은 순간이 더 짧고 놓치기 쉽다.
+    // 강화가 수치보다 앞이다. 배율이 붙은 순간이 더 짧고 놓치기 쉽다.
     const [label, color] = more > 0
       ? [`강화 +${Math.round(more * 100)}%`, COLORS.accent]
-      : firing
-        ? ['발동', COLORS.accent]
-        : unlocked
-          ? [`${count}`, runtime.weapon.color]
-          : ['잠김', runtime.weapon.color];
-    const lit = more > 0 || firing;
+      : [`${readout.value} / ${readout.required}`, runtime.weapon.color];
+    const lit = more > 0;
 
     badge.back.setStrokeStyle(lit ? 2 : 1, color, lit ? 0.95 : 0.55);
-    badge.title.setText(`${hand === 'left' ? '왼손' : '오른손'} ${runtime.weapon.name}   합계 ${comboTotal(this.combo)}`);
-    badge.value.setText(label);
-    badge.value.setColor(lit ? COLORS.accentText : '#ffffff');
-
+    // **무엇을 붙여서 이 배지가 떠 있는지를 적는다.**
+    // 전에는 `교차`라고만 썼는데, 그건 아래 글자가 이미 말하는 것이라 같은 말을 두 번
+    // 하고 있었다. 연계 이름은 화면 어디에도 없어서 무엇 때문에 뜬 배지인지 알 수 없었다.
+    // 세는 조건은 무엇을 세는지(`이 손`/`합계`/`반대손`)가 숫자만으로 안 드러나 함께 적는다.
+    const comboName = supportsFor(this.run.loadout, runtime.weapon.basic.id).find((support) =>
+      comboRulesOf(support.behaviors).length > 0,
+    )?.name;
+    const suffix = `  ·  ${readout.label}`;
+    badge.title.setText(
+      `${hand === 'left' ? '왼손' : '오른손'} ${runtime.weapon.name}   ${comboName ?? ''}${suffix}`,
+    );
+    // **세지 않는 조건에서는 눈금을 아예 지운다.**
+    // 전에는 성립 여부에 따라 5칸을 한꺼번에 켜고 껐는데, 꺼진 다섯 칸이 그대로
+    // `0 / 5 채워야 함`으로 읽혔다. 카운터를 뗀 이유가 그것이었는데 눈금이 같은
+    // 오해를 그대로 하고 있었다. 게다가 글자가 그 위에 겹쳐 찍혔다.
+    // 눈금 개수는 **요구치와 같아야 한다.** 예전에는 5칸이 박혀 있었는데, 조건이
+    // 연계마다 달라진 뒤로는 `교차 2회`짜리에도 5칸이 떠서 2까지만 차고 멈춘
+    // 눈금이 고장난 것처럼 보인다.
+    const counting = true;
     for (const [index, pip] of badge.pips.entries()) {
-      const filled = index < count;
-      pip.setFillStyle(filled ? color : 0x2a2f42, filled ? 0.95 : 0.9);
+      const used = counting && index < readout.required;
+      pip.setVisible(used);
+      if (used) {
+        const filled = index < readout.value;
+        pip.setFillStyle(filled ? color : 0x2a2f42, filled ? 0.95 : 0.9);
+      }
     }
 
+    // 눈금이 사라진 만큼 글자가 쓸 수 있는 폭이 넓어진다. 반대로 눈금이 있으면
+    // 그 오른쪽만 쓸 수 있다. `반대손으로`나 `강화 +30%`처럼 긴 문구가 눈금을
+    // 밟지 않도록, 넘치면 넘친 만큼 줄인다.
+    const maxWidth = counting ? 108 : 220;
+    badge.value.setFontSize(32);
+    badge.value.setText(label);
+    if (badge.value.width > maxWidth) {
+      badge.value.setFontSize(Math.max(14, Math.floor((32 * maxWidth) / badge.value.width)));
+    }
+    badge.value.setY(badge.back.y + (counting ? -8 : 0));
+    badge.value.setColor(lit ? COLORS.accentText : '#ffffff');
+
     const duration = resolveFor(this.run.loadout, runtime.weapon.basic).stats.comboDuration ?? 5;
-    const ratio = count > 0 ? Phaser.Math.Clamp(this.combo.remaining / duration, 0, 1) : 0;
+    const running = readout.value > 0;
+    const ratio = running ? Phaser.Math.Clamp(this.combo.remaining / duration, 0, 1) : 0;
     badge.timer.width = 224 * ratio;
     badge.timer.setFillStyle(color, lit ? 0.9 : 0.65);
+  }
+
+  /**
+   * 관리인의 말.
+   *
+   * **첫 마을에서는 무엇을 해야 하는지까지 말한다.** 소켓이 셋인데 무엇을 어디에
+   * 끼우는지 아무도 알려주지 않으면, 패널을 열어 놓고도 그냥 나가게 된다.
+   * 두 번째부터는 같은 말을 반복하지 않는다 — 아는 사람에게는 잔소리다.
+   */
+  private townDialogueText(): string {
+    const first = this.run.progress.configs[this.run.progress.active.left].basicSkillId === null;
+    if (!first) {
+      return '그 장갑은 네가 지나온 싸움을 기억한다.\n나가기 전에, 어떤 형태를 손에 남길지 정해 두어라.';
+    }
+    return [
+      '그 장갑은 네가 지나온 싸움을 기억한다.',
+      '왼쪽 두 번째 탭에서 무기마다 칸이 셋 보일 것이다.',
+      '첫 칸에 기본스킬을 끼우면 평소 치는 공격의 형태가 바뀐다. 오른쪽 격자에서 골라 넣어라.',
+    ].join('\n');
   }
 
   private showTownDialogue(): void {
@@ -2645,7 +2958,7 @@ export class PlayScene extends Phaser.Scene {
     );
     container.add(
       this.add
-        .text(104, VIEW_HEIGHT - 162, '그 장갑은 네가 지나온 싸움을 기억한다.\n나가기 전에, 어떤 형태를 손에 남길지 정해 두어라.', {
+        .text(104, VIEW_HEIGHT - 162, this.townDialogueText(), {
           fontSize: '18px',
           color: COLORS.text,
           lineSpacing: 8,
@@ -2921,8 +3234,30 @@ export class PlayScene extends Phaser.Scene {
     this.refreshWeaponViews();
   }
 
-  private showTown(): void {
+  /** 마을 설정 패널을 처음 연다. 탭과 필터를 기본값으로 되돌린다. */
+  private showTown(readOnly = false): void {
+    // 첫 마을에서는 **할 일이 있는 탭**을 먼저 연다. 소켓이 전부 비어 있는데
+    // 장비 착용 탭이 먼저 뜨면 무엇을 하러 왔는지 알기 어렵다.
+    const untouched = this.run.progress.configs[this.run.progress.active.left].basicSkillId === null;
+    this.townTab = !readOnly && untouched ? 2 : 1;
+    this.townFilter = 'all';
+    this.townPendingSlot = null;
+    this.townDragFrom = null;
+    this.townReadOnly = readOnly;
+    this.renderTown();
+  }
+
+  /**
+   * 패널을 다시 그린다.
+   *
+   * 부분 갱신을 하지 않는 이유는 이 패널이 서로 물려 있기 때문이다. 칸을 하나
+   * 채우면 인벤토리에서 그 항목이 빠지고, 점멸 대상이 바뀌고, 다른 칸의 후보도
+   * 달라진다. 조각마다 갱신 경로를 만들면 어긋나는 곳이 생긴다.
+   */
+  private renderTown(): void {
     if (this.overlay) this.closeOverlay();
+    // 다시 그리면 칸이 새로 만들어져 `pointerout`이 오지 않는다. 남은 설명을 먼저 지운다.
+    this.hideTownTip();
 
     const container = this.add.container(0, 0).setDepth(30);
     this.clearTransientOverlays();
@@ -2930,51 +3265,41 @@ export class PlayScene extends Phaser.Scene {
 
     // 패널이 화면보다 작아서 뒤로 HUD 글자가 비쳐 읽혔다. 전체를 덮는 막을 먼저 깐다.
     container.add(this.add.rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, VIEW_WIDTH, VIEW_HEIGHT, 0x05060a, 0.92));
+    const panel = TOWN_UI.panel;
     container.add(
       this.add
-        .rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, VIEW_WIDTH - 116, VIEW_HEIGHT - 82, 0x0a0b0f, 0.94)
+        .rectangle(panel.x + panel.w / 2, panel.y + panel.h / 2, panel.w, panel.h, 0x0a0b0f, 0.94)
         .setStrokeStyle(2, 0x3a4059, 0.95),
     );
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), 74, '마을 관리인', {
-          fontSize: '34px',
+        .text(VIEW_WIDTH / 2, panel.y + 24, this.townReadOnly ? '인벤토리' : '마을 관리인', {
+          fontSize: '24px',
           color: COLORS.text,
           fontStyle: 'bold',
         })
         .setOrigin(0.5),
     );
-    container.add(
-      this.add
-        .text((VIEW_WIDTH / 2), 116, '장갑이 기억한 무기와 강화기술을 여기서 정리해 두게.', {
-          fontSize: '16px',
-          color: COLORS.textDim,
-        })
-        .setOrigin(0.5),
-    );
+    if (this.townReadOnly) {
+      container.add(
+        this.add
+          .text(VIEW_WIDTH / 2, panel.y + 48, '보기 전용 — 장비 변경은 마을에서만 된다', {
+            fontSize: '13px',
+            color: '#ffb4a2',
+          })
+          .setOrigin(0.5),
+      );
+    }
 
-    // 획득 내역은 적지 않는다. 바닥 드랍에 가까이 갔을 때 이미 알렸고,
-    // 여기서 또 띄우면 이미 받은 것을 시스템이 다시 알리는 표시가 된다.
-    const unlocked = this.run.progress.unlockedWeapons.map((id) => weaponOf(id).name).join(' / ');
-    container.add(
-      this.add
-        .text((VIEW_WIDTH / 2), 162, [`보유 무기: ${unlocked}`, `전투 중 R링 교체 가능`].join('\n'), {
-          fontSize: '15px',
-          color: COLORS.text,
-          align: 'center',
-          lineSpacing: 4,
-          wordWrap: { width: VIEW_WIDTH - 180 },
-        })
-        .setOrigin(0.5),
-    );
-
-    this.renderManifestationPanel(container);
-    this.renderWheelSetupPanel(container);
+    this.renderTownMainTabs(container);
+    if (this.townTab === 1) this.renderTownEquipTab(container);
+    else this.renderTownSkillTab(container);
+    this.renderTownInventory(container);
 
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), VIEW_HEIGHT - 48, 'R 닫기   ·   오른쪽 출구로 다음 전투', {
-          fontSize: '17px',
+        .text(VIEW_WIDTH / 2, VIEW_HEIGHT - 18, this.townReadOnly ? 'I 닫기' : 'R 닫기   ·   오른쪽 출구로 다음 전투', {
+          fontSize: '14px',
           color: COLORS.accentText,
           fontStyle: 'bold',
         })
@@ -2986,238 +3311,738 @@ export class PlayScene extends Phaser.Scene {
     this.refreshHud();
   }
 
-  private renderManifestationPanel(container: Phaser.GameObjects.Container): void {
-    const startX = 98;
-    const startY = 286;
-    const rowHeight = 58;
-    const column = {
-      weapon: startX,
-      combo: startX + 170,
-      primary: startX + 410,
-      synergy: startX + 660,
-    };
+  // ───────────────────────── 마을 설정 패널 (기획서 `UI구성.pptx`)
 
-    container.add(this.add.text(startX, startY - 42, '실체화 장비 설정', { fontSize: '21px', color: COLORS.text, fontStyle: 'bold' }));
-    container.add(this.add.text(column.weapon, startY - 14, '무기', { fontSize: '13px', color: COLORS.textDim }));
-    container.add(this.add.text(column.combo, startY - 14, '강화기술', { fontSize: '13px', color: COLORS.textDim }));
-    container.add(this.add.text(column.primary, startY - 14, '보조', { fontSize: '13px', color: COLORS.textDim }));
-    container.add(this.add.text(column.synergy, startY - 14, '연계', { fontSize: '13px', color: COLORS.textDim }));
-
-    for (const [index, weaponId] of this.run.progress.unlockedWeapons.entries()) {
-      const weapon = weaponOf(weaponId);
-      const config = this.run.progress.configs[weaponId];
-      const y = startY + 24 + index * rowHeight;
-      const comboName = findSkill(config.comboSkillId)?.name ?? weapon.combo.name;
-      const primary = config.primarySupportId ? findSupport(config.primarySupportId) : undefined;
-      const synergy = config.synergySupportId ? findSupport(config.synergySupportId) : undefined;
-      const primaryCandidates = this.supportCandidates(weapon.combo, 'primary');
-      const synergyCandidates = this.supportCandidates(weapon.combo, 'synergy');
-
-      container.add(this.add.text(column.weapon, y, weapon.name, { fontSize: '18px', color: COLORS.text, fontStyle: 'bold' }).setOrigin(0, 0.5));
-      container.add(this.add.text(column.combo, y, comboName, { fontSize: '16px', color: COLORS.text }).setOrigin(0, 0.5));
-      this.addSlotButton(container, column.primary, y, this.supportSlotLabel(weapon.combo, primary, primaryCandidates), primaryCandidates.length > 0, () => {
-        this.cycleSupport(weaponId, 'primarySupportId', primaryCandidates);
+  /** 좌측 세로 탭. 무기 설정 / 기술 설정. */
+  private renderTownMainTabs(container: Phaser.GameObjects.Container): void {
+    const t = TOWN_UI.mainTab;
+    const tabs = ['무기 설정', '기술 설정'] as const;
+    for (const [index, label] of tabs.entries()) {
+      const y = t.y + index * (t.h + t.gap);
+      const active = this.townTab === index + 1;
+      const rect = this.add
+        .rectangle(t.x + t.w / 2, y + t.h / 2, t.w, t.h, active ? 0x2b3350 : 0x141824, 0.96)
+        .setStrokeStyle(2, active ? COLORS.accent : 0x3a4059, active ? 1 : 0.8)
+        .setInteractive({ useHandCursor: true });
+      rect.on('pointerdown', () => {
+        this.townTab = (index + 1) as 1 | 2;
+        this.townPendingSlot = null;
+        this.renderTown();
       });
-      this.addSlotButton(container, column.synergy, y, this.supportSlotLabel(weapon.combo, synergy, synergyCandidates), synergyCandidates.length > 0, () => {
-        this.cycleSupport(weaponId, 'synergySupportId', synergyCandidates);
-      });
+      container.add(rect);
+      container.add(
+        this.add
+          .text(t.x + t.w / 2, y + t.h / 2, label, {
+            fontSize: '13px',
+            color: active ? COLORS.accentText : COLORS.textDim,
+            fontStyle: 'bold',
+          })
+          .setOrigin(0.5),
+      );
+    }
+    container.add(
+      this.add.text(TOWN_UI.content.x, TOWN_UI.content.y - 22, this.townTab === 1 ? '무기 설정' : '기술 설정', {
+        fontSize: '17px',
+        color: COLORS.text,
+        fontStyle: 'bold',
+      }),
+    );
+  }
+
+  /** 탭① — 장비 스탯 자리와 R링 착용 칸. */
+  private renderTownEquipTab(container: Phaser.GameObjects.Container): void {
+    const c = TOWN_UI.content;
+
+    // 기획서에 `장비 스탯 표시 부분 (현재는 장비 능력치에 대해 따로 개발된 내용이 없음)`
+    // 이라고 적혀 있다. 자리를 잡아 두되 없는 수치를 지어내지 않는다.
+    const statsH = 150;
+    container.add(
+      this.add.rectangle(c.x + c.w / 2, c.y + statsH / 2, c.w, statsH, 0x141824, 0.9).setStrokeStyle(1, 0x3a4059, 0.7),
+    );
+    container.add(
+      this.add.text(c.x + 14, c.y + 12, '장비 스탯', { fontSize: '14px', color: COLORS.textDim }),
+    );
+    const left = weaponOf(this.run.progress.active.left).name;
+    const right = this.run.progress.active.right ? weaponOf(this.run.progress.active.right).name : '없음';
+    container.add(
+      this.add.text(c.x + 14, c.y + 42, [`왼손 ${left}`, `오른손 ${right}`, '', '능력치 표시는 아직 없다'].join('\n'), {
+        fontSize: '14px',
+        color: COLORS.text,
+        lineSpacing: 5,
+      }),
+    );
+
+    // 착용 칸. 기획서의 `R키 눌렀을때 나오는 UI와 비슷하게`에 해당한다.
+    const slotsY = c.y + statsH + 28;
+    container.add(this.add.text(c.x, slotsY - 22, 'R링 무기 후보', { fontSize: '15px', color: COLORS.textDim }));
+
+    const slots: Array<{ hand: Hand; index: 0 | 1; label: string }> = [
+      { hand: 'left', index: 0, label: '왼손 1' },
+      { hand: 'left', index: 1, label: '왼손 2' },
+      { hand: 'right', index: 0, label: '오른손 1' },
+      { hand: 'right', index: 1, label: '오른손 2' },
+    ];
+    const boxW = (c.w - 16) / 2;
+    const boxH = 84;
+    for (const [i, slot] of slots.entries()) {
+      const x = c.x + (i % 2) * (boxW + 16);
+      const y = slotsY + Math.floor(i / 2) * (boxH + 14);
+      this.renderTownSlot(container, { kind: 'wheel', hand: slot.hand, index: slot.index }, x, y, boxW, boxH, slot.label);
     }
   }
 
-  private supportSlotLabel(skill: Skill, current: Support | undefined, candidates: readonly Support[]): string {
-    // 이 칸에 넣을 수 있는 후보가 하나도 없으면 `비어 있음`만 남는다.
-    // 왜 비었는지 말해주지 않으면 기능이 고장 난 것처럼 읽힌다.
-    if (candidates.length === 0) return '아직 없음\n보스 드랍으로 얻는다';
+  /** 탭② — 무기마다 보조·연계 칸. 보유 무기가 위, 미보유는 아래에 회색으로. */
+  private renderTownSkillTab(container: Phaser.GameObjects.Container): void {
+    const c = TOWN_UI.content;
+    const rowH = 68;
+    const labelW = 84;
+    // 기획서(`UI구성.pptx`)의 행 구성이 `무기 ─ 기본스킬 ─ 보조 ─ 연계`다.
+    // 같은 폭에 칸이 둘에서 셋으로 늘어 무기 이름 자리를 조금 줄였다.
+    const gap = 8;
+    const slotW = (c.w - labelW - gap * 2) / 3;
+    const slotX = (index: number) => c.x + labelW + index * (slotW + gap);
 
-    const currentIndex = current ? candidates.findIndex((support) => support.id === current.id) : -1;
-    const counter = ` (${currentIndex >= 0 ? currentIndex + 1 : 0}/${candidates.length})`;
-    if (!current) return `비어 있음${counter}`;
-    const preview = this.supportPreview(skill, current);
-    return `${current.name}${counter}\n${preview || this.shortSupportSummary(current)}`;
+    for (const [index, label] of ['기본스킬', '보조', '연계'].entries()) {
+      container.add(this.add.text(slotX(index), c.y - 2, label, { fontSize: '13px', color: COLORS.textDim }));
+    }
+
+    // 보유한 무기를 먼저, 미보유를 뒤에. 기획서의 정렬 요구다.
+    const owned = WEAPON_IDS.filter((id) => this.run.progress.unlockedWeapons.includes(id));
+    const locked = WEAPON_IDS.filter((id) => !this.run.progress.unlockedWeapons.includes(id));
+
+    for (const [index, weaponId] of [...owned, ...locked].entries()) {
+      const y = c.y + 18 + index * rowH;
+      const weapon = weaponOf(weaponId);
+      const isOwned = owned.includes(weaponId);
+
+      // 무기는 글자가 아니라 그림으로. 기획서 요구다.
+      const iconKey = WEAPON_SPRITE[weaponId];
+      if (this.textures.exists(iconKey)) {
+        const icon = this.add.image(c.x + 26, y + 26, iconKey).setOrigin(0.5);
+        icon.setScale(44 / Math.max(icon.width, icon.height));
+        // 미보유는 회색으로 칠하고 선택이 불가능하다.
+        if (!isOwned) icon.setTint(0x4a5062).setAlpha(0.55);
+        container.add(icon);
+      }
+      container.add(
+        this.add
+          .text(c.x + 48, y + 26, weapon.name, {
+            fontSize: '15px',
+            color: isOwned ? COLORS.text : COLORS.textDim,
+            fontStyle: isOwned ? 'bold' : 'normal',
+          })
+          .setOrigin(0, 0.5),
+      );
+
+      if (!isOwned) {
+        container.add(
+          this.add
+            .rectangle(c.x + labelW + (c.w - labelW) / 2, y + 26, c.w - labelW, 52, 0x141824, 0.5)
+            .setStrokeStyle(1, 0x2a2f42, 0.6),
+        );
+        container.add(
+          this.add
+            .text(c.x + labelW + (c.w - labelW) / 2, y + 26, '미보유', { fontSize: '13px', color: '#5a6070' })
+            .setOrigin(0.5),
+        );
+        continue;
+      }
+
+      this.renderTownSlot(container, { kind: 'basic', weapon: weaponId }, slotX(0), y, slotW, 52);
+      this.renderTownSlot(container, { kind: 'support', weapon: weaponId, slot: 'primary' }, slotX(1), y, slotW, 52);
+      this.renderTownSlot(container, { kind: 'support', weapon: weaponId, slot: 'synergy' }, slotX(2), y, slotW, 52);
+    }
   }
 
-  private supportPreview(skill: Skill, support: Support): string {
+  /**
+   * 이 보조형스킬을 **그 무기에 붙이면** 무엇이 달라지는지.
+   *
+   * 설명문(`description`)은 일반론이라 무기마다 다른 결과를 말해주지 못한다.
+   * 같은 `다중투사체`도 활에 붙으면 화살이 몇 발이 되는지가 무기마다 다르다.
+   * 실제로 붙여 본 수치를 비교해 그 무기 기준으로 알려준다.
+   */
+  private supportEffectFor(weaponId: WeaponId, support: Support): string {
+    const weapon = weaponOf(weaponId);
+    // 붙을 수 있는 스킬을 찾는다. 기본 공격과 강화기술 중 태그가 맞는 쪽이다.
+    const skill = canAttach(weapon.basic, support, []).ok
+      ? weapon.basic
+      : canAttach(weapon.combo, support, []).ok
+        ? weapon.combo
+        : null;
+    // 못 붙는 이유를 **무엇이 필요한지**로 말한다. `안 붙는다`만 쓰면 다른 무기를
+    // 하나씩 눌러 보는 것 말고는 알 방법이 없다.
+    if (!skill) return `${support.requires.join('·')} 스킬에만 붙는다`;
+
+    const lines: string[] = [`${skill.name}에 붙는다`];
+
     const before = resolveSkill(skill, []).stats;
     const after = resolveSkill(skill, [support]).stats;
     const pairs: [Stat, string][] = [
+      ['damage', '피해'],
       ['projectileCount', '투사체'],
       ['areaRadius', '반경'],
       ['duration', '지속'],
-      ['tickInterval', '틱'],
-      ['damage', '피해'],
       ['projectileSpeed', '속도'],
-      ['comboGain', '콤보'],
+      ['tickInterval', '틱'],
     ];
-
     for (const [stat, label] of pairs) {
       const from = before[stat];
       const to = after[stat];
       if (from === undefined || to === undefined || Math.abs(from - to) < 0.001) continue;
-      return `${label} ${this.formatStat(from)}→${this.formatStat(to)}`;
+      lines.push(`${label} ${this.formatStat(from)} → ${this.formatStat(to)}`);
     }
-    const behavior = support.behaviors?.find((item) => item.kind === 'statusDamage');
-    if (behavior?.kind === 'statusDamage') return `상태 대상 피해 +${Math.round(behavior.more * 100)}%`;
-    const pierce = support.behaviors?.find((item) => item.kind === 'pierce');
-    if (pierce?.kind === 'pierce') return pierce.count === 'all' ? '모든 대상 관통' : `관통 +${pierce.count}`;
-    const chain = support.behaviors?.find((item) => item.kind === 'chain');
-    if (chain?.kind === 'chain') return `연쇄 +${chain.count}`;
-    const fork = support.behaviors?.find((item) => item.kind === 'fork');
-    if (fork?.kind === 'fork') return `갈래 +${fork.count}`;
-    const ricochet = support.behaviors?.find((item) => item.kind === 'ricochet');
-    if (ricochet?.kind === 'ricochet') return `튕김 +${ricochet.count}`;
-    return '';
+
+    // **여기에는 무기마다 달라지는 것만 적는다.**
+    // 관통 횟수도 상처 증폭도 어느 무기에 붙이든 같은 값이고, 그 내용은 위의
+    // `description`이 이미 말하고 있다. 같은 문장을 두 번 읽히면 정작 다른 부분인
+    // 수치 변화가 묻힌다. 실제로 `연계 방출`이 설명문과 거의 같은 줄을 반복했다.
+    return lines.join('\n');
   }
 
-  private shortSupportSummary(support: Support): string {
-    if (support.tags.includes('지대')) return '지대 성질 변경';
-    if (support.tags.includes('투사체')) return '투사체 성질 변경';
-    return '스킬 성능 변경';
+  /**
+   * 이 연계가 어떤 갈래인지. 기획 표의 `분류` 칸이다.
+   *
+   * 연계 칸은 무기당 하나뿐이라 다섯이 한 자리를 놓고 경쟁한다. 갈래를 먼저
+   * 알려주면 무엇과 무엇 중에 고르는지가 보인다. 거동에서 끌어내므로 데이터가
+   * 늘어도 따로 손댈 곳이 없다.
+   *
+   * 성능만 보정하는 보조에는 붙이지 않는다. 전부 같은 갈래라 알려줄 것이 없다.
+   */
+  private supportCategory(support: Support): string | null {
+    for (const behavior of support.behaviors ?? []) {
+      if (behavior.kind === 'combo') return '콤보 효과';
+      if (behavior.kind === 'statusDamage') return '상태 효과';
+    }
+    return null;
+  }
+
+  /**
+   * 항목 설명을 띄운다.
+   *
+   * **어느 무기 기준인지가 중요하다.** 채우기를 기다리는 칸이 있으면 그 무기 기준으로,
+   * 없으면 보유한 무기 전부에 대해 보여준다. 같은 보조형스킬도 무기마다 결과가 다르다.
+   *
+   * `scope`는 이미 장착된 칸에 올렸을 때 쓴다. 그 칸의 무기 기준으로만 보여준다.
+   */
+  private showTownTip(item: InventoryItem, x: number, y: number, scope?: WeaponId): void {
+    this.hideTownTip();
+    // 기본스킬은 붙이는 게 아니라 형태를 바꾸는 것이라 설명이 짧다.
+    if (item.kind === 'skill') {
+      const weapon = weaponOf(item.weapon);
+      this.drawTownTip(
+        [
+          item.name,
+          '기본스킬',
+          item.description,
+          '',
+          `[${weapon.name}]`,
+          `${weapon.basic.name} 대신 나간다`,
+          `공격 간격 ${weapon.cooldown}ms → ${attackIntervalFor(weapon, weapon.basicSkill)}ms`,
+        ].join('\n'),
+        x,
+        y,
+        true,
+      );
+      return;
+    }
+    if (item.kind !== 'support') return;
+    const support = findSupport(item.id);
+    if (!support) return;
+
+    const notAttachable = `${support.requires.join('·')} 스킬에만 붙는다`;
+    const category = this.supportCategory(support);
+    const head = [
+      support.name,
+      `${this.slotKindOf(item.slot).label}${category ? ` · ${category}` : ''}`,
+      support.description,
+    ].join('\n');
+
+    const pending = this.townPendingSlot;
+
+    // **넣을 수 없는 칸을 눌러둔 상태면 그것부터 말한다.**
+    // 태그만 보고 효과를 설명하면, 보조 칸을 눌러둔 채 연계 스킬에 올렸을 때
+    // 못 넣는데 넣을 수 있는 것처럼 읽힌다. 판정은 장착과 같은 함수를 쓴다.
+    if (pending !== null && !this.townSlotAccepts(pending, item)) {
+      const reason =
+        pending.kind === 'wheel'
+          ? '이 칸에는 무기만 들어간다'
+          : pending.kind === 'basic'
+            ? '이 칸에는 그 무기의 기본스킬만 들어간다'
+            : item.slot !== pending.slot
+              ? `이것은 ${this.slotKindOf(item.slot).label} 스킬이라 ${this.slotKindOf(pending.slot).label} 칸에 안 들어간다`
+              : `이것은 ${support.requires.join('·')} 스킬에만 붙어서 이 무기에는 안 들어간다`;
+      this.drawTownTip(`${head}\n\n${reason}`, x, y, false);
+      return;
+    }
+
+    const weapons: WeaponId[] =
+      scope !== undefined
+        ? [scope]
+        : pending !== null && pending.kind === 'support'
+          ? [pending.weapon]
+          : this.run.progress.unlockedWeapons.filter((id) => this.supportEffectFor(id, support) !== notAttachable);
+
+    const blocks = weapons.map((id) => `[${weaponOf(id).name}]\n${this.supportEffectFor(id, support)}`);
+    const body = blocks.length ? blocks.join('\n\n') : '붙일 수 있는 무기가 없다';
+
+    this.drawTownTip(`${head}\n\n${body}`, x, y, true);
+  }
+
+  private drawTownTip(text: string, x: number, y: number, ok: boolean): void {
+    const label = this.add.text(0, 0, text, {
+      fontSize: '13px',
+      color: ok ? COLORS.text : '#ffb4a2',
+      lineSpacing: 4,
+      wordWrap: { width: 300 },
+    });
+    // 화면 밖으로 나가지 않게 민다. 인벤토리 오른쪽 끝 칸에서 잘려 읽히지 않았다.
+    const w = label.width + 20;
+    const h = label.height + 16;
+    const px = Math.min(x, VIEW_WIDTH - w - 12);
+    const py = Math.min(y, VIEW_HEIGHT - h - 12);
+    label.setPosition(px + 10, py + 8);
+
+    const back = this.add
+      .rectangle(px + w / 2, py + h / 2, w, h, 0x0d1018, 0.98)
+      .setStrokeStyle(1, ok ? COLORS.accent : 0x8a4a4a, 0.85);
+
+    const container = this.add.container(0, 0, [back, label]).setDepth(45);
+    pinContainer(this, container);
+    this.townTip = container;
+  }
+
+  private hideTownTip(): void {
+    this.townTip?.destroy();
+    this.townTip = null;
   }
 
   private formatStat(value: number): string {
     return Number.isInteger(value) ? String(value) : value.toFixed(1);
   }
 
-  private supportCandidates(skill: Skill, slot: 'primary' | 'synergy'): Support[] {
-    return this.run.progress.ownedSupports.flatMap((id) => {
-      const support = findSupport(id);
-      if (!support) return [];
-      if (supportSlotType(support) !== slot) return [];
-      return canAttach(skill, support).ok ? [support] : [];
-    });
+  /** 이 칸에 지금 들어 있는 것. */
+  private townSlotItem(target: TownSlotTarget): InventoryItem | null {
+    if (target.kind === 'wheel') {
+      const id = this.run.progress.wheel[target.hand][target.index];
+      if (!id) return null;
+      const weapon = weaponOf(id);
+      return { kind: 'weapon', id, name: weapon.name, color: weapon.color };
+    }
+    const config = this.run.progress.configs[target.weapon];
+    if (target.kind === 'basic') {
+      if (config.basicSkillId === null) return null;
+      return basicSkillItem(target.weapon);
+    }
+    const id = target.slot === 'primary' ? config.primarySupportId : config.synergySupportId;
+    if (!id) return null;
+    const support = findSupport(id);
+    if (!support) return null;
+    return { kind: 'support', id, name: support.name, slot: supportSlotType(support), description: support.description };
   }
 
-  private addSlotButton(
+  /**
+   * 이 항목을 그 칸에 넣을 수 있는지.
+   *
+   * 점멸 대상을 고를 때와 드롭을 받을 때 같은 판정을 써야 한다. 둘이 갈리면
+   * 점멸했는데 안 들어가거나 그 반대가 된다.
+   */
+  private townSlotAccepts(target: TownSlotTarget, item: InventoryItem): boolean {
+    if (target.kind === 'wheel') return item.kind === 'weapon';
+    // 첫 소켓은 그 무기의 기본스킬만 받는다. 활에서 멸검이 나가면 그림도 소리도 안 맞는다.
+    if (target.kind === 'basic') return item.kind === 'skill' && item.weapon === target.weapon;
+    if (item.kind !== 'support') return false;
+    if (item.slot !== target.slot) return false;
+    // **지금 나가는 공격에 붙을 수 있어야 한다.** 첫 소켓을 채웠는지에 따라 달라진다.
+    // 검에 멸검을 끼우면 `지대`를 요구하는 보조가 그때부터 들어간다.
+    const support = findSupport(item.id);
+    if (!support) return false;
+    return canAttach(equippedBasicSkill(this.run.progress, target.weapon), support, []).ok;
+  }
+
+  /** 칸 하나를 그린다. 클릭하면 채우기 대기 상태가 되고, 드롭도 여기서 받는다. */
+  private renderTownSlot(
     container: Phaser.GameObjects.Container,
+    target: TownSlotTarget,
     x: number,
     y: number,
-    label: string,
-    enabled: boolean,
-    onClick: () => void,
-  ): { rect: Phaser.GameObjects.Rectangle; width: number; height: number } {
-    const width = 220;
-    const height = 48;
-    const fill = enabled ? 0x242a3a : 0x171923;
-    const stroke = enabled ? COLORS.accent : 0x3a4059;
-    const rect = this.add
-      .rectangle(x, y, width, height, fill, 0.92)
-      .setOrigin(0, 0.5)
-      .setStrokeStyle(1, stroke, enabled ? 0.75 : 0.35);
-    const text = this.add
-      .text(x + 14, y, label, {
-        fontSize: label.includes('\n') ? '13px' : '15px',
-        color: enabled ? COLORS.text : COLORS.textDim,
-        lineSpacing: 2,
-        wordWrap: { width: width - 28 },
-      })
-      .setOrigin(0, 0.5);
+    w: number,
+    h: number,
+    label?: string,
+  ): void {
+    const item = this.townSlotItem(target);
+    const pending = this.townPendingSlot !== null && this.sameTownSlot(this.townPendingSlot, target);
 
-    if (enabled) {
-      rect.setInteractive({ useHandCursor: true });
-      text.setInteractive({ useHandCursor: true });
-      rect.on('pointerover', () => rect.setFillStyle(0x2e3650, 0.96));
-      rect.on('pointerout', () => rect.setFillStyle(fill, 0.92));
-      rect.on('pointerdown', onClick);
-      text.on('pointerover', () => rect.setFillStyle(0x2e3650, 0.96));
-      text.on('pointerout', () => rect.setFillStyle(fill, 0.92));
-      text.on('pointerdown', onClick);
+    const rect = this.add
+      .rectangle(x + w / 2, y + h / 2, w, h, pending ? 0x2b3350 : 0x141824, 0.96)
+      .setStrokeStyle(2, pending ? COLORS.accent : 0x3a4059, pending ? 1 : 0.8);
+    container.add(rect);
+
+    // 보기 전용에서는 칸을 아예 잡지 않는다. 누를 수 있게 두고 무시하면
+    // 눌리는데 아무 일도 안 일어나는 것처럼 보여 고장으로 읽힌다.
+    if (!this.townReadOnly) {
+      // `dropZone`이 없으면 Phaser가 `drop` 이벤트를 주지 않는다. 드래그해서
+      // 놓아도 아무 일이 일어나지 않아 기능이 없는 것처럼 보인다.
+      rect.setInteractive({ useHandCursor: true, dropZone: true });
+      rect.setData('townSlot', target);
+      rect.on('pointerdown', () => {
+        // 같은 칸을 다시 누르면 대기를 푼다. 잘못 눌렀을 때 빠져나갈 길이 있어야 한다.
+        this.townPendingSlot = pending ? null : target;
+        this.renderTown();
+      });
+    } else {
+      rect.setAlpha(0.75);
     }
 
-    container.add(rect);
-    container.add(text);
-    return { rect, width, height };
-  }
+    // **넣고 나서도 설명이 보여야 한다.**
+    // 인벤토리에서는 올리면 설명이 뜨는데 장착하는 순간 이름만 남아서, 무엇을
+    // 붙여 뒀는지 확인하려면 빼서 다시 올려보는 수밖에 없었다.
+    // 칸의 무기 기준으로만 보여준다. 그 칸에서 실제로 일어나는 일이 그것이다.
+    // 좌표는 오버레이 컨테이너의 지역 좌표다. 포인터의 월드 좌표를 그대로 넘기면
+    // 컨테이너가 카메라에 핀으로 붙어 있어 엉뚱한 곳에 뜬다.
+    if (item !== null && item.kind === 'support' && target.kind === 'support') {
+      rect.on('pointerover', () => this.showTownTip(item, x + w + 10, y, target.weapon));
+      rect.on('pointerout', () => this.hideTownTip());
+    }
 
-  private cycleSupport(weapon: WeaponId, slot: 'primarySupportId' | 'synergySupportId', candidates: readonly Support[]): void {
-    const current = this.run.progress.configs[weapon][slot];
-    const ids = [null, ...candidates.map((support) => support.id)] as const;
-    const nextId = ids[(ids.indexOf(current) + 1) % ids.length] ?? null;
-    const progress = configureManifestation(this.run.progress, weapon, { [slot]: nextId });
+    if (label) {
+      container.add(this.add.text(x + 10, y + 8, label, { fontSize: '12px', color: COLORS.textDim }));
+    }
 
-    this.run = {
-      ...this.run,
-      progress,
-      loadout: loadoutFromProgress(progress, this.run.loadout),
-    };
-    this.saveCurrentProgress();
-    this.refreshHud();
-    this.reopenTownOverlay();
-  }
-
-  private renderWheelSetupPanel(container: Phaser.GameObjects.Container): void {
-    const y = VIEW_HEIGHT - 132;
-    const startX = 98;
-    container.add(this.add.text(startX, y - 38, 'R링 무기 후보', { fontSize: '20px', color: COLORS.text, fontStyle: 'bold' }));
-
-    this.addWheelSlotButton(container, startX, y + 18, '왼손 1', this.run.progress.wheel.left[0], 'left', 0);
-    this.addWheelSlotButton(container, startX + 240, y + 18, '왼손 2', this.run.progress.wheel.left[1], 'left', 1);
-    this.addWheelSlotButton(container, startX + 500, y + 18, '오른손 1', this.run.progress.wheel.right[0], 'right', 0);
-    this.addWheelSlotButton(container, startX + 740, y + 18, '오른손 2', this.run.progress.wheel.right[1], 'right', 1);
-  }
-
-  private addWheelSlotButton(
-    container: Phaser.GameObjects.Container,
-    x: number,
-    y: number,
-    label: string,
-    weapon: WheelSlot,
-    hand: Hand,
-    index: 0 | 1,
-  ): void {
-    const equipped = Boolean(weapon) && this.run.progress.active[hand] === weapon;
-    const { rect, width } = this.addSlotButton(
-      container,
-      x,
-      y,
-      `${label}\n${weapon ? weaponOf(weapon).name : '비어 있음'}`,
-      true,
-      () => this.cycleWheelSlot(hand, index),
-    );
-
-    // 지금 손에 들려 있는 후보는 테두리와 배경으로 구분한다.
-    // `장착 중`이라는 글자만으로는 눈에 들어오지 않는다.
-    if (equipped) {
-      rect.setStrokeStyle(3, COLORS.accent, 1);
-      rect.setFillStyle(0x2b3350, 0.96);
+    const textY = label ? y + h / 2 + 8 : y + h / 2;
+    if (item) {
+      if (item.kind === 'weapon' && this.textures.exists(WEAPON_SPRITE[item.id])) {
+        const icon = this.add.image(x + w - 28, y + h / 2, WEAPON_SPRITE[item.id]).setOrigin(0.5);
+        icon.setScale(34 / Math.max(icon.width, icon.height));
+        container.add(icon);
+      }
+      container.add(
+        this.add.text(x + 10, textY, item.name, { fontSize: '15px', color: COLORS.text }).setOrigin(0, 0.5),
+      );
+      // 비우는 길. 기획서에 명시는 없지만 넣은 것을 뺄 수 없으면 되돌릴 방법이 없다.
+      if (this.townReadOnly) return;
+      const clear = this.add
+        .text(x + w - 10, y + 10, '×', { fontSize: '15px', color: COLORS.textDim })
+        .setOrigin(1, 0)
+        .setInteractive({ useHandCursor: true });
+      clear.on('pointerdown', (_p: unknown, _lx: unknown, _ly: unknown, event: Phaser.Types.Input.EventData) => {
+        event.stopPropagation();
+        this.applyTownSlot(target, null);
+      });
+      container.add(clear);
+    } else {
       container.add(
         this.add
-          .text(x + width - 12, y - 15, '장착 중', { fontSize: '12px', color: COLORS.accentText, fontStyle: 'bold' })
-          .setOrigin(1, 0.5),
+          .text(x + 10, textY, pending ? '인벤토리에서 고르시오' : '비어 있음', {
+            fontSize: '14px',
+            color: pending ? COLORS.accentText : '#5a6070',
+          })
+          .setOrigin(0, 0.5),
+      );
+    }
+  }
+
+  private sameTownSlot(a: TownSlotTarget, b: TownSlotTarget): boolean {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === 'wheel' && b.kind === 'wheel') return a.hand === b.hand && a.index === b.index;
+    if (a.kind === 'basic' && b.kind === 'basic') return a.weapon === b.weapon;
+    if (a.kind === 'support' && b.kind === 'support') return a.weapon === b.weapon && a.slot === b.slot;
+    return false;
+  }
+
+  /** 칸에 항목을 넣거나(`item`) 비운다(`null`). */
+  private applyTownSlot(target: TownSlotTarget, item: InventoryItem | null): void {
+    if (target.kind === 'wheel') {
+      const weapon = item && item.kind === 'weapon' ? item.id : null;
+      // 1번 칸을 바꾸면 손에 드는 무기도 바뀌어야 한다. 마을을 나갈 때까지 미루면
+      // 패널에는 `왼손 1: 방패`라고 떠 있는데 캐릭터는 검을 든 채로 남는다.
+      this.run = {
+        ...this.run,
+        progress: equipFirstWheelSlots(setWheelSlot(this.run.progress, target.hand, target.index, weapon)),
+      };
+    } else if (target.kind === 'basic') {
+      const id = item && item.kind === 'skill' ? item.id : null;
+      this.run = {
+        ...this.run,
+        progress: configureManifestation(this.run.progress, target.weapon, { basicSkillId: id }),
+      };
+    } else {
+      const key = target.slot === 'primary' ? 'primarySupportId' : 'synergySupportId';
+      const id = item && item.kind === 'support' ? item.id : null;
+      this.run = { ...this.run, progress: configureManifestation(this.run.progress, target.weapon, { [key]: id }) };
+    }
+    this.run = { ...this.run, loadout: loadoutFromProgress(this.run.progress, this.run.loadout) };
+    this.saveCurrentProgress();
+    // 진행 상태만 바꾸면 화면과 전투 런타임이 옛 무기를 들고 있다.
+    this.syncWeaponRuntimes();
+    this.refreshHud();
+    this.townPendingSlot = null;
+    this.renderTown();
+  }
+
+  /** 우측 인벤토리. 필터 탭 3개 + 7×7 격자 + 자동정렬 버튼. */
+  private renderTownInventory(container: Phaser.GameObjects.Container): void {
+    const t = TOWN_UI.filterTab;
+    const filters: Array<{ key: InventoryFilter; label: string }> = [
+      { key: 'all', label: '전체' },
+      { key: 'weapon', label: '무기' },
+      { key: 'skill', label: '기본' },
+      { key: 'support', label: '보조형' },
+    ];
+    for (const [index, f] of filters.entries()) {
+      const x = t.x + index * (t.w + t.gap);
+      const active = this.townFilter === f.key;
+      const rect = this.add
+        .rectangle(x + t.w / 2, t.y + t.h / 2, t.w, t.h, active ? 0x2b3350 : 0x141824, 0.96)
+        .setStrokeStyle(2, active ? COLORS.accent : 0x3a4059, active ? 1 : 0.8)
+        .setInteractive({ useHandCursor: true });
+      rect.on('pointerdown', () => {
+        this.townFilter = f.key;
+        this.renderTown();
+      });
+      container.add(rect);
+      container.add(
+        this.add
+          .text(x + t.w / 2, t.y + t.h / 2, f.label, {
+            fontSize: '14px',
+            color: active ? COLORS.accentText : COLORS.textDim,
+            fontStyle: 'bold',
+          })
+          .setOrigin(0.5),
       );
     }
 
-    // 무기 그림을 슬롯 안에 넣는다. 이름만 바뀌면 클릭이 먹혔는지 알기 어렵다.
-    if (weapon && this.textures.exists(WEAPON_SPRITE[weapon])) {
-      const icon = this.add.image(x + width - 34, y + 6, WEAPON_SPRITE[weapon]).setOrigin(0.5);
-      icon.setScale(38 / Math.max(icon.width, icon.height));
-      container.add(icon);
+    const inv = TOWN_UI.inventory;
+    container.add(
+      this.add.rectangle(inv.x + inv.w / 2, inv.y + inv.h / 2, inv.w, inv.h, 0x0d1018, 0.9).setStrokeStyle(1, 0x3a4059, 0.7),
+    );
+
+    const cells = cellsOf(this.run.progress, this.run.progress.inventory, this.townFilter);
+    const step = TOWN_UI.cell + TOWN_UI.cellGap;
+    const gridW = INVENTORY_COLUMNS * step - TOWN_UI.cellGap;
+    const originX = inv.x + (inv.w - gridW) / 2;
+    const originY = inv.y + 14;
+
+    for (let i = 0; i < INVENTORY_COLUMNS * INVENTORY_ROWS; i++) {
+      const cx = originX + (i % INVENTORY_COLUMNS) * step;
+      const cy = originY + Math.floor(i / INVENTORY_COLUMNS) * step;
+      this.renderInventoryCell(container, i, cells[i] ?? null, cx, cy);
     }
+
+    const sortY = inv.y + inv.h - 26;
+    const sortRect = this.add
+      .rectangle(inv.x + inv.w / 2, sortY, 130, 32, 0x141824, 0.96)
+      .setStrokeStyle(1, 0x3a4059, 0.9)
+      .setInteractive({ useHandCursor: true });
+    sortRect.on('pointerdown', () => {
+      this.run = { ...this.run, progress: sortInventory(this.run.progress) };
+      this.saveCurrentProgress();
+      this.renderTown();
+    });
+    container.add(sortRect);
+    container.add(
+      this.add.text(inv.x + inv.w / 2, sortY, '자동정렬', { fontSize: '14px', color: COLORS.text }).setOrigin(0.5),
+    );
   }
 
-  private cycleWheelSlot(hand: Hand, index: 0 | 1): void {
-    const current = this.run.progress.wheel[hand][index];
-    const candidates: WheelSlot[] = [null, ...this.wheelCandidatesForHand(hand)];
-    const next = candidates[(candidates.indexOf(current) + 1) % candidates.length] ?? null;
-    // 1번 칸을 바꾸면 손에 드는 무기가 바뀐다. 마을을 나갈 때까지 미루면 패널에는
-    // `왼손 1: 방패`라고 떠 있는데 캐릭터는 검을 든 채로 남아 설정과 화면이 어긋난다.
-    const progress = equipFirstWheelSlots(setWheelSlot(this.run.progress, hand, index, next));
+  /**
+   * 보조형스킬의 슬롯 종류를 부르는 이름과 색.
+   *
+   * 격자 칸의 배지, 호버 설명, 거절 사유가 전부 이걸 쓴다. 세 곳이 각자 문자열을
+   * 들고 있으면 한 곳만 고쳐져서 같은 것을 다르게 부르게 된다.
+   */
+  private slotKindOf(slot: 'primary' | 'synergy'): { label: string; color: number } {
+    return slot === 'synergy' ? { label: '연계', color: COLORS.accent } : { label: '보조', color: 0x6ea8ff };
+  }
 
-    this.run = {
-      ...this.run,
-      progress,
-      loadout: loadoutFromProgress(progress, this.run.loadout),
+  /** 격자 칸 하나. 드래그로 옮길 수 있고, 대기 중인 칸에 넣을 수 있으면 점멸한다. */
+  private renderInventoryCell(
+    container: Phaser.GameObjects.Container,
+    index: number,
+    item: InventoryItem | null,
+    x: number,
+    y: number,
+  ): void {
+    const size = TOWN_UI.cell;
+    const pending = this.townPendingSlot;
+    const eligible = pending !== null && item !== null && this.townSlotAccepts(pending, item);
+
+    const rect = this.add
+      .rectangle(x + size / 2, y + size / 2, size, size, 0x161b28, 0.95)
+      .setStrokeStyle(1, 0x2f3648, 0.9)
+      .setInteractive({ useHandCursor: true, draggable: true, dropZone: true });
+    rect.setData('cellIndex', index);
+    container.add(rect);
+
+    // 칸을 이루는 조각들. 점멸과 흐리기를 **칸 전체**에 걸어야 해서 모아 둔다.
+    // 배경만 흐리게 했더니 배지와 이름이 밝게 남아, 못 넣는 것이 넣을 수 있는 것처럼
+    // 보였다. 배지를 넣고 나서 그 차이가 눈에 띄게 커졌다.
+    const parts: Phaser.GameObjects.GameObject[] = [rect];
+    const add = <T extends Phaser.GameObjects.GameObject>(object: T): T => {
+      container.add(object);
+      parts.push(object);
+      return object;
     };
-    this.saveCurrentProgress();
-    this.syncWeaponRuntimes();
-    this.refreshHud();
-    this.reopenTownOverlay();
+
+    if (item) {
+      if (item.kind === 'weapon' && this.textures.exists(WEAPON_SPRITE[item.id])) {
+        const icon = add(this.add.image(x + size / 2, y + size / 2 - 6, WEAPON_SPRITE[item.id]).setOrigin(0.5));
+        icon.setScale(30 / Math.max(icon.width, icon.height));
+      } else if (item.kind === 'skill') {
+        // 기본스킬은 무기 색을 그대로 쓰고 마름모로 그린다. 무기와 같은 계열이지만
+        // 무기가 아니라는 것이 한눈에 갈려야 한다.
+        container.add(this.add.rectangle(x + size / 2, y + 7, size - 2, 13, item.color, 0.22));
+        container.add(
+          this.add
+            .text(x + size / 2, y + 7, '기본', { fontSize: '9px', color: COLORS.text, fontStyle: 'bold' })
+            .setOrigin(0.5),
+        );
+        const diamond = this.add.rectangle(x + size / 2, y + size / 2 + 1, 13, 13, item.color, 0.9);
+        diamond.setRotation(Math.PI / 4);
+        container.add(diamond);
+      } else if (item.kind === 'support') {
+        // **보조형스킬은 종류를 글자로 적는다.**
+        // 전에는 점 색깔로만 갈랐는데, 색만으로는 어느 쪽이 연계인지 알 방법이 없어
+        // 칸을 눌러 점멸시켜 보기 전에는 구분이 안 됐다. 배지는 칸 위쪽 띠에 둔다.
+        const kind = this.slotKindOf(item.slot);
+        add(this.add.rectangle(x + size / 2, y + 7, size - 2, 13, kind.color, 0.22));
+        add(
+          this.add
+            .text(x + size / 2, y + 7, kind.label, { fontSize: '9px', color: COLORS.text, fontStyle: 'bold' })
+            .setOrigin(0.5),
+        );
+        // 띠가 자리를 차지하므로 점은 조금 작게, 조금 아래로 내린다.
+        add(this.add.circle(x + size / 2, y + size / 2 + 1, 9, kind.color, 0.85));
+      } else {
+        add(this.add.circle(x + size / 2, y + size / 2 - 6, 11, 0x6ea8ff, 0.85));
+      }
+      add(
+        this.add
+          .text(x + size / 2, y + size - 11, item.name, { fontSize: '10px', color: COLORS.textDim })
+          .setOrigin(0.5),
+      );
+    }
+
+    if (eligible) {
+      // 넣을 수 있는 것만 점멸시킨다. 기획서의 `점멸되어 표시됨`이다.
+      rect.setStrokeStyle(2, COLORS.accent, 1);
+      this.tweens.add({ targets: parts, alpha: 0.45, duration: 420, yoyo: true, repeat: -1 });
+    } else if (pending !== null && item !== null) {
+      // 대기 중인데 못 넣는 것은 눌러서 헤매지 않도록 흐리게 둔다.
+      for (const part of parts) (part as unknown as { setAlpha(v: number): void }).setAlpha(0.4);
+    }
+
+    rect.on('pointerdown', () => {
+      if (!item) return;
+      if (pending === null) return;
+      if (!this.townSlotAccepts(pending, item)) {
+        this.showTownToast('무기 유형에 맞지 않습니다.');
+        return;
+      }
+      this.applyTownSlot(pending, item);
+    });
+
+    // 올려두면 이 항목이 **그 무기에서** 무엇을 하는지 알려준다.
+    // 설명문만으로는 무기마다 다른 결과를 알 수 없다.
+    rect.on('pointerover', () => {
+      if (item) this.showTownTip(item, x + size + 10, y);
+    });
+    rect.on('pointerout', () => this.hideTownTip());
   }
 
-  private wheelCandidatesForHand(hand: Hand): WeaponId[] {
-    const preferred: readonly WeaponId[] = hand === 'left'
-      ? ['sword', 'shield', 'bow', 'arcane']
-      : ['bow', 'arcane', 'shield', 'sword'];
-    return preferred.filter((weapon) => this.run.progress.unlockedWeapons.includes(weapon));
+  /**
+   * 드래그앤드롭.
+   *
+   * 격자 칸끼리 놓으면 자리를 맞바꾸고, 좌측 칸에 놓으면 장착한다.
+   * 타입이 맞지 않으면 기획서대로 화면 최하단에 안내를 띄운다.
+   */
+  private setupTownDragAndDrop(): void {
+    this.input.on('dragstart', (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject) => {
+      if (this.overlayKind !== 'town-config') return;
+      const index = obj.getData('cellIndex');
+      this.townDragFrom = typeof index === 'number' ? index : null;
+    });
+
+    this.input.on('drag', (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject, x: number, y: number) => {
+      if (this.overlayKind !== 'town-config') return;
+      // 끌고 있는 칸만 따라다니게 한다. 놓으면 다시 그리므로 위치는 원복된다.
+      const shape = obj as Phaser.GameObjects.Rectangle;
+      shape.setPosition(x, y);
+      shape.setDepth(40);
+    });
+
+    this.input.on('drop', (_p: Phaser.Input.Pointer, _obj: Phaser.GameObjects.GameObject, zone: Phaser.GameObjects.GameObject) => {
+      if (this.overlayKind !== 'town-config') return;
+      this.handleTownDrop(zone);
+    });
+
+    this.input.on('dragend', (_p: Phaser.Input.Pointer, _obj: Phaser.GameObjects.GameObject, dropped: boolean) => {
+      if (this.overlayKind !== 'town-config') return;
+      this.townDragFrom = null;
+      // 놓을 곳이 아니면 원래 자리로 돌아가야 한다. 다시 그리는 것이 가장 확실하다.
+      if (!dropped) this.renderTown();
+    });
+  }
+
+  private handleTownDrop(zone: Phaser.GameObjects.GameObject): void {
+    const from = this.townDragFrom;
+    this.townDragFrom = null;
+    if (from === null) return;
+
+    const item = cellsOf(this.run.progress, this.run.progress.inventory)[from] ?? null;
+
+    // 격자 칸끼리 — 자리 맞바꾸기.
+    const toIndex = zone.getData('cellIndex');
+    if (typeof toIndex === 'number') {
+      this.run = { ...this.run, progress: moveInventoryItem(this.run.progress, from, toIndex) };
+      this.saveCurrentProgress();
+      this.renderTown();
+      return;
+    }
+
+    // 좌측 칸에 놓기 — 장착.
+    const target = zone.getData('townSlot') as TownSlotTarget | undefined;
+    if (!target) {
+      this.renderTown();
+      return;
+    }
+    if (!item) {
+      this.renderTown();
+      return;
+    }
+    if (!this.townSlotAccepts(target, item)) {
+      this.showTownToast('무기 유형에 맞지 않습니다.');
+      this.renderTown();
+      return;
+    }
+    this.applyTownSlot(target, item);
+  }
+
+  /**
+   * 화면 최하단 안내.
+   *
+   * 기획서가 `무기 유형에 맞지 않습니다.` 문구를 4~5초 띄웠다가 사라지게 해달라고
+   * 적고 있다. 패널을 다시 그려도 살아남아야 하므로 오버레이 바깥에 둔다.
+   */
+  private showTownToast(message: string): void {
+    this.townToast?.destroy();
+    const label = this.add
+      // `setScrollFactor(0)`만으로는 카메라 확대 때문에 자리가 밀린다.
+      // `render.ts`에 적힌 대로 HUD와 같은 고정 좌표 변환을 쓴다.
+      .text(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 40), message, {
+        fontSize: '16px',
+        color: '#ffb4a2',
+        fontStyle: 'bold',
+        backgroundColor: '#1a1015',
+        padding: { x: 14, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(60)
+      .setScrollFactor(0);
+    this.townToast = label;
+    this.time.delayedCall(4500, () => {
+      if (this.townToast === label) this.townToast = null;
+      label.destroy();
+    });
   }
 
   private saveCurrentProgress(): void {
@@ -3225,19 +4050,10 @@ export class PlayScene extends Phaser.Scene {
     saveProgress(this.run.progress);
   }
 
-  private reopenTownOverlay(): void {
-    this.closeOverlay();
-    this.time.delayedCall(0, () => this.showTown());
-  }
-
-  /**
-   * 오버레이를 치운다.
-   *
-   * **카드의 클릭 핸들러 안에서 그 카드를 바로 파괴하면 안 된다.** Phaser가 아직
-   * 그 포인터 이벤트를 처리하는 중이라 입력 플러그인이 죽은 오브젝트를 붙들게 되고,
-   * 그 뒤로 클릭이 먹지 않는다. 화면에서 즉시 감추고 파괴는 다음 틱으로 미룬다.
-   */
   private closeOverlay(): void {
+    // 설명은 오버레이 밖에 있어 함께 사라지지 않는다. 명시적으로 지운다.
+    this.hideTownTip();
+    this.townReadOnly = false;
     const overlay = this.overlay;
     this.overlay = null;
     this.overlayKind = null;
@@ -3353,8 +4169,13 @@ export class PlayScene extends Phaser.Scene {
     const weapons = reward.weapons?.map((id) => weaponOf(id).name) ?? [];
     if (weapons.length) lines.push(`무기: ${weapons.join(' / ')}`);
 
-    const comboSkills = reward.comboSkills?.map((id) => findSkill(id)?.name ?? id) ?? [];
-    if (comboSkills.length) lines.push(`강화기술: ${comboSkills.join(' / ')}`);
+    // 강화기술은 무기에 딸린 상태값이라 별도 보유 목록에는 없다. 그래도 무엇이 딸려
+    // 왔는지는 알려야 한다. 얻은 무기에서 끌어내므로 보상 정의와 어긋날 수가 없다.
+    const basicSkills = reward.basicSkills?.flatMap((id) => {
+      const weapon = WEAPON_IDS.map(weaponOf).find((w) => w.basicSkill.id === id);
+      return weapon ? [weapon.basicSkill.name] : [];
+    }) ?? [];
+    if (basicSkills.length) lines.push(`기본스킬: ${basicSkills.join(' / ')}`);
 
     const supports = reward.supports?.flatMap((id) => {
       const support = findSupport(id);

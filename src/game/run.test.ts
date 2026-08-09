@@ -16,7 +16,7 @@ import {
 import { TOTAL_ROOMS } from '@/game/rooms';
 import { totalSupports, supportsFor } from '@/game/loadout';
 import { createLoadout } from '@/game/loadout';
-import { configureManifestation, createInitialProgress, setWheelSlot, unlockComboSkills, unlockSupports, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
+import { configureManifestation, createInitialProgress, setWheelSlot, unlockBasicSkills, unlockSupports, unlockWeaponSwitch, unlockWeapons } from '@/game/progression';
 
 const newRun = () => createRun('sword', 'bow');
 
@@ -70,7 +70,8 @@ describe('clearRoom', () => {
     const run = clearRoom(damaged);
     expect(run.phase).toBe('combat');
     expect(run.roomIndex).toBe(1);
-    expect(run.progress.ownedComboSkills).toContain('annihilation');
+    // 기획상 아이템 드랍은 보스킬에만 있다. 첫 방은 조작 학습만 맡는다.
+    expect(run.progress.ownedSupports).toEqual([]);
     expect(run.shieldEnergy).toBe(SHIELD_ENERGY_MAX);
   });
 
@@ -81,9 +82,9 @@ describe('clearRoom', () => {
     expect(town.phase).toBe('town');
     expect(town.roomIndex).toBe(1);
     expect(town.progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
-    expect(town.progress.ownedComboSkills).toEqual(['annihilation', 'volley', 'fracture-wave']);
-    // `콤보 개방`은 강화기술 전환을 여는 열쇠라 첫 보스가 준다. 나머지 보조형스킬은 여전히 없다.
-    expect(town.progress.ownedSupports).toEqual(['combo-imprint']);
+    // `강화 개방`은 강화기술 전환을 여는 열쇠라 첫 보스가 준다. 나머지 보조형스킬은 여전히 없다.
+    // 확정 보조형스킬은 없다. 무작위 드랍은 주워야 들어온다.
+    expect(town.progress.ownedSupports).toEqual([]);
     expect(town.progress.weaponSwitchUnlocked).toBe(true);
     expect(town.progress.wheel.left).toEqual(['sword', 'shield']);
     expect(town.progress.wheel.right).toEqual([null, null]);
@@ -98,13 +99,13 @@ describe('clearRoom', () => {
     expect(run.phase).toBe('won');
   });
 
-  it('마지막 보스 보상은 승리 상태의 보유 목록에 남는다', () => {
+  it('마지막 보스 무기 보상은 승리 상태의 보유 목록에 남는다', () => {
     const run = clearRoom(advanceWaves(TOTAL_ROOMS - 1));
 
     expect(run.phase).toBe('won');
     expect(run.progress.unlockedWeapons).toContain('arcane');
-    expect(run.progress.ownedComboSkills).toContain('arcane-daggers');
-    expect(run.progress.ownedSupports).toEqual(['combo-imprint', 'chain', 'crackling-ground']);
+    // 보조/연계 랜덤 드랍은 화면 드랍 생성 시점에 확정된다.
+    expect(run.progress.ownedSupports).toEqual([]);
   });
 
   it('전투 중이 아니면 아무 일도 하지 않는다', () => {
@@ -123,7 +124,7 @@ describe('collectRoomReward', () => {
     expect(collected.roomIndex).toBe(0);
     expect(collected.progress.unlockedWeapons).toContain('bow');
     expect(collected.progress.ownedSupports).toContain('multiple-projectiles');
-    expect(collected.gained).toEqual({ weapons: ['bow'], comboSkills: [], supports: ['multiple-projectiles'] });
+    expect(collected.gained).toEqual({ weapons: ['bow'], basicSkills: [], supports: ['multiple-projectiles'], keys: [] });
   });
 
   it('이미 가진 보상은 gained에 다시 표시하지 않는다', () => {
@@ -132,16 +133,16 @@ describe('collectRoomReward', () => {
     run = collectRoomReward(run, reward);
     const again = collectRoomReward(run, reward);
 
-    expect(again.gained).toEqual({ weapons: ['bow'], comboSkills: [], supports: [] });
+    expect(again.gained).toEqual({ weapons: ['bow'], basicSkills: [], supports: [], keys: [] });
     expect(again.progress.unlockedWeapons.filter((id) => id === 'bow')).toHaveLength(1);
   });
 
   it('여러 드랍 아이템을 따로 주워도 gained를 누적한다', () => {
     let run = createRun('sword', null);
     run = collectRoomReward(run, { weapons: ['bow'] });
-    run = collectRoomReward(run, { comboSkills: ['volley'] });
+    run = collectRoomReward(run, { supports: ['multiple-projectiles'] });
 
-    expect(run.gained).toEqual({ weapons: ['bow'], comboSkills: ['volley'], supports: [] });
+    expect(run.gained).toEqual({ weapons: ['bow'], basicSkills: [], supports: ['multiple-projectiles'], keys: [] });
   });
 });
 
@@ -354,16 +355,16 @@ describe('이미 가진 보상은 다시 획득으로 세지 않는다', () => {
     const run = clearRoom(atFirstBoss(createInitialProgress()));
 
     expect(run.gained?.weapons).toEqual(['bow', 'shield']);
-    expect(run.gained?.comboSkills).toEqual(['volley', 'fracture-wave']);
-    expect(run.gained?.supports).toEqual(['combo-imprint']);
+    expect(run.gained?.supports).toEqual([]);
   });
 
   it('이미 다 가지고 있으면 새로 얻은 것이 없다', () => {
     // 저장이 있는 두 번째 판. 같은 보상을 또 받지만 실제로 늘어나는 것은 없다.
-    const owned = unlockSupports(
-      unlockComboSkills(unlockWeapons(createInitialProgress(), ['bow', 'shield']), ['volley', 'fracture-wave']),
-      ['combo-imprint'],
-    );
+    const owned = unlockBasicSkills(unlockWeapons(createInitialProgress(), ['bow', 'shield']), [
+      'thrust',
+      'scattershot',
+      'shield-slam',
+    ]);
 
     const run = clearRoom(atFirstBoss(owned));
 

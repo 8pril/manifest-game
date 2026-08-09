@@ -22,7 +22,23 @@ export interface Weapon {
   concept: string;
   /** 기본 공격 명중 시 부여를 시도하는 상태이상. */
   status: StatusKind;
+  /** 무기 본래의 기본 공격. 첫 소켓이 비어 있으면 이것이 나간다. */
   basic: Skill;
+  /**
+   * 첫 소켓(`기본스킬`)에 끼우는 것. 끼우면 이것이 곧 기본 공격이 된다.
+   *
+   * **`basic`과 헷갈리기 쉽다.** `basic`은 무기가 원래 하는 공격이고 이쪽은
+   * 그것을 대체하는 선택지다. 그래서 **더 세면 안 된다.** 더 세기만 하면
+   * 안 끼울 이유가 없어 소켓이 고르는 칸이 아니라 반드시 채우는 칸이 된다.
+   * 축을 하나 바꿔 놓는다 — 넓게 치던 것을 좁고 멀리, 한 발을 여러 발로.
+   */
+  basicSkill: Skill;
+  /**
+   * 콤보로 발동하던 강화기술. **지금은 어디에도 연결돼 있지 않다(보류).**
+   *
+   * 상시 장착으로 두기엔 기본 공격의 1.65~1.92배(무리 상대로는 4~7배)라 너무 세고,
+   * 콤보 조건으로 되돌릴지는 기획 판단을 기다리는 중이다. 데이터는 남겨 둔다.
+   */
   combo: Skill;
   color: number;
   /** 기본 공격 간격(ms). */
@@ -41,14 +57,14 @@ export function deliveryOf(skill: Skill): Delivery {
 }
 
 /**
- * 각성 상태에서 강화기술이 기본 공격을 대체할 때의 공격 간격.
+ * 이 스킬을 기본 공격으로 쓸 때의 간격.
  *
- * 투사체형 강화기술은 남아서 틱 피해를 중첩시키지 않으므로 무기 기본 쿨다운을 쓴다.
- * 지대형 강화기술은 지속시간 동안 여러 장이 겹치면 피해가 발동 주기에 반비례해 뛰므로
- * 별도 comboInterval을 유지한다.
+ * 투사체·근접은 남아서 중첩되지 않으므로 무기 기본 쿨다운을 쓴다.
+ * **지대는 다르다.** 지속시간 동안 여러 장이 겹치면 피해가 발동 주기에 반비례해
+ * 뛴다(멸검: 별도 간격 253 vs 기본 쿨다운 760). 그래서 지대만 `comboInterval`로 늦춘다.
  */
-export function awakenedAttackInterval(weapon: Weapon): number {
-  return deliveryOf(weapon.combo) === 'area' ? weapon.comboInterval : weapon.cooldown;
+export function attackIntervalFor(weapon: Weapon, skill: Skill): number {
+  return deliveryOf(skill) === 'area' ? weapon.comboInterval : weapon.cooldown;
 }
 
 const COMBO_STATS = { comboDuration: COMBO_BASE_DURATION };
@@ -69,6 +85,16 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       name: '베기',
       tags: ['공격', '근접', '물리', '중첩'],
       base: { damage: 46, meleeRange: 120, meleeArc: 1.7, knockback: 18, comboGain: 1, ...COMBO_STATS },
+      supportSlots: 2,
+    },
+    // 넓게 스치던 것을 좁고 멀리. 부채가 1.7 → 0.7로 좁아지는 대신 사거리가
+    // 120 → 190이고 한 대가 무겁다. 무리에 둘러싸이면 손해, 한 마리를 물고
+    // 늘어질 때 이득이다.
+    basicSkill: {
+      id: 'thrust',
+      name: '찌르기',
+      tags: ['공격', '근접', '물리'],
+      base: { damage: 54, meleeRange: 190, meleeArc: 0.7, knockback: 24, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
     // 원안의 '멸검': n타마다 주변 적들에게 광역 장판
@@ -97,9 +123,18 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       base: { damage: 74, projectileCount: 1, projectileSpeed: 460, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
+    // 한 발을 세 발로 흩는다. 총합은 조금 줄지만 가까이서 셋 다 맞으면 이득이라,
+    // 활을 원거리로 쓸지 붙어서 쓸지가 갈린다.
+    basicSkill: {
+      id: 'scattershot',
+      name: '산탄',
+      tags: ['공격', '투사체', '물리'],
+      base: { damage: 39, projectileCount: 3, projectileSpeed: 400, comboGain: 1, ...COMBO_STATS },
+      supportSlots: 2,
+    },
     combo: {
       id: 'volley',
-      name: '연사',
+      name: '일제 사격',
       tags: ['공격', '투사체', '물리'],
       base: { damage: 51, projectileCount: 5, projectileSpeed: 520 },
       supportSlots: 2,
@@ -120,6 +155,16 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       name: '비전 탄',
       tags: ['공격', '투사체', '주문', '원소'],
       base: { damage: 88, projectileCount: 1, projectileSpeed: 380, comboGain: 1, ...COMBO_STATS },
+      supportSlots: 2,
+    },
+    // **투사체를 지대로 바꾼다.** 태그가 달라지므로 붙일 수 있는 보조형스킬도
+    // 통째로 갈린다(관통·연쇄 대신 폭발하는 지대·지진). 소켓 하나가 빌드를
+    // 바꾸는 자리라는 것을 가장 잘 보여주는 항목이다.
+    basicSkill: {
+      id: 'arcane-bloom',
+      name: '비전 개화',
+      tags: ['공격', '지대', '주문', '원소', '지속시간'],
+      base: { damage: 50, areaRadius: 96, duration: 1.4, tickInterval: 0.35 },
       supportSlots: 2,
     },
     // 원안의 '비전단검': 플레이어 주변에 단검 6개를 소환해 발사
@@ -147,6 +192,14 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       name: '밀치기',
       tags: ['공격', '근접', '물리'],
       base: { damage: 24, meleeRange: 104, meleeArc: 2.4, knockback: 115, comboGain: 1, ...COMBO_STATS },
+      supportSlots: 2,
+    },
+    // 넓게 밀어내던 것을 좁고 세게. 제어를 포기하고 피해를 가져온다.
+    basicSkill: {
+      id: 'shield-slam',
+      name: '강타',
+      tags: ['공격', '근접', '물리'],
+      base: { damage: 29, meleeRange: 96, meleeArc: 1.1, knockback: 48, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
     combo: {

@@ -10,7 +10,10 @@ import {
   comboTotal,
   comboOf,
   otherHand,
+  comboReadout,
+  refreshCombo,
   COMBO_MAX,
+  COMBO_BASE_DURATION,
 } from './combo';
 import type { StatBlock } from '@/engine/modifiers';
 
@@ -102,24 +105,6 @@ describe('콤보 소모', () => {
 });
 
 describe('콤보 조건 판정', () => {
-  it('교차 — 직전 명중이 반대손이면 성립한다', () => {
-    const combo = gainCombo(createCombo(), 'right', stats);
-
-    expect(comboTriggerMet(combo, 'left', { reads: 'alternate' })).toBe(true);
-    expect(comboTriggerMet(combo, 'right', { reads: 'alternate' })).toBe(false);
-  });
-
-  it('교차 — 같은 손을 연달아 치면 끊긴다', () => {
-    let combo = gainCombo(createCombo(), 'right', stats);
-    expect(comboTriggerMet(combo, 'left', { reads: 'alternate' })).toBe(true);
-
-    combo = gainCombo(combo, 'left', stats);
-    expect(comboTriggerMet(combo, 'left', { reads: 'alternate' })).toBe(false);
-  });
-
-  it('교차 — 아직 아무것도 안 맞혔으면 성립하지 않는다', () => {
-    expect(comboTriggerMet(createCombo(), 'left', { reads: 'alternate' })).toBe(false);
-  });
 
   it('자기 손 수치를 본다', () => {
     let combo = createCombo();
@@ -149,15 +134,34 @@ describe('콤보 조건 판정', () => {
   });
 });
 
+describe('지대 지속피해', () => {
+  it('지속시간만 늘리고 손과 교차는 건드리지 않는다', () => {
+    // 지대 틱은 플레이어가 손으로 친 것이 아니다. 예전에는 틱마다 `sustainCombo`를
+    // 불러 `직전 손`을 자기 손으로 덮어썼고, 그동안 반대손이 영구히 준비 상태였다.
+    let combo = createCombo();
+    for (const hand of ['left', 'right'] as const) combo = gainCombo(combo, hand, stats);
+    const before = { lastHand: combo.lastHand };
+
+    const after = refreshCombo(tickCombo(combo, 2), stats);
+
+    expect(after.lastHand).toBe(before.lastHand);
+    expect(after.remaining).toBe(COMBO_BASE_DURATION);
+  });
+});
+
 describe('보조능력에서 콤보 규칙 읽기', () => {
   it('콤보 거동만 골라낸다', () => {
     const rules = comboRulesOf([
       { kind: 'pierce', count: 2 },
-      { kind: 'combo', trigger: { reads: 'alternate' }, effect: { kind: 'comboSkill' } },
+      {
+        kind: 'combo',
+        trigger: { reads: 'total', required: 6 },
+        effect: { kind: 'empower', hand: 'self', more: 0.3 },
+      },
     ]);
 
     expect(rules).toHaveLength(1);
-    expect(rules[0].trigger).toEqual({ reads: 'alternate' });
+    expect(rules[0].trigger).toEqual({ reads: 'total', required: 6 });
   });
 
   it('콤보 거동이 없으면 비어 있다', () => {
@@ -178,5 +182,38 @@ describe('보조', () => {
 
     expect(comboOf(combo, 'right')).toBe(1);
     expect(comboOf(combo, 'left')).toBe(0);
+  });
+});
+
+describe('화면 표시', () => {
+
+  it('합계 조건은 합계와 요구치를 준다', () => {
+    let combo = createCombo();
+    for (const hand of ['left', 'right', 'left'] as const) combo = gainCombo(combo, hand, stats);
+
+    expect(comboReadout(combo, 'left', { reads: 'total', required: 6 })).toEqual({
+      kind: 'count',
+      value: 3,
+      required: 6,
+      label: '합계',
+    });
+  });
+
+  it('자기 손 조건은 그 손의 수치를 준다', () => {
+    let combo = createCombo();
+    for (let i = 0; i < 4; i++) combo = gainCombo(combo, 'left', stats);
+
+    expect(comboReadout(combo, 'left', { reads: 'self', required: 5 })).toMatchObject({ value: 4, label: '이 손' });
+    expect(comboReadout(combo, 'right', { reads: 'self', required: 5 })).toMatchObject({ value: 0 });
+  });
+
+  it('반대손 조건은 반대손 수치를 준다', () => {
+    let combo = createCombo();
+    for (let i = 0; i < 3; i++) combo = gainCombo(combo, 'left', stats);
+
+    expect(comboReadout(combo, 'right', { reads: 'other', required: 5 })).toMatchObject({
+      value: 3,
+      label: '반대손',
+    });
   });
 });

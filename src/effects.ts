@@ -71,7 +71,9 @@ export function floatingText(
   y: number,
   text: string,
   color: string,
+  options: { duration?: number } = {},
 ): void {
+  const { duration = 700 } = options;
   const label = scene.add
     .text(x, y - 10, text, { fontSize: '20px', color, fontStyle: 'bold' })
     .setOrigin(0.5)
@@ -91,7 +93,7 @@ export function floatingText(
     targets: label,
     y: y - 52,
     alpha: 0,
-    duration: 700,
+    duration,
     ease: 'Quad.easeOut',
     onComplete: () => label.destroy(),
   });

@@ -5,7 +5,6 @@ import {
   createInitialProgress,
   equipFromWheel,
   equipFirstWheelSlots,
-  hasComboSkill,
   hasSupport,
   hasWeapon,
   setWheelSlot,
@@ -19,7 +18,6 @@ describe('createInitialProgress', () => {
     const progress = createInitialProgress();
 
     expect(progress.unlockedWeapons).toEqual(['sword']);
-    expect(progress.ownedComboSkills).toEqual([]);
     expect(progress.ownedSupports).toEqual([]);
     expect(progress.weaponSwitchUnlocked).toBe(false);
     expect(progress.active).toEqual({ left: 'sword', right: null });
@@ -27,15 +25,15 @@ describe('createInitialProgress', () => {
     expect(progress.wheel.right).toEqual([null, null]);
   });
 
-  it('무기별 기본 강화기술 설정을 갖는다', () => {
+  it('무기별 설정은 소켓 세 칸이 비어 있는 상태로 시작한다', () => {
     const progress = createInitialProgress();
 
+    // `무기 ─ 기본스킬 ─ 보조 ─ 연계`. 첫 소켓이 비면 무기 본래의 기본 공격이 나간다.
     expect(progress.configs.sword).toEqual({
-      comboSkillId: 'annihilation',
+      basicSkillId: null,
       primarySupportId: null,
       synergySupportId: null,
     });
-    expect(progress.configs.bow.comboSkillId).toBe('volley');
   });
 });
 
@@ -44,9 +42,7 @@ describe('weapon unlocks', () => {
     const progress = unlockWeapons(createInitialProgress(), ['bow', 'shield']);
 
     expect(progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
-    expect(progress.ownedComboSkills).toEqual([]);
     expect(hasWeapon(progress, 'bow')).toBe(true);
-    expect(hasComboSkill(progress, 'volley')).toBe(false);
     expect(hasWeapon(progress, 'arcane')).toBe(false);
   });
 
@@ -54,7 +50,6 @@ describe('weapon unlocks', () => {
     const progress = unlockWeapons(createInitialProgress(), ['shield', 'bow']);
 
     expect(progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
-    expect(progress.ownedComboSkills).toEqual([]);
   });
 });
 
@@ -108,7 +103,7 @@ describe('weapon wheel', () => {
 });
 
 describe('manifestation config', () => {
-  it('해금된 무기의 강화기술과 보조형스킬 슬롯을 바꾼다', () => {
+  it('해금된 무기의 보조형스킬 슬롯을 바꾼다', () => {
     const progress = unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['multiple-projectiles', 'wound-seeker']);
     const configured = configureManifestation(progress, 'bow', {
       primarySupportId: 'multiple-projectiles',
@@ -116,7 +111,6 @@ describe('manifestation config', () => {
     });
 
     expect(configured.configs.bow).toMatchObject({
-      comboSkillId: 'volley',
       primarySupportId: 'multiple-projectiles',
       synergySupportId: 'wound-seeker',
     });
@@ -162,13 +156,6 @@ describe('manifestation config', () => {
     expect(configuredSupports(configured, 'bow')).toEqual([]);
   });
 
-  it('미보유 강화기술은 설정하지 않는다', () => {
-    const progress = createInitialProgress();
-    const configured = configureManifestation(progress, 'sword', { comboSkillId: 'volley' });
-
-    expect(configured.configs.sword.comboSkillId).toBe('annihilation');
-  });
-
   it('아직 해금되지 않은 무기 설정은 바꾸지 않는다', () => {
     const progress = createInitialProgress();
 
@@ -204,5 +191,21 @@ describe('마을에서 R링 1번 칸을 바꿨을 때', () => {
 
     const after = equipFirstWheelSlots(setWheelSlot(before, 'right', 0, null));
     expect(after.active.right).toBeNull();
+  });
+});
+
+describe('해금하면 인벤토리에 들어간다', () => {
+  // 호출하는 쪽이 따로 챙기게 하면 빠뜨리는 경로가 생긴다. 실제로 마을 UI를
+  // 새로 만들면서 저장 복원 경로에서 이 동기화가 빠져 격자가 비어 보였다.
+  it('무기를 해금하면 배치에 나타난다', () => {
+    const progress = unlockWeapons(createInitialProgress(), ['bow']);
+
+    expect(progress.inventory).toContain('bow');
+  });
+
+  it('보조형스킬을 해금하면 배치에 나타난다', () => {
+    const progress = unlockSupports(createInitialProgress(), ['multiple-projectiles']);
+
+    expect(progress.inventory).toContain('multiple-projectiles');
   });
 });

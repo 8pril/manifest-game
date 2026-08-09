@@ -48,7 +48,6 @@ export type Behavior =
  */
 export type ComboTrigger =
   /** 직전 명중이 반대손이면 성립. 세지 않고 직전 한 번만 본다. */
-  | { reads: 'alternate' }
   /** 이 무기 자신의 콤보가 기준 이상. */
   | { reads: 'self'; required: number }
   /** 반대손의 콤보가 기준 이상. */
@@ -59,7 +58,6 @@ export type ComboTrigger =
 /** 콤보 조건이 성립했을 때 일어나는 일. */
 export type ComboEffect =
   /** 이 무기의 공격이 강화기술로 나간다. */
-  | { kind: 'comboSkill' }
   /**
    * 콤보를 소모하고 지정한 손을 한동안 강화한다.
    *

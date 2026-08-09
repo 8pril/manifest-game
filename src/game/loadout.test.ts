@@ -13,7 +13,7 @@ import {
   rightWeapon,
 } from '@/game/loadout';
 import { SUPPORTS } from '@/data/supports';
-import { configureManifestation, createInitialProgress, unlockSupports, unlockWeapons } from '@/game/progression';
+import { configureManifestation, createInitialProgress, unlockBasicSkills, unlockSupports, unlockWeapons } from '@/game/progression';
 import { createRun, clearRoom } from '@/game/run';
 
 const pierce = SUPPORTS.find((s) => s.id === 'pierce')!;
@@ -68,26 +68,24 @@ describe('resolveFor', () => {
 });
 
 describe('loadoutFromProgress', () => {
-  it('콤보 개방을 붙이면 보조가 강화기술로 간다', () => {
-    // 강화기술이 실제로 발동하는 빌드이므로 보조는 그쪽을 강화한다.
-    // 연계(`콤보 개방`)은 기본 공격에 붙어야 전환을 열 수 있다.
+  it('첫 소켓을 채우면 보조가 그 기본스킬로 간다', () => {
+    // 기본스킬을 끼우면 그것이 곧 기본 공격이다. 보조는 실제로 나가는 쪽에 붙는다.
     let progress = unlockWeapons(createInitialProgress(), ['bow']);
-    progress = unlockSupports(progress, ['multiple-projectiles', 'combo-imprint']);
+    progress = unlockBasicSkills(progress, ['scattershot']);
+    progress = unlockSupports(progress, ['multiple-projectiles']);
     progress = { ...progress, active: { left: 'sword', right: 'bow' } };
     progress = configureManifestation(progress, 'bow', {
+      basicSkillId: 'scattershot',
       primarySupportId: 'multiple-projectiles',
-      synergySupportId: 'combo-imprint',
     });
 
     const loadout = loadoutFromProgress(progress);
-    expect(supportsFor(loadout, 'volley').map((s) => s.id)).toEqual(['multiple-projectiles']);
-    expect(supportsFor(loadout, 'arrow-shot').map((s) => s.id)).toEqual(['combo-imprint']);
-    expect(resolveFor(loadout, rightWeapon(loadout)!.combo).stats.projectileCount).toBe(7);
+    expect(supportsFor(loadout, 'scattershot').map((s) => s.id)).toEqual(['multiple-projectiles']);
+    expect(supportsFor(loadout, 'arrow-shot')).toEqual([]);
+    expect(resolveFor(loadout, rightWeapon(loadout)!.basicSkill).stats.projectileCount).toBe(5);
   });
 
-  it('콤보 개방이 없으면 보조가 기본 공격으로 간다', () => {
-    // 콤보를 안 쓰는 빌드에서는 강화기술이 발동할 일이 없다. 거기에 보조를
-    // 붙이면 칸이 통째로 죽으므로 평소 쓰는 기본 공격을 강화한다.
+  it('첫 소켓이 비면 보조가 무기 본래의 기본 공격으로 간다', () => {
     let progress = unlockWeapons(createInitialProgress(), ['bow']);
     progress = unlockSupports(progress, ['multiple-projectiles', 'wound-seeker']);
     progress = { ...progress, active: { left: 'sword', right: 'bow' } };
@@ -105,15 +103,19 @@ describe('loadoutFromProgress', () => {
     expect(resolveFor(loadout, rightWeapon(loadout)!.basic).stats.projectileCount).toBe(3);
   });
 
-  it('기본 공격에 태그가 안 맞는 연계는 강화기술로 넘어간다', () => {
-    // `상처 공명`은 `지대`를 요구하는데 검의 기본 공격 베기에는 지대가 없다.
-    // 붙을 곳이 없다고 버리지 않고 강화기술 멸검으로 넘긴다.
-    let progress = unlockSupports(createInitialProgress(), ['wound-resonance']);
-    progress = configureManifestation(progress, 'sword', { synergySupportId: 'wound-resonance' });
+  it('첫 소켓이 무엇을 붙일 수 있는지까지 바꾼다', () => {
+    // `상처 공명`은 `지대`를 요구한다. 비전 탄은 투사체라 안 붙지만, 비전 개화를
+    // 끼우면 기본 공격이 지대가 되므로 그때부터 붙는다.
+    let progress = unlockBasicSkills(unlockWeapons(createInitialProgress(), ['arcane']), ['arcane-bloom']);
+    progress = unlockSupports(progress, ['wound-resonance']);
+    progress = configureManifestation(progress, 'arcane', { synergySupportId: 'wound-resonance' });
+    expect(supportsFor(loadoutFromProgress(progress), 'arcane-bolt')).toEqual([]);
+    expect(supportsFor(loadoutFromProgress(progress), 'arcane-bloom')).toEqual([]);
 
-    const loadout = loadoutFromProgress(progress);
-    expect(supportsFor(loadout, 'sword-slash')).toEqual([]);
-    expect(supportsFor(loadout, 'annihilation').map((s) => s.id)).toEqual(['wound-resonance']);
+    progress = configureManifestation(progress, 'arcane', { basicSkillId: 'arcane-bloom' });
+    expect(supportsFor(loadoutFromProgress(progress), 'arcane-bloom').map((s) => s.id)).toEqual([
+      'wound-resonance',
+    ]);
   });
 });
 
@@ -145,23 +147,17 @@ describe('handOf', () => {
 });
 
 describe('supportsFromProgress', () => {
-  it('첫 보스 뒤에 얻는 보조형스킬은 콤보 개방 하나뿐이다', () => {
-    // 원래는 첫 마을 시점 보유 0개였다(기획 확인, D6). 그런데 콤보를 기본 규칙에서
-    // 빼면서 `콤보 개방`이 강화기술 전환을 여는 **유일한 열쇠**가 됐다.
-    //
-    // 마을은 첫 보스 뒤 딱 한 번 나오고 보조형스킬 설정은 마을에서만 되므로,
-    // 첫 보스보다 뒤에 주면 1회차에는 장착할 방법이 아예 없다. 그러면 멸검·연사·
-    // 비전단검·균열 파동을 한 번도 못 보고 판이 끝난다.
-    //
-    // 그래서 이 하나만 예외로 첫 보스 보상에 둔다. 나머지는 여전히 0개다.
+  it('첫 마을에서는 아무것도 자동 장착되지 않는다', () => {
+    // 기본스킬은 무기와 함께 오지만 소켓은 비어 있다. 끼우는 것은 사람이 한다.
     let run = createRun('sword', null);
     run = clearRoom(run); // 흐린 입구
     run = clearRoom(run); // 첫 문지기 → 마을
 
     expect(run.phase).toBe('town');
-    expect(run.progress.ownedSupports).toEqual(['combo-imprint']);
-    // 얻기만 했을 뿐 자동 장착되지는 않는다. 마을에서 직접 골라야 한다.
     expect(run.loadout.supports).toEqual({});
+    for (const weapon of run.progress.unlockedWeapons) {
+      expect(run.progress.configs[weapon].basicSkillId).toBeNull();
+    }
   });
 
   it('태그가 맞지 않는 보조능력은 붙지 않는다', () => {
@@ -180,7 +176,7 @@ describe('supportsFromProgress', () => {
       configs: {
         ...createInitialProgress().configs,
         bow: {
-          comboSkillId: 'volley',
+          basicSkillId: null,
           primarySupportId: 'multiple-projectiles',
           synergySupportId: 'wound-seeker',
         },

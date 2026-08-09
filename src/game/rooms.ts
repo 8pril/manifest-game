@@ -1,10 +1,36 @@
 import type { EnemyKind } from '@/game/enemy';
 import type { WeaponId } from '@/data/weapons';
+import { SEAL_KEYS } from '@/data/keys';
 
+/**
+ * 방 보상.
+ *
+ * **강화기술은 보상이 아니다.** 무기를 얻으면 그 무기의 강화기술도 따라온다.
+ * 예전에는 `comboSkills`로 따로 주웠는데, 검을 가진 사람이 멸검 말고 다른 것을
+ * 쓸 방법이 없으므로 그 줍기는 선택을 만들지 않고 관문만 하나 더 만들었다.
+ * 강화기술도 마찬가지다. 무기의 첫 소켓에 끼우는 `기본스킬`이라 무기와 함께 온다.
+ */
 export interface RoomReward {
   weapons?: readonly WeaponId[];
-  comboSkills?: readonly string[];
+  /** 기본스킬. 무기에 딸려 오지 않으므로 따로 적는다. */
+  basicSkills?: readonly string[];
+  /** 열쇠. 봉인된 문을 여는 데 쓴다. */
+  keys?: readonly string[];
   supports?: readonly string[];
+  /** 방 보상이 뜨는 순간 보유하지 않은 보조/연계 중에서 뽑는다. */
+  randomSupports?: {
+    primary?: number;
+    synergy?: number;
+    /**
+     * 이 무기에 붙일 수 있는 것만 뽑는다. 안 적으면 아무 무기나 된다.
+     *
+     * 특정 보스가 특정 무기를 키워 주는 자리라는 것을 드랍으로 말하기 위한 것이다.
+     * 태그로 거르므로 "검 전용"이라고 따로 표시할 필요가 없다.
+     */
+    forWeapon?: WeaponId;
+    /** 무기 본래의 공격이 아니라 이 스킬에 붙는 것으로 거른다. */
+    forSkillOf?: 'basic' | 'basicSkill' | 'combo';
+  };
 }
 
 /**
@@ -40,6 +66,10 @@ export interface RoomDef {
   entersTown?: boolean;
   /** 이 방을 정리할 때 보유 목록에 들어가는 확정 보상. */
   reward?: RoomReward;
+  /** 방에 들어올 때 한 번 띄우는 안내. 길을 잃지 않게 하는 최소한의 말이다. */
+  hint?: string;
+  /** 이 열쇠를 전부 갖고 있어야 출구가 열린다. 없으면 적을 정리해도 잠겨 있다. */
+  requiresKeys?: readonly string[];
   /** 방의 크기. 화면(1280×720)보다 크면 카메라가 플레이어를 따라간다. */
   width: number;
   height: number;
@@ -58,9 +88,6 @@ export const ROOMS: readonly RoomDef[] = [
     // 첫 방은 조금 작게 잡아 조작을 익히게 한다.
     label: '흐린 입구',
     spawns: [{ kind: 'chaser', count: 6 }],
-    reward: {
-      comboSkills: ['annihilation'],
-    },
     width: 1900,
     height: 1150,
     // 시작 방은 색을 거의 넣지 않는다. 기준점이 있어야 뒤의 방이 달라 보인다.
@@ -78,14 +105,19 @@ export const ROOMS: readonly RoomDef[] = [
       { kind: 'chaser', count: 4 },
     ],
     entersTown: true,
+    // **첫 보스는 무기와 기본스킬만 준다.** 보조형스킬은 두 번째 보스 몫이다.
+    //
+    // 기본스킬은 무기에 딸려 오므로 보유 목록에는 무기 2종만 늘지만, 드랍 연출에서는
+    // 활·방패·산탄·강타 4개가 각각 바닥에 떨어진다. 무엇이 열렸는지 보이게 하려는
+    // 것이라, 화면에 보이는 수와 보유 상태가 다른 것은 의도다.
+    //
+    // 첫 마을에 채울 것이 없어 보일까 걱정했는데, 소켓 구조가 생기면서 해결됐다.
+    // 보조형스킬이 하나도 없어도 **기본스킬을 끼울지 말지**를 고를 수 있다.
     reward: {
       weapons: ['bow', 'shield'],
-      comboSkills: ['volley', 'fracture-wave'],
-      // `콤보 개방`은 강화기술 전환을 여는 유일한 열쇠다. 콤보를 기본 규칙에서
-      // 뺐으므로 이걸 얻기 전까지는 어떤 무기도 기본 공격만 쓴다.
-      // 첫 보스가 무기와 강화기술을 함께 여는 자리라 여기서 준다. 더 뒤로 미루면
-      // 1회차에 강화기술을 한 번도 못 보고, 그건 심사에서 게임의 절반이 빠지는 것이다.
-      supports: ['combo-imprint'],
+      // 검의 것까지 함께 준다. 기본스킬은 무기에 딸려 오지 않으므로, 여기서 주지
+      // 않으면 시작 무기인 검은 소켓을 영영 채울 수 없다.
+      basicSkills: ['thrust', 'scattershot', 'shield-slam'],
     },
     width: 2000,
     height: 1250,
@@ -115,46 +147,94 @@ export const ROOMS: readonly RoomDef[] = [
     ],
   },
   {
-    // 첫 보스 뒤 얻은 무기와 R키 교체를 써보는 엘리트 전투.
-    label: '파편 회랑',
+    // 정면 문이 봉인돼 있다. 여기서 갈림길을 안내하고 위·아래 두 보스로 보낸다.
+    label: '갈림길 어귀',
+    spawns: [
+      { kind: 'chaser', count: 12 },
+      { kind: 'archer', count: 3 },
+    ],
+    // 문 안내는 방에 들어오는 순간 띄운다. 열쇠를 다 모으기 전에는 이 방을 지나가되,
+    // 봉인된 문 자체는 아랫길을 끝낸 뒤에 열린다.
+    hint: '정면 문이 봉인돼 있다. 위·아래 두 곳에서 열쇠를 찾아야 한다',
+    width: ROOM_WIDTH,
+    height: ROOM_HEIGHT,
+    tone: { color: 0x4a3a6b, alpha: 0.12 },
+    props: [
+      { kind: 'pillar', count: 7 },
+      { kind: 'rubble', count: 5 },
+    ],
+  },
+  {
+    // 윗길. 기믹이 까다로운 보스다. 검을 키워 주는 보조를 준다.
+    label: '윗길 제단',
+    spawns: [
+      { kind: 'warden', count: 1 },
+      { kind: 'archer', count: 5 },
+    ],
+    reward: {
+      keys: ['key-upper'],
+      randomSupports: { primary: 1, forWeapon: 'sword', forSkillOf: 'basic' },
+    },
+    width: 2100,
+    height: 1300,
+    tone: { color: 0x2f6b4a, alpha: 0.13 },
+    props: [
+      { kind: 'pillar', count: 4 },
+      { kind: 'brazier', count: 4 },
+    ],
+  },
+  {
+    // 아랫길. 기믹은 단순하고 체력이 아주 많다. 검의 기본스킬을 키워 주는 연계를 준다.
+    label: '아랫길 굴',
+    spawns: [
+      { kind: 'glutton', count: 1 },
+      { kind: 'brute', count: 4 },
+    ],
+    reward: {
+      keys: ['key-lower'],
+      randomSupports: { synergy: 1, forWeapon: 'sword', forSkillOf: 'basicSkill' },
+    },
+    width: 2100,
+    height: 1300,
+    tone: { color: 0x6b5a2f, alpha: 0.14 },
+    props: [
+      { kind: 'bones', count: 9 },
+      { kind: 'rubble', count: 8 },
+    ],
+  },
+  {
+    // 봉인이 풀린 뒤. 열쇠 2개가 없으면 출구가 열리지 않는다.
+    label: '봉인된 문 안쪽',
     spawns: [
       { kind: 'chaser', count: 18 },
       { kind: 'archer', count: 5 },
       { kind: 'brute', count: 3 },
     ],
+    requiresKeys: SEAL_KEYS,
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
-    // 이름이 "파편 회랑"이다. 부러진 기둥을 가장 많이 둔다.
-    tone: { color: 0x4a3a6b, alpha: 0.12 },
+    tone: { color: 0x3a4a6b, alpha: 0.12 },
     props: [
-      { kind: 'pillar', count: 7 },
-      { kind: 'rubble', count: 7 },
+      { kind: 'rubble', count: 10 },
+      { kind: 'pillar', count: 3 },
     ],
   },
   {
     // 최종 보스.
-    //
-    // 기획 의도가 "잡몹을 썰면서 나아간 다음 **여러 보스**를 잡아 아이템을 얻는 것"이고
-    // "보스는 한 종류로 하면 절대 안 된다"였다. 한 판에 보스를 두 번 만난다.
-    //  - 첫 문지기: 해금의 순간. 활/방패를 주고 마을로 보낸다
-    //  - 여기: 마무리의 순간. 영구 성장 드랍을 준다
-    //
-    // 잡몹 정리로 판이 끝나면 핵앤슬래시의 마무리가 서지 않는다.
     label: '무너진 문',
     spawns: [
       { kind: 'collapsedDoor', count: 1 },
-      { kind: 'chaser', count: 14 },
-      { kind: 'archer', count: 4 },
-      { kind: 'brute', count: 2 },
+      { kind: 'chaser', count: 16 },
+      { kind: 'archer', count: 5 },
+      { kind: 'brute', count: 3 },
     ],
     reward: {
       weapons: ['arcane'],
-      comboSkills: ['arcane-daggers'],
-      supports: ['chain', 'crackling-ground'],
+      basicSkills: ['arcane-bloom'],
+      randomSupports: { primary: 1, synergy: 1 },
     },
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
-    // 최종 보스방. 보라를 가장 세게 넣는다. 타이틀 화면의 빛과 같은 색이다.
     tone: { color: 0x5b3a8f, alpha: 0.17 },
     props: [
       { kind: 'rubble', count: 11 },

@@ -1,7 +1,7 @@
 import type { Skill, Support } from '@/engine/support';
-import { resolveSkill, canAttach, supportSlotType, type ResolvedSkill } from '@/engine/support';
+import { resolveSkill, canAttach, type ResolvedSkill } from '@/engine/support';
 import { weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
-import { configuredSupports, type PlayerProgress } from '@/game/progression';
+import { configuredSupports, equippedBasicSkill, type PlayerProgress } from '@/game/progression';
 
 /**
  * 로드아웃.
@@ -49,34 +49,16 @@ export function supportsFromProgress(progress: PlayerProgress): Readonly<Record<
   const supports: Record<string, Support[]> = {};
 
   for (const weaponId of progress.unlockedWeapons) {
-    const weapon = weaponOf(weaponId);
-    const configured = configuredSupports(progress, weaponId);
+    // **실제로 나가는 공격에만 붙인다.** 첫 소켓에 기본스킬을 끼웠으면 그것이
+    // 곧 기본 공격이다. 나가지도 않는 스킬에 붙이면 그 칸이 통째로 죽는다.
+    //
+    // 예전에는 붙일 곳을 두 군데 두고 태그가 맞는 쪽으로 흘려보냈는데, 콤보 전환이
+    // 없어지면서 그럴 이유가 사라졌다. 한 무기가 쓰는 공격은 언제나 하나다.
+    const skill = equippedBasicSkill(progress, weaponId);
 
-    // 이 무기가 강화기술을 쓰는가. `콤보 개방`을 붙였을 때만 전환이 일어난다.
-    const usesCombo = configured.some((s) => s.behaviors?.some((b) => b.kind === 'combo'));
-
-    for (const support of configured) {
-      // **연계는 기본 공격에 먼저 붙인다.** 조건과 시너지를 다루는 쪽이라
-      // 평소 쓰는 공격에 걸려야 의미가 있고, `콤보 개방`은 기본 공격에 붙어야
-      // 기본 → 강화기술 전환을 열 수 있다. 태그가 안 맞으면 강화기술로 넘긴다
-      // (예: `상처 공명`은 `지대`를 요구하는데 기본 공격에는 지대가 없다).
-      //
-      // **보조는 실제로 발동하는 공격에 붙인다.** 콤보를 쓰는 빌드면 강화기술,
-      // 아니면 기본 공격이다. 발동하지도 않을 스킬에 붙이면 칸이 통째로 죽는다.
-      const order =
-        supportSlotType(support) === 'synergy'
-          ? [weapon.basic, weapon.combo]
-          : usesCombo
-            ? [weapon.combo, weapon.basic]
-            : [weapon.basic, weapon.combo];
-
-      for (const skill of order) {
-        const accepted = supports[skill.id] ?? [];
-        if (canAttach(skill, support, accepted).ok) {
-          supports[skill.id] = [...accepted, support];
-          break;
-        }
-      }
+    for (const support of configuredSupports(progress, weaponId)) {
+      const accepted = supports[skill.id] ?? [];
+      if (canAttach(skill, support, accepted).ok) supports[skill.id] = [...accepted, support];
     }
   }
   return supports;

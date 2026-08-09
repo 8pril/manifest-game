@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { WEAPON_LIST, awakenedAttackInterval, deliveryOf, type Weapon } from '@/data/weapons';
+import { WEAPON_LIST, attackIntervalFor, deliveryOf, type Weapon } from '@/data/weapons';
 import { resolveSkill, type Support } from '@/engine/support';
 import { projectileDamageMultiplier } from '@/engine/projectile';
 import { findSupport } from '@/data/supports';
@@ -40,7 +40,7 @@ function basicDps(weapon: Weapon): number {
 
 /** 각성(대체 발동) 상태의 초당 피해. */
 function awakenedDps(weapon: Weapon, supports: readonly Support[] = []): number {
-  return dps(weapon.combo, supports, awakenedAttackInterval(weapon));
+  return dps(weapon.combo, supports, attackIntervalFor(weapon, weapon.combo));
 }
 
 const table = WEAPON_LIST.map((weapon) => ({
@@ -129,7 +129,7 @@ describe('지대 겹침이 발동 주기에 반비례하는지', () => {
 
   it('기본 쿨다운으로 넘기면 지대형이 폭증한다', () => {
     const sword = WEAPON_LIST.find((w) => w.id === 'sword')!;
-    const correct = dps(sword.combo, [], awakenedAttackInterval(sword));
+    const correct = dps(sword.combo, [], attackIntervalFor(sword, sword.combo));
     const naive = dps(sword.combo, [], sword.cooldown);
     console.log(`  멸검: 별도 간격 ${Math.round(correct)} vs 기본 쿨다운 ${Math.round(naive)}`);
     expect(naive).toBeGreaterThan(correct * 2.5);
@@ -154,5 +154,55 @@ describe('마을 기본 세팅을 붙였을 때', () => {
     }
     console.log('\n[마을 기본 세팅]\n' + lines.join('\n') + '\n');
     expect(lines).toHaveLength(3);
+  });
+});
+
+
+/**
+ * 첫 소켓의 기본스킬은 **곁수정이 아니라 다른 선택**이어야 한다.
+ *
+ * 더 세기만 하면 안 끼울 이유가 없어 소켓이 고르는 칸이 아니라 반드시 채우는 칸이
+ * 된다. 실제로 강화기술(멸검 등)을 여기에 두었더니 단일 1.65~1.92배, 무리 4~7배라
+ * 선택이 성립하지 않았다. 그래서 축을 하나 바꾸되 총량은 비슷하게 맞춘다.
+ */
+describe('기본스킬은 기본 공격의 곁수정이 아니다', () => {
+  const socketTable = WEAPON_LIST.map((weapon) => ({
+    name: weapon.name,
+    basic: Math.round(basicDps(weapon)),
+    socket: Math.round(dps(weapon.basicSkill, [], attackIntervalFor(weapon, weapon.basicSkill))),
+    kind: deliveryOf(weapon.basicSkill),
+  }));
+
+  it('표를 남긴다', () => {
+    console.log('\n[기본스킬 — 단일 대상 초당 피해]');
+    for (const r of socketTable) {
+      console.log(
+        `  ${r.name.padEnd(3)} 기본 ${String(r.basic).padStart(4)} → 소켓 ${String(r.socket).padStart(4)}` +
+        `  (${(r.socket / r.basic).toFixed(2)}배, ${r.kind})`,
+      );
+    }
+    expect(socketTable).toHaveLength(WEAPON_LIST.length);
+  });
+
+  it('단일 대상 피해가 기본 공격의 0.75~1.25배 안에 있다', () => {
+    const outliers = socketTable
+      .filter((r) => r.socket / r.basic < 0.75 || r.socket / r.basic > 1.25)
+      .map((r) => `${r.name} ${(r.socket / r.basic).toFixed(2)}배`);
+
+    expect(outliers, '기본스킬이 곁수정이 되면 소켓이 선택이 아니게 된다').toEqual([]);
+  });
+
+  it('무기마다 축이 하나씩 바뀐다', () => {
+    // 같은 값을 조금 올린 것이 아니라 성격이 달라져야 고를 이유가 생긴다.
+    for (const weapon of WEAPON_LIST) {
+      const before = resolveSkill(weapon.basic, []).stats;
+      const after = resolveSkill(weapon.basicSkill, []).stats;
+      const changedAxis =
+        deliveryOf(weapon.basicSkill) !== deliveryOf(weapon.basic)
+        || (before.meleeArc !== undefined && after.meleeArc !== before.meleeArc)
+        || (before.projectileCount ?? 1) !== (after.projectileCount ?? 1);
+
+      expect(changedAxis, `${weapon.name}의 기본스킬이 수치만 다르다`).toBe(true);
+    }
   });
 });
