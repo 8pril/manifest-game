@@ -130,7 +130,7 @@ import {
   type InventoryItem,
 } from '@/game/inventory';
 import { configureManifestation, createInitialProgress, equipFirstWheelSlots, equipFromWheel, grantComboSupport, equippedBasicSkill, unlockSupports, unlockWeapons, setWheelSlot, swapWheelSlots, moveInventoryItem, sortInventory, type Hand, type PlayerProgress } from '@/game/progression';
-import { parseDebugStart } from '@/game/debug-start';
+import { parseDebugStartWithMode } from '@/game/debug-start';
 import { clearSavedProgress, loadRunCheckpoint, saveRunCheckpoint, type RunCheckpoint } from '@/game/progress-storage';
 import { playSfx } from '@/audio/sfx';
 import { canApplyCrowdControl } from '@/game/crowd-control';
@@ -315,7 +315,7 @@ interface EnemyEntity {
   state: Enemy;
   view: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
   hpBar: Phaser.GameObjects.Rectangle;
-  statusDots: Phaser.GameObjects.Rectangle[];
+  statusDots: Phaser.GameObjects.Container[];
 }
 
 interface ProjectileEntity {
@@ -372,7 +372,7 @@ interface WeaponWheelMenu {
   segments: WheelSegment[];
 }
 
-type OverlayKind = 'town-dialogue' | 'town-config' | 'pause' | 'map' | 'result';
+type OverlayKind = 'town-dialogue' | 'town-config' | 'pause' | 'map' | 'status-help' | 'result';
 
 /**
  * 마을 패널에서 채우기를 기다리는 칸.
@@ -419,6 +419,7 @@ type WorldMapNode =
   | { kind: 'town'; x: number; y: number };
 
 type TrialExitSide = 'top' | 'bottom' | 'right';
+type StandardExitSide = 'right' | 'top' | 'bottom';
 
 interface TrialExit {
   side: TrialExitSide;
@@ -479,6 +480,7 @@ export class PlayScene extends Phaser.Scene {
   private hpBarFill!: Phaser.GameObjects.Rectangle;
   private shieldBarBack!: Phaser.GameObjects.Rectangle;
   private shieldBarFill!: Phaser.GameObjects.Rectangle;
+  private statusLegend!: Phaser.GameObjects.Container;
   private potionBottleBack!: Phaser.GameObjects.Rectangle;
   private potionBottleFill!: Phaser.GameObjects.Rectangle;
   private potionBottleNeck!: Phaser.GameObjects.Rectangle;
@@ -556,6 +558,7 @@ export class PlayScene extends Phaser.Scene {
   private shieldGuardUntil = 0;
   private arcaneFlowUntil = 0;
   private nextHitSfxAt = 0;
+  private supportFeedbackReadyAt: Record<string, number> = {};
   /** 규칙 발동 횟수. 개발 빌드 검증용이며 게임 로직에는 쓰이지 않는다. */
   private ruleEvents = { burst: 0, wallSlam: 0, brand: 0, woundConsume: 0, fracture: 0 };
   private weapons: { left: WeaponId; right: WeaponId | null } = { left: 'sword', right: null };
@@ -614,7 +617,7 @@ export class PlayScene extends Phaser.Scene {
     this.weaponWheel = null;
 
     // 새 기획의 기본값: 검 1종으로 시작하고 오른손은 비어 있다.
-    const debugStart = parseDebugStart(location.search, TOTAL_ROOMS);
+    const debugStart = parseDebugStartWithMode(location.search, TOTAL_ROOMS, import.meta.env.DEV);
     const hasDebugWeapons = debugStart.left !== undefined || debugStart.right !== undefined;
     const ignoresSavedProgress =
       hasDebugWeapons ||
@@ -670,6 +673,7 @@ export class PlayScene extends Phaser.Scene {
     this.resultScheduled = false;
     this.arcaneFlowUntil = 0;
     this.shieldGuardUntil = 0;
+    this.supportFeedbackReadyAt = {};
 
     this.run = this.initialCheckpoint
       ? this.restoreCheckpoint(this.initialCheckpoint)
@@ -782,6 +786,16 @@ export class PlayScene extends Phaser.Scene {
       if (this.paused || this.overlay) return;
       if (this.run.phase !== 'combat' && this.run.phase !== 'town') return;
       this.showWorldMap();
+    });
+    keyboard.on('keydown-H', () => {
+      if (isOver(this.run) || this.weaponWheel) return;
+      if (this.overlayKind === 'status-help') {
+        this.closeStatusHelp();
+        return;
+      }
+      if (this.paused || this.overlay) return;
+      if (this.run.phase !== 'combat' && this.run.phase !== 'town') return;
+      this.showStatusHelp();
     });
     keyboard.on('keydown-B', () => {
       if (isOver(this.run) || this.weaponWheel || this.paused || this.overlay) return;
@@ -919,7 +933,9 @@ export class PlayScene extends Phaser.Scene {
    */
   private comboRulesFor(runtime: WeaponRuntime) {
     const skill = equippedBasicSkill(this.run.progress, runtime.weapon.id);
-    return comboRulesOf(resolveFor(this.run.loadout, skill).behaviors);
+    return supportsFor(this.run.loadout, skill.id).flatMap((support) =>
+      comboRulesOf(support.behaviors).map((rule) => ({ ...rule, support })),
+    );
   }
 
   /** 이 무기의 기본 공격이 기본스킬로 바뀌어 있는가. 첫 소켓이 채워졌다는 뜻이다. */
@@ -941,7 +957,7 @@ export class PlayScene extends Phaser.Scene {
    * 매 프레임 다시 본다(`refreshSustainedEmpower`).
    */
   private applyComboEffects(runtime: WeaponRuntime): void {
-    for (const { trigger, effect } of this.comboRulesFor(runtime)) {
+    for (const { trigger, effect, support } of this.comboRulesFor(runtime)) {
       if (effect.kind !== 'empower' || !effect.consumes) continue;
       if (!comboTriggerMet(this.combo, runtime.hand, trigger)) continue;
 
@@ -958,7 +974,7 @@ export class PlayScene extends Phaser.Scene {
             ? otherHand(runtime.hand)
             : 'total';
       this.combo = consumeCombo(this.combo, scope);
-      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, '연계 방출', COLORS.accentText);
+      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, support.name, COLORS.accentText);
     }
   }
 
@@ -971,7 +987,7 @@ export class PlayScene extends Phaser.Scene {
   private refreshSustainedEmpower(): void {
     for (const runtime of [this.left, this.right]) {
       if (!runtime) continue;
-      for (const { trigger, effect } of this.comboRulesFor(runtime)) {
+      for (const { trigger, effect, support } of this.comboRulesFor(runtime)) {
         if (effect.kind !== 'empower' || effect.consumes) continue;
 
         const target = effect.hand === 'self' ? runtime.hand : otherHand(runtime.hand);
@@ -979,6 +995,7 @@ export class PlayScene extends Phaser.Scene {
         const on = empowerMore(this.empower, target) > 0;
         if (met && !on) {
           this.empower = grantEmpower(this.empower, target, { more: effect.more });
+          floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, support.name, COLORS.accentText);
         } else if (!met && on && this.empower[target]?.hitsLeft === undefined && this.empower[target]?.secondsLeft === undefined) {
           // 횟수·시간 제한이 없는 것만 끈다. 소모형으로 받은 강화는 조건과 무관하게 남는다.
           const next = { ...this.empower };
@@ -1003,6 +1020,7 @@ export class PlayScene extends Phaser.Scene {
    */
   private useSkill(runtime: WeaponRuntime, skill: Skill, angle: number): void {
     const resolved = resolveFor(this.run.loadout, skill);
+    this.showPrimarySupportFeedback(runtime, skill);
     playSfx('attack');
 
     switch (deliveryOf(skill)) {
@@ -1016,6 +1034,25 @@ export class PlayScene extends Phaser.Scene {
         this.dropArea(resolved.stats, resolved.behaviors, angle, runtime);
         break;
     }
+  }
+
+  private showPrimarySupportFeedback(runtime: WeaponRuntime, skill: Skill): void {
+    const support = supportsFor(this.run.loadout, skill.id).find((candidate) => supportSlotType(candidate) === 'primary');
+    if (!support) return;
+
+    const key = `${runtime.hand}:${skill.id}:${support.id}`;
+    if (this.time.now < (this.supportFeedbackReadyAt[key] ?? 0)) return;
+    this.supportFeedbackReadyAt[key] = this.time.now + 3200;
+
+    ring(this, this.player.x, this.player.y, runtime.weapon.color, { from: PLAYER_RADIUS + 6, to: PLAYER_RADIUS + 38, duration: 320, width: 2 });
+    floatingText(
+      this,
+      this.player.x,
+      this.player.y - PLAYER_RADIUS - 34,
+      `${support.name} 적용`,
+      COLORS.accentText,
+      { duration: 1300 },
+    );
   }
 
   private fireProjectiles(
@@ -1329,19 +1366,20 @@ export class PlayScene extends Phaser.Scene {
 
     const cx = room.width / 2;
     const cy = room.height / 2;
+    const exit = this.standardExitPlacement(room.width, room.height);
     this.roomFloor.push(this.floorView(cx, cy, room.width, room.height, COLORS.background, 0x1b1e2b));
     // 서술 오브젝트를 먼저 놓아야 장식물이 그 자리를 피할 수 있다.
     this.placeLore(room);
     this.roomFloor.push(...this.propViews(room, this.run.roomIndex + 1, room.props));
-    this.roomFloor.push(...this.wallViews(room.width, room.height, 0x2a2f42, cy));
+    this.roomFloor.push(...this.wallViews(room.width, room.height, 0x2a2f42, exit));
     // 색조는 바닥·장식물·벽을 모두 덮어야 한 장소로 읽힌다. 그래서 마지막에 얹는다.
     this.roomFloor.push(this.toneView(cx, cy, room.width, room.height, room.tone));
 
-    // 출구는 오른쪽 벽 가운데. 방을 정리하기 전에는 닫혀 있다.
+    // 기본 출구. 분기 방은 들어온 방향의 반대쪽으로 해금 시험장에 되돌아간다.
     // 해금 시험장은 별도의 위/아래/오른쪽 문을 쓰므로 기본 출구는 감춰 둔다.
-    this.exit = this.exitView(room.width - WALL / 2, cy, 0x2a2f42);
+    this.exit = this.standardExitView(exit.side, exit.x, exit.y, 0x2a2f42);
     this.exitLabel = this.add
-      .text(room.width - WALL - 110, cy, '', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
+      .text(exit.labelX, exit.labelY, '', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
       .setOrigin(0.5)
       .setDepth(2);
     this.roomFloor.push(this.exit, this.exitLabel);
@@ -1369,7 +1407,7 @@ export class PlayScene extends Phaser.Scene {
     if (restoredExitOpen) {
       this.exitOpen = true;
       tintView(this.exit, COLORS.accent);
-      this.exitLabel.setText(room.entersTown ? '마을 →' : '출구 →');
+      this.exitLabel.setText(this.standardExitLabel(room));
       this.tweens.add({ targets: this.exit, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
     } else if (roomAlreadyCleared) {
       if (this.run.roomIndex === TRIAL_ROOM_INDEX) this.openTrialExits();
@@ -1419,7 +1457,7 @@ export class PlayScene extends Phaser.Scene {
     // 마을에는 서술 오브젝트가 없으므로 비워 둘 자리를 계산할 것도 없다.
     this.loreNotes = [];
     this.roomFloor.push(...this.propViews({ width: TOWN_WIDTH, height: TOWN_HEIGHT }, 99, TOWN_PROPS));
-    this.roomFloor.push(...this.wallViews(TOWN_WIDTH, TOWN_HEIGHT, 0x3a4059, cy));
+    this.roomFloor.push(...this.wallViews(TOWN_WIDTH, TOWN_HEIGHT, 0x3a4059, { side: 'right', x: TOWN_WIDTH - WALL / 2, y: cy }));
     this.roomFloor.push(this.toneView(cx, cy, TOWN_WIDTH, TOWN_HEIGHT, TOWN_TONE));
 
     this.exit = this.exitView(TOWN_WIDTH - WALL / 2, cy, viaPortal ? 0x2a2f42 : COLORS.accent);
@@ -1662,7 +1700,12 @@ export class PlayScene extends Phaser.Scene {
    * 카메라가 방 안으로 제한되므로 벽은 판정 경계(`WALL`) 안쪽 24px 띠에만 그릴 수 있다.
    * 타일 이미지가 없으면 예전처럼 선 테두리 하나로 대체한다.
    */
-  private wallViews(width: number, height: number, lineColor: number, exitY?: number): Phaser.GameObjects.GameObject[] {
+  private wallViews(
+    width: number,
+    height: number,
+    lineColor: number,
+    exit?: { side: StandardExitSide; x: number; y: number },
+  ): Phaser.GameObjects.GameObject[] {
     if (!this.textures.exists('tile-wall')) {
       return [
         this.add
@@ -1679,27 +1722,50 @@ export class PlayScene extends Phaser.Scene {
     const tileScale = WALL / (texture.height || WALL);
 
     // 가로 벽은 모서리를 비켜 안쪽만 덮는다. 겹쳐 두면 모서리에서 돌 방향이 갑자기 꺾인다.
-    const span = width - WALL * 2;
-    const bands: Phaser.GameObjects.TileSprite[] = [
-      this.add.tileSprite(width / 2, WALL / 2, span, WALL, 'tile-wall'),
-      this.add.tileSprite(width / 2, height - WALL / 2, span, WALL, 'tile-wall').setFlipY(true),
-      this.add.tileSprite(WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90).setFlipY(true),
-    ];
+    const bands: Phaser.GameObjects.TileSprite[] = [];
 
-    // 오른쪽 벽은 출구 자리에서 끊는다. 통로가 벽 위에 얹힌 물체가 아니라
-    // 벽이 뚫린 자리로 보이려면, 그 구간에 벽을 그리지 않아야 한다.
-    if (exitY === undefined) {
-      bands.push(this.add.tileSprite(width - WALL / 2, height / 2, height, WALL, 'tile-wall').setAngle(90));
-    } else {
-      const top = exitY - EXIT_SIZE / 2;
-      const bottom = height - (exitY + EXIT_SIZE / 2);
-      if (top > 0) bands.push(this.add.tileSprite(width - WALL / 2, top / 2, top, WALL, 'tile-wall').setAngle(90));
-      if (bottom > 0) {
-        bands.push(
-          this.add.tileSprite(width - WALL / 2, height - bottom / 2, bottom, WALL, 'tile-wall').setAngle(90),
-        );
+    const addHorizontalWall = (side: 'top' | 'bottom') => {
+      const y = side === 'top' ? WALL / 2 : height - WALL / 2;
+      const flip = side === 'bottom';
+      const gap = exit?.side === side ? { from: exit.x - EXIT_SIZE / 2, to: exit.x + EXIT_SIZE / 2 } : null;
+      const segments = gap
+        ? [
+            { from: WALL, to: Math.max(WALL, gap.from) },
+            { from: Math.min(width - WALL, gap.to), to: width - WALL },
+          ]
+        : [{ from: WALL, to: width - WALL }];
+      for (const segment of segments) {
+        const length = segment.to - segment.from;
+        if (length <= 0) continue;
+        const wall = this.add.tileSprite(segment.from + length / 2, y, length, WALL, 'tile-wall');
+        if (flip) wall.setFlipY(true);
+        bands.push(wall);
       }
-    }
+    };
+
+    const addVerticalWall = (side: 'left' | 'right') => {
+      const x = side === 'left' ? WALL / 2 : width - WALL / 2;
+      const flip = side === 'left';
+      const gap = exit?.side === 'right' && side === 'right' ? { from: exit.y - EXIT_SIZE / 2, to: exit.y + EXIT_SIZE / 2 } : null;
+      const segments = gap
+        ? [
+            { from: 0, to: Math.max(0, gap.from) },
+            { from: Math.min(height, gap.to), to: height },
+          ]
+        : [{ from: 0, to: height }];
+      for (const segment of segments) {
+        const length = segment.to - segment.from;
+        if (length <= 0) continue;
+        const wall = this.add.tileSprite(x, segment.from + length / 2, length, WALL, 'tile-wall').setAngle(90);
+        if (flip) wall.setFlipY(true);
+        bands.push(wall);
+      }
+    };
+
+    addHorizontalWall('top');
+    addHorizontalWall('bottom');
+    addVerticalWall('left');
+    addVerticalWall('right');
     for (const band of bands) {
       band.setTileScale(tileScale);
       band.setDepth(0);
@@ -1733,6 +1799,27 @@ export class PlayScene extends Phaser.Scene {
     return this.add.rectangle(x, y, WALL, EXIT_SIZE, color).setDepth(1);
   }
 
+  private standardExitSide(): StandardExitSide {
+    if (this.run.roomIndex === UPPER_BRANCH_ROOM_INDEX) return 'bottom';
+    if (this.run.roomIndex === LOWER_BRANCH_ROOM_INDEX) return 'top';
+    return 'right';
+  }
+
+  private standardExitPlacement(width: number, height: number): { side: StandardExitSide; x: number; y: number; labelX: number; labelY: number } {
+    const side = this.standardExitSide();
+    const cx = width / 2;
+    const cy = height / 2;
+    if (side === 'top') return { side, x: cx, y: WALL / 2, labelX: cx, labelY: WALL + 24 };
+    if (side === 'bottom') return { side, x: cx, y: height - WALL / 2, labelX: cx, labelY: height - WALL - 24 };
+    return { side, x: width - WALL / 2, y: cy, labelX: width - WALL - 110, labelY: cy };
+  }
+
+  private standardExitView(side: StandardExitSide, x: number, y: number, color: number) {
+    return side === 'right'
+      ? this.exitView(x, y, color)
+      : this.add.rectangle(x, y, EXIT_SIZE, WALL, color).setDepth(1);
+  }
+
   private createEnemyEntity(kind: Enemy['kind'], x: number, y: number): EnemyEntity {
     const enemy = createEnemy(kind, x, y);
     return this.createEnemyEntityFromState(enemy);
@@ -1745,13 +1832,16 @@ export class PlayScene extends Phaser.Scene {
       state: enemy,
       view: this.spriteOrShape(ENEMY_SPRITE[enemy.kind], enemy.x, enemy.y, stats.radius * 2, stats.color),
       hpBar: this.add.rectangle(enemy.x, enemy.y - stats.radius - 9, stats.radius * 2, 4, 0x6ee7a8).setDepth(6),
-      statusDots: STATUS_ORDER.map((status, index) =>
-        this.add
-          .rectangle(enemy.x + (index - 1.5) * 9, enemy.y - stats.radius - 16, 5, 5, STATUS_COLORS[status])
-          .setDepth(6)
-          .setVisible(false),
-      ),
+      statusDots: STATUS_ORDER.map((status, index) => this.statusMark(enemy.x + (index - 1.5) * 13, enemy.y - stats.radius - 20, status)),
     };
+  }
+
+  private statusMark(x: number, y: number, status: StatusKind): Phaser.GameObjects.Container {
+    const badge = this.add
+      .circle(0, 0, 6, STATUS_COLORS[status], 0.95)
+      .setStrokeStyle(2, 0x10131d, 0.95);
+
+    return this.add.container(x, y, [badge]).setDepth(7).setVisible(false);
   }
 
   private cloneEnemy(enemy: Enemy): Enemy {
@@ -1962,9 +2052,18 @@ export class PlayScene extends Phaser.Scene {
   private openStandardExit(room: (typeof ROOMS)[number] | undefined): void {
     this.exitOpen = true;
     tintView(this.exit, COLORS.accent);
-    const label = this.branchReturnTarget() === TRIAL_ROOM_INDEX ? '시험장 →' : room?.entersTown ? '마을 →' : '출구 →';
-    this.exitLabel.setText(label);
+    this.exitLabel.setText(this.standardExitLabel(room));
     this.tweens.add({ targets: this.exit, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
+  }
+
+  private standardExitLabel(room: (typeof ROOMS)[number] | undefined): string {
+    if (this.branchReturnTarget() === TRIAL_ROOM_INDEX) {
+      const side = this.standardExitSide();
+      if (side === 'bottom') return '시험장 ↓';
+      if (side === 'top') return '시험장 ↑';
+      return '시험장 →';
+    }
+    return room?.entersTown ? '마을 →' : '출구 →';
   }
 
   private createTrialExits(width: number, height: number): void {
@@ -2031,8 +2130,14 @@ export class PlayScene extends Phaser.Scene {
     if (this.run.phase !== 'combat') return;
     if (!this.exitOpen) return;
     if (this.checkTrialExitReached()) return;
-    if (Math.abs(this.player.x - this.exit.x) > WALL + PLAYER_RADIUS) return;
-    if (Math.abs(this.player.y - this.exit.y) > EXIT_SIZE / 2 + PLAYER_RADIUS) return;
+    const side = this.standardExitSide();
+    const near =
+      side === 'top' || side === 'bottom'
+        ? Math.abs(this.player.x - this.exit.x) <= EXIT_SIZE / 2 + PLAYER_RADIUS &&
+          Math.abs(this.player.y - this.exit.y) <= WALL + PLAYER_RADIUS
+        : Math.abs(this.player.x - this.exit.x) <= WALL + PLAYER_RADIUS &&
+          Math.abs(this.player.y - this.exit.y) <= EXIT_SIZE / 2 + PLAYER_RADIUS;
+    if (!near) return;
 
     this.exitOpen = false;
     const returnTarget = this.branchReturnTarget();
@@ -2681,7 +2786,7 @@ export class PlayScene extends Phaser.Scene {
     for (const [index, kind] of STATUS_ORDER.entries()) {
       const dot = entity.statusDots[index];
       dot.setVisible(hasStatus(enemy, kind));
-      dot.setPosition(enemy.x + (index - 1.5) * 9, enemy.y - radius - 16);
+      dot.setPosition(enemy.x + (index - 1.5) * 13, enemy.y - radius - 20);
     }
   }
 
@@ -3158,6 +3263,7 @@ export class PlayScene extends Phaser.Scene {
     this.hud = this.add
       .text(screenX(24), screenY(58), '', { fontSize: '14px', color: COLORS.text, lineSpacing: 3 })
       .setDepth(20);
+    this.statusLegend = this.createStatusLegend(screenX(VIEW_WIDTH - 560), screenY(82));
     this.potionBottleBack = this.add
       .rectangle(screenX(36), screenY(152), 24, 34, 0x10141f, 0.82)
       .setStrokeStyle(2, 0x4a2230, 0.95)
@@ -3200,6 +3306,7 @@ export class PlayScene extends Phaser.Scene {
       this.shieldBarBack,
       this.shieldBarFill,
       this.hud,
+      this.statusLegend,
       this.potionBottleBack,
       this.potionBottleFill,
       this.potionBottleNeck,
@@ -3237,6 +3344,37 @@ export class PlayScene extends Phaser.Scene {
     );
 
     return { back, title, value, timer, pips };
+  }
+
+  private createStatusLegend(x: number, y: number): Phaser.GameObjects.Container {
+    const container = this.add.container(x, y).setDepth(20);
+    const entries: Array<{ status: StatusKind; label: string }> = [
+      { status: 'wound', label: '상처' },
+      { status: 'exposed', label: '약점' },
+      { status: 'brand', label: '낙인' },
+      { status: 'fracture', label: '균열' },
+    ];
+
+    container.add(
+      this.add
+        .text(0, 0, 'H 적 상태', { fontSize: '12px', color: COLORS.textDim, fontStyle: 'bold' })
+        .setOrigin(0, 0.5),
+    );
+    let cursor = 68;
+    for (const entry of entries) {
+      const dot = this.add.circle(cursor, 0, 5, STATUS_COLORS[entry.status], 0.95).setStrokeStyle(1, 0x10131d, 0.9);
+      const label = this.add
+        .text(cursor + 9, 0, entry.label, {
+          fontSize: '12px',
+          color: COLORS.textDim,
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5);
+      container.add([dot, label]);
+      cursor += label.width + 26;
+    }
+
+    return container;
   }
 
   private comboBadgeObjects(
@@ -3337,8 +3475,14 @@ export class PlayScene extends Phaser.Scene {
         ...(this.exitOpen && !inTown ? ['방을 정리했다. 출구로 이동 →'] : []),
       ].join('\n'),
     );
+    this.updateStatusLegend();
     this.updatePotionHud();
     this.updateComboText();
+  }
+
+  private updateStatusLegend(): void {
+    const rect = this.minimapRect();
+    this.statusLegend.setPosition(rect.left - 264, rect.top + 12);
   }
 
   private updatePotionHud(): void {
@@ -3385,9 +3529,7 @@ export class PlayScene extends Phaser.Scene {
     // 전에는 `교차`라고만 썼는데, 그건 아래 글자가 이미 말하는 것이라 같은 말을 두 번
     // 하고 있었다. 연계 이름은 화면 어디에도 없어서 무엇 때문에 뜬 배지인지 알 수 없었다.
     // 세는 조건은 무엇을 세는지(`이 손`/`합계`/`반대손`)가 숫자만으로 안 드러나 함께 적는다.
-    const comboName = supportsFor(this.run.loadout, runtime.weapon.basic.id).find((support) =>
-      comboRulesOf(support.behaviors).length > 0,
-    )?.name;
+    const comboName = rules[0].support.name;
     const suffix = `  ·  ${readout.label}`;
     badge.title.setText(
       `${hand === 'left' ? '왼손' : '오른손'} ${runtime.weapon.name}   ${comboName ?? ''}${suffix}`,
@@ -4139,6 +4281,10 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private statusTipText(kind: StatusKind): string {
+    return [`상태: ${STATUS_RULES[kind].label}`, ...this.statusHelpLines(kind)].join('\n');
+  }
+
+  private statusHelpLines(kind: StatusKind): string[] {
     const rule = STATUS_RULES[kind];
     const chance = rule.chance >= 1 ? '항상' : `${Math.round(rule.chance * 100)}%`;
     const source = this.statusSourceText(kind, chance);
@@ -4159,7 +4305,7 @@ export class PlayScene extends Phaser.Scene {
         '보스는 기본적으로 기절·넉백 면역',
       ],
     };
-    return [`상태: ${rule.label}`, source, ...effects[kind]].join('\n');
+    return [source, ...effects[kind]];
   }
 
   private statusSourceText(kind: StatusKind, chance: string): string {
@@ -4511,15 +4657,15 @@ export class PlayScene extends Phaser.Scene {
       } else if (item.kind === 'skill') {
         // 기본스킬은 무기 색을 그대로 쓰고 마름모로 그린다. 무기와 같은 계열이지만
         // 무기가 아니라는 것이 한눈에 갈려야 한다.
-        container.add(this.add.rectangle(x + size / 2, y + 7, size - 2, 13, item.color, 0.22));
-        container.add(
+        add(this.add.rectangle(x + size / 2, y + 7, size - 2, 13, item.color, 0.22));
+        add(
           this.add
             .text(x + size / 2, y + 7, '기본', { fontSize: '9px', color: COLORS.text, fontStyle: 'bold' })
             .setOrigin(0.5),
         );
         const diamond = this.add.rectangle(x + size / 2, y + size / 2 + 1, 13, 13, item.color, 0.9);
         diamond.setRotation(Math.PI / 4);
-        container.add(diamond);
+        add(diamond);
       } else if (item.kind === 'support') {
         // **보조형스킬은 종류를 글자로 적는다.**
         // 전에는 점 색깔로만 갈랐는데, 색만으로는 어느 쪽이 연계인지 알 방법이 없어
@@ -4817,6 +4963,10 @@ export class PlayScene extends Phaser.Scene {
       this.closeMap();
       return true;
     }
+    if (this.overlayKind === 'status-help') {
+      this.closeStatusHelp();
+      return true;
+    }
     if (this.overlayKind === 'pause') {
       this.closePause();
       return true;
@@ -5019,6 +5169,95 @@ export class PlayScene extends Phaser.Scene {
     this.closeOverlay();
   }
 
+  private showStatusHelp(): void {
+    this.paused = true;
+
+    const container = this.add.container(0, 0).setDepth(30);
+    pinContainer(this, container);
+    container.add(this.add.rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, VIEW_WIDTH, VIEW_HEIGHT, 0x05060a, 0.72));
+
+    const panel = { x: 260, y: 92, w: VIEW_WIDTH - 520, h: VIEW_HEIGHT - 184 };
+    container.add(
+      this.add
+        .rectangle(panel.x + panel.w / 2, panel.y + panel.h / 2, panel.w, panel.h, 0x0a0b0f, 0.96)
+        .setStrokeStyle(2, 0x3a4059, 0.95),
+    );
+    container.add(
+      this.add
+        .text(panel.x + 28, panel.y + 30, '적 상태 설명', {
+          fontSize: '28px',
+          color: COLORS.text,
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5),
+    );
+    container.add(
+      this.add
+        .text(panel.x + panel.w - 62, panel.y + 30, 'H / Esc', {
+          fontSize: '15px',
+          color: COLORS.accentText,
+          fontStyle: 'bold',
+        })
+        .setOrigin(1, 0.5),
+    );
+    this.addOverlayCloseButton(container, panel.x + panel.w - 28, panel.y + 30, () => this.closeStatusHelp());
+
+    const columns = 2;
+    const cardGap = 20;
+    const cardsTop = panel.y + 82;
+    const cardW = (panel.w - 76) / columns;
+    const cardH = 162;
+    for (const [index, status] of STATUS_ORDER.entries()) {
+      const col = index % columns;
+      const row = Math.floor(index / columns);
+      const x = panel.x + 28 + col * (cardW + cardGap);
+      const y = cardsTop + row * (cardH + cardGap);
+      const rule = STATUS_RULES[status];
+
+      container.add(
+        this.add
+          .rectangle(x + cardW / 2, y + cardH / 2, cardW, cardH, 0x141824, 0.92)
+          .setStrokeStyle(1, STATUS_COLORS[status], 0.75),
+      );
+      container.add(this.add.circle(x + 20, y + 24, 8, STATUS_COLORS[status], 0.95).setStrokeStyle(1, 0x10131d, 0.9));
+      container.add(
+        this.add
+          .text(x + 36, y + 24, rule.label, {
+            fontSize: '17px',
+            color: COLORS.text,
+            fontStyle: 'bold',
+          })
+          .setOrigin(0, 0.5),
+      );
+      container.add(
+        this.add.text(x + 18, y + 54, this.statusHelpLines(status).join('\n'), {
+          fontSize: '12px',
+          color: COLORS.textDim,
+          lineSpacing: 3,
+          wordWrap: { width: cardW - 36 },
+        }),
+      );
+    }
+
+    const footerY = cardsTop + cardH * 2 + cardGap + 36;
+    container.add(
+      this.add
+        .text(panel.x + 28, footerY, '상태 연계는 이미 걸린 상처/균열 등을 읽어 추가 피해를 낸다.', {
+          fontSize: '14px',
+          color: COLORS.textDim,
+        })
+        .setOrigin(0, 0.5),
+    );
+
+    this.overlay = container;
+    this.overlayKind = 'status-help';
+  }
+
+  private closeStatusHelp(): void {
+    this.paused = false;
+    this.closeOverlay();
+  }
+
   /**
    * 일시정지 화면.
    *
@@ -5075,7 +5314,7 @@ export class PlayScene extends Phaser.Scene {
     container.add(this.add.rectangle((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x0a0b0f, 0.88));
     container.add(
       this.add
-        .text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) - 90, won ? '승리' : '패배', {
+        .text((VIEW_WIDTH / 2), 150, won ? '승리' : '패배', {
           fontSize: '56px',
           color: won ? '#6ee7a8' : '#ff6b6b',
           fontStyle: 'bold',
@@ -5086,24 +5325,25 @@ export class PlayScene extends Phaser.Scene {
     const hands = describeByHand(this.run.loadout);
     // 방의 보상이 아니라 이번 판에서 실제로 새로 얻은 것만 적는다.
     const reward = won ? this.run.gained : undefined;
+    const body = this.add
+      .text(
+        (VIEW_WIDTH / 2),
+        226,
+        [
+          this.right ? `${this.left.weapon.name} + ${this.right.weapon.name}` : `${this.left.weapon.name}`,
+          `처치 ${this.run.kills}   시간 ${this.run.elapsed.toFixed(1)}초`,
+          hands.map((h) => `${h.hand} ${h.weapon}` + (h.lines.length ? ` — ${h.lines.join(', ')}` : '')).join('\n'),
+          ...this.rewardLines(reward, '이번 판에서 얻은 것'),
+        ].join('\n'),
+        { fontSize: '16px', color: COLORS.text, align: 'center', lineSpacing: 8, wordWrap: { width: VIEW_WIDTH - 180 } },
+      )
+      .setOrigin(0.5, 0);
+    container.add(body);
+
+    const controlsY = Math.min(VIEW_HEIGHT - 62, body.y + body.height + 46);
     container.add(
       this.add
-        .text(
-          (VIEW_WIDTH / 2),
-          (VIEW_HEIGHT / 2) - 10,
-          [
-            this.right ? `${this.left.weapon.name} + ${this.right.weapon.name}` : `${this.left.weapon.name}`,
-            `처치 ${this.run.kills}   시간 ${this.run.elapsed.toFixed(1)}초`,
-            hands.map((h) => `${h.hand} ${h.weapon}` + (h.lines.length ? ` — ${h.lines.join(', ')}` : '')).join('\n'),
-            ...this.rewardLines(reward, '이번 판에서 얻은 것'),
-          ].join('\n'),
-          { fontSize: '16px', color: COLORS.text, align: 'center', lineSpacing: 8, wordWrap: { width: VIEW_WIDTH - 180 } },
-        )
-        .setOrigin(0.5),
-    );
-    container.add(
-      this.add
-        .text((VIEW_WIDTH / 2), (VIEW_HEIGHT / 2) + 90, 'R 키로 처음부터 시작\nShift+R 기록 지우고 처음부터', {
+        .text((VIEW_WIDTH / 2), controlsY, 'R 키로 처음부터 시작\nShift+R 기록 지우고 처음부터', {
           fontSize: '18px',
           color: COLORS.textDim,
           align: 'center',

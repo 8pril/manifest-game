@@ -110,7 +110,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
         id: 'annihilation',
         name: '멸검',
         tags: ['공격', '지대', '물리', '지속시간'],
-        base: { damage: 23, areaRadius: 115, duration: 1.8, tickInterval: 0.3 },
+        base: { damage: 14, areaRadius: 82, duration: 1.2, tickInterval: 0.4 },
         supportSlots: 2,
       },
     ],

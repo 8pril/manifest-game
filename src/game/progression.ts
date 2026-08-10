@@ -286,17 +286,62 @@ export function configureManifestation(
 ): PlayerProgress {
   if (!hasWeapon(progress, weapon)) return progress;
   const accepted = sanitizeManifestationPatch(progress, weapon, patch);
+  let configs: ManifestationConfigs = {
+    ...progress.configs,
+    [weapon]: {
+      ...progress.configs[weapon],
+      ...accepted,
+    },
+  };
+
+  configs = clearEquippedSupportElsewhere(configs, weapon, 'primary', accepted.primarySupportId);
+  configs = clearEquippedSupportElsewhere(configs, weapon, 'synergy', accepted.synergySupportId);
 
   return {
     ...progress,
-    configs: {
-      ...progress.configs,
-      [weapon]: {
-        ...progress.configs[weapon],
-        ...accepted,
-      },
-    },
+    configs,
   };
+}
+
+function clearEquippedSupportElsewhere(
+  configs: ManifestationConfigs,
+  targetWeapon: WeaponId,
+  targetSlot: 'primary' | 'synergy',
+  supportId: string | null | undefined,
+): ManifestationConfigs {
+  if (!supportId) return configs;
+  const targetKey = targetSlot === 'primary' ? 'primarySupportId' : 'synergySupportId';
+  let next = configs;
+
+  for (const weapon of WEAPON_IDS) {
+    for (const slot of ['primary', 'synergy'] as const) {
+      if (weapon === targetWeapon && slot === targetSlot) continue;
+      const key = slot === 'primary' ? 'primarySupportId' : 'synergySupportId';
+      if (next[weapon][key] !== supportId) continue;
+      if (next === configs) next = { ...configs };
+      next = {
+        ...next,
+        [weapon]: {
+          ...next[weapon],
+          [key]: null,
+        },
+      };
+    }
+  }
+
+  // 같은 보조가 같은 무기의 반대 슬롯에 남아 있던 옛 저장도 정리한다.
+  const oppositeKey = targetKey === 'primarySupportId' ? 'synergySupportId' : 'primarySupportId';
+  if (next[targetWeapon][oppositeKey] === supportId) {
+    next = {
+      ...next,
+      [targetWeapon]: {
+        ...next[targetWeapon],
+        [oppositeKey]: null,
+      },
+    };
+  }
+
+  return next;
 }
 
 export function configuredSupports(progress: PlayerProgress, weapon: WeaponId): readonly Support[] {

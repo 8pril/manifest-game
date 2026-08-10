@@ -94,14 +94,15 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   /**
    * 윗길 제단의 보스. **기믹이 까다로운 쪽**이다.
    *
-   * 문지기와 같은 돌진 패턴을 쓰되 예고가 짧고 다시 오는 주기가 빠르다. 체력은
-   * 오히려 낮다 — 오래 버티는 싸움이 아니라 **읽고 피하는** 싸움이어야 한다.
+   * 문지기와 같은 단발 돌진이 아니라, 첫 돌진 뒤 현재 위치를 다시 보고 한 번 더
+   * 들어오는 2단 돌진을 쓴다. 오래 버티는 싸움이 아니라 **첫 회피 뒤 후속 회피까지**
+   * 읽는 싸움이어야 한다.
    */
   warden: {
     label: '제단지기',
     hp: 1500,
     speed: 96,
-    radius: 62,
+    radius: 72,
     contactDamage: 26,
     contactCooldown: 0.8,
     color: 0x6be0a0,
@@ -162,6 +163,7 @@ export interface BossState {
   staggerRemaining: number;
   shockRemaining: number;
   chargeDirection: Vec2;
+  followupChargesRemaining: number;
   summonedAt: readonly number[];
 }
 
@@ -179,6 +181,10 @@ export const BOSS_CHARGE_DURATION = 0.45;
 export const BOSS_CHARGE_SPEED = 520;
 export const BOSS_CHARGE_DAMAGE_MULTIPLIER = 1.6;
 export const BOSS_WALL_STAGGER = 1.1;
+export const WARDEN_CHARGE_COOLDOWN = BOSS_CHARGE_COOLDOWN * 0.75;
+export const WARDEN_CHARGE_TELEGRAPH = 0.55;
+export const WARDEN_FOLLOWUP_TELEGRAPH = 0.35;
+export const WARDEN_FOLLOWUP_CHARGES = 1;
 export const BOSS_SUMMON_THRESHOLDS = [0.7, 0.35] as const;
 export const BOSS_SUMMON_COUNT = 4;
 export const BOSS_SHOCK_COOLDOWN = 3.4;
@@ -224,17 +230,18 @@ const SHOCK_BOSSES: readonly EnemyKind[] = ['collapsedDoor', 'glutton'];
 function createBossState(kind: EnemyKind): BossState {
   return {
     phase: 'idle',
-    // 제단지기는 같은 돌진 패턴을 **더 자주** 건다. 읽는 눈을 시험하는 쪽이다.
+    // 제단지기는 같은 돌진을 더 자주만 쓰지 않고, 한 번 더 재조준해서 들어온다.
     chargeCooldown: SHOCK_BOSSES.includes(kind)
       ? BOSS_SHOCK_COOLDOWN
       : kind === 'warden'
-        ? BOSS_CHARGE_COOLDOWN * 0.6
+        ? WARDEN_CHARGE_COOLDOWN
         : BOSS_CHARGE_COOLDOWN,
     telegraphRemaining: 0,
     chargeRemaining: 0,
     staggerRemaining: 0,
     shockRemaining: 0,
     chargeDirection: { x: 1, y: 0 },
+    followupChargesRemaining: 0,
     summonedAt: [],
   };
 }
@@ -324,8 +331,16 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
   if (boss.phase === 'charging') {
     boss.chargeRemaining -= deltaSeconds;
     if (boss.chargeRemaining <= 0) {
+      if (enemy.kind === 'warden' && boss.followupChargesRemaining > 0) {
+        boss.followupChargesRemaining -= 1;
+        boss.phase = 'telegraph';
+        boss.telegraphRemaining = WARDEN_FOLLOWUP_TELEGRAPH;
+        boss.chargeDirection = directionTo(enemy, target);
+        events.push({ kind: 'chargeTelegraph', direction: boss.chargeDirection });
+        return events;
+      }
       boss.phase = 'idle';
-      boss.chargeCooldown = BOSS_CHARGE_COOLDOWN;
+      boss.chargeCooldown = bossCooldown(enemy.kind);
     }
     return events;
   }
@@ -334,7 +349,7 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
     boss.staggerRemaining -= deltaSeconds;
     if (boss.staggerRemaining <= 0) {
       boss.phase = 'idle';
-      boss.chargeCooldown = BOSS_CHARGE_COOLDOWN;
+      boss.chargeCooldown = bossCooldown(enemy.kind);
     }
     return events;
   }
@@ -368,12 +383,19 @@ export function advanceBossPattern(enemy: Enemy, target: Vec2, deltaSeconds: num
       return events;
     }
     boss.phase = 'telegraph';
-    boss.telegraphRemaining = BOSS_CHARGE_TELEGRAPH;
+    boss.telegraphRemaining = enemy.kind === 'warden' ? WARDEN_CHARGE_TELEGRAPH : BOSS_CHARGE_TELEGRAPH;
+    boss.followupChargesRemaining = enemy.kind === 'warden' ? WARDEN_FOLLOWUP_CHARGES : 0;
     boss.chargeDirection = directionTo(enemy, target);
     events.push({ kind: 'chargeTelegraph', direction: boss.chargeDirection });
   }
 
   return events;
+}
+
+function bossCooldown(kind: EnemyKind): number {
+  if (SHOCK_BOSSES.includes(kind)) return BOSS_SHOCK_COOLDOWN;
+  if (kind === 'warden') return WARDEN_CHARGE_COOLDOWN;
+  return BOSS_CHARGE_COOLDOWN;
 }
 
 export function bossMoveDirection(enemy: Enemy, target: Vec2): Vec2 | null {
@@ -397,6 +419,7 @@ export function staggerBossOnWall(enemy: Enemy): boolean {
   if (enemy.boss?.phase !== 'charging') return false;
   enemy.boss.phase = 'staggered';
   enemy.boss.chargeRemaining = 0;
+  enemy.boss.followupChargesRemaining = 0;
   enemy.boss.staggerRemaining = BOSS_WALL_STAGGER;
   return true;
 }

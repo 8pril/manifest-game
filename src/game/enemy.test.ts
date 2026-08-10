@@ -25,6 +25,9 @@ import {
   BOSS_SHOCK_DAMAGE,
   BOSS_SHOCK_RADIUS,
   BOSS_SHOCK_TELEGRAPH,
+  WARDEN_CHARGE_COOLDOWN,
+  WARDEN_CHARGE_TELEGRAPH,
+  WARDEN_FOLLOWUP_TELEGRAPH,
   staggerBossOnWall,
 } from '@/game/enemy';
 import { beforeEach } from 'vitest';
@@ -175,6 +178,41 @@ describe('boss patterns', () => {
 
     expect(staggerBossOnWall(boss)).toBe(false);
     expect(boss.boss?.phase).toBe('idle');
+  });
+
+  it('제단지기는 첫 돌진 뒤 현재 위치를 다시 보고 한 번 더 돌진한다', () => {
+    const boss = createEnemy('warden', 100, 0);
+
+    expect(ENEMY_STATS.warden.radius).toBeGreaterThan(ENEMY_STATS.gatekeeper.radius);
+
+    expect(advanceBossPattern(boss, { x: 0, y: 0 }, WARDEN_CHARGE_COOLDOWN)).toEqual([
+      { kind: 'chargeTelegraph', direction: { x: -1, y: 0 } },
+    ]);
+    expect(advanceBossPattern(boss, { x: 0, y: 0 }, WARDEN_CHARGE_TELEGRAPH)).toEqual([
+      { kind: 'chargeStart', direction: { x: -1, y: 0 } },
+    ]);
+
+    expect(advanceBossPattern(boss, { x: 100, y: 100 }, BOSS_CHARGE_DURATION)).toEqual([
+      { kind: 'chargeTelegraph', direction: { x: 0, y: 1 } },
+    ]);
+    expect(advanceBossPattern(boss, { x: 100, y: 100 }, WARDEN_FOLLOWUP_TELEGRAPH)).toEqual([
+      { kind: 'chargeStart', direction: { x: 0, y: 1 } },
+    ]);
+
+    advanceBossPattern(boss, { x: 100, y: 100 }, BOSS_CHARGE_DURATION);
+    expect(boss.boss?.phase).toBe('idle');
+  });
+
+  it('제단지기가 벽에 부딪히면 후속 돌진은 끊긴다', () => {
+    const boss = createEnemy('warden', 100, 0);
+
+    advanceBossPattern(boss, { x: 0, y: 0 }, WARDEN_CHARGE_COOLDOWN);
+    advanceBossPattern(boss, { x: 0, y: 0 }, WARDEN_CHARGE_TELEGRAPH);
+    expect(staggerBossOnWall(boss)).toBe(true);
+
+    advanceBossPattern(boss, { x: 100, y: 100 }, BOSS_WALL_STAGGER);
+    expect(boss.boss?.phase).toBe('idle');
+    expect(boss.boss?.followupChargesRemaining).toBe(0);
   });
 
   it('체력 구간마다 사냥개 소환 이벤트를 한 번만 낸다', () => {

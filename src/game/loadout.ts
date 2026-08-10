@@ -47,6 +47,7 @@ export function loadoutFromProgress(progress: PlayerProgress, previous: Loadout 
  */
 export function supportsFromProgress(progress: PlayerProgress): Readonly<Record<string, readonly Support[]>> {
   const supports: Record<string, Support[]> = {};
+  const usedSupportIds = new Set<string>();
 
   for (const weaponId of progress.unlockedWeapons) {
     // **실제로 나가는 공격에만 붙인다.** 첫 소켓에 기본스킬을 끼웠으면 그것이
@@ -57,8 +58,12 @@ export function supportsFromProgress(progress: PlayerProgress): Readonly<Record<
     const skill = equippedBasicSkill(progress, weaponId);
 
     for (const support of configuredSupports(progress, weaponId)) {
+      if (usedSupportIds.has(support.id)) continue;
       const accepted = supports[skill.id] ?? [];
-      if (canAttach(skill, support, accepted).ok) supports[skill.id] = [...accepted, support];
+      if (canAttach(skill, support, accepted).ok) {
+        supports[skill.id] = [...accepted, support];
+        usedSupportIds.add(support.id);
+      }
     }
   }
   return supports;

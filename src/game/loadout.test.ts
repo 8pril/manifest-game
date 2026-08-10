@@ -190,4 +190,22 @@ describe('supportsFromProgress', () => {
 
     expect(supportsFromProgress(progress)).toEqual({});
   });
+
+  it('옛 저장에 같은 보조형스킬이 여러 소켓에 남아 있어도 한 번만 적용한다', () => {
+    const base = unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['bold-resolve']);
+    const progress = {
+      ...base,
+      configs: {
+        ...base.configs,
+        sword: { ...base.configs.sword, primarySupportId: 'bold-resolve' },
+        bow: { ...base.configs.bow, primarySupportId: 'bold-resolve' },
+      },
+    };
+
+    const supports = supportsFromProgress(progress);
+
+    expect(Object.values(supports).flat().map((support) => support.id)).toEqual(['bold-resolve']);
+    expect(supports['sword-slash']?.map((support) => support.id)).toEqual(['bold-resolve']);
+    expect(supports['arrow-shot']).toBeUndefined();
+  });
 });

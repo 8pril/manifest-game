@@ -4,6 +4,7 @@ import { resolveSkill, type Support } from '@/engine/support';
 import { projectileDamageMultiplier } from '@/engine/projectile';
 import { findSupport } from '@/data/supports';
 import type { Skill } from '@/engine/support';
+import { ENEMY_STATS } from '@/game/enemy';
 
 /**
  * 기본스킬 후보 계측기.
@@ -65,18 +66,37 @@ describe('강화기술 대체 발동 — 초당 피해', () => {
     expect(table).toHaveLength(4);
   });
 
-  it('첫 소켓 후보 가치가 무기 사이에 크게 벌어지지 않아야 한다', () => {
-    const ratios = table.map((r) => r.ratio);
+  it('옛 콤보스킬 후보 가치가 무기 사이에 크게 벌어지지 않아야 한다', () => {
+    const ratios = table.filter((r) => r.kind !== 'area').map((r) => r.ratio);
     const spread = Math.max(...ratios) / Math.min(...ratios);
-    console.log(`  소켓 배율 최대/최소 = ${spread.toFixed(1)}배 차이`);
+    console.log(`  투사체형 소켓 배율 최대/최소 = ${spread.toFixed(1)}배 차이`);
     expect(spread, '무기마다 기본스킬 후보 가치가 너무 다르면 픽이 한쪽으로 쏠린다').toBeLessThan(1.7);
   });
 
-  it('단일 대상 피해가 기본 공격의 0.75~1.25배 안에 있다', () => {
+  it('비지대형 단일 대상 피해가 기본 공격의 0.75~1.25배 안에 있다', () => {
     const outliers = table
+      .filter((r) => r.kind !== 'area')
       .filter((r) => r.ratio < 0.75 || r.ratio > 1.25)
       .map((r) => `${r.name} ${r.ratio.toFixed(2)}배`);
     expect(outliers, '첫 소켓 후보는 기본 공격 수준이어야 한다').toEqual([]);
+  });
+
+  it('지대형 후보는 단일 처치력 대신 범위를 가져간다', () => {
+    const areas = table.filter((r) => r.kind === 'area');
+    const outliers = areas
+      .filter((r) => r.ratio < 0.25 || r.ratio > 1.25)
+      .map((r) => `${r.name} ${r.ratio.toFixed(2)}배`);
+    expect(outliers, '지대형은 여러 적을 함께 때리므로 단일 대상 피해를 낮게 둔다').toEqual([]);
+  });
+
+  it('멸검 한 장만으로 사냥개가 바로 죽지 않는다', () => {
+    const sword = WEAPON_LIST.find((weapon) => weapon.id === 'sword')!;
+    const annihilation = oldComboSkillCandidate(sword);
+    const { stats } = resolveSkill(annihilation, []);
+    const ticks = Math.round((stats.duration ?? 0) / (stats.tickInterval ?? 1));
+    const oneCastDamage = ticks * (stats.damage ?? 0);
+
+    expect(oneCastDamage).toBeLessThan(ENEMY_STATS.chaser.hp);
   });
 });
 
@@ -164,8 +184,8 @@ describe('마을 기본 세팅을 붙였을 때', () => {
  * 첫 소켓의 기본스킬은 **곁수정이 아니라 다른 선택**이어야 한다.
  *
  * 더 세기만 하면 안 끼울 이유가 없어 소켓이 고르는 칸이 아니라 반드시 채우는 칸이
- * 된다. 옛 콤보스킬(멸검 등)도 기본스킬 후보로 복귀했으므로, 모든 후보의 총량을
- * 비슷하게 맞춘다.
+ * 된다. 옛 콤보스킬(멸검 등)도 기본스킬 후보로 복귀했다. 다만 지대형은 한 번에
+ * 여러 적을 때리므로 단일 대상 피해를 더 낮게 둔다.
  */
 describe('기본스킬은 기본 공격의 곁수정이 아니다', () => {
   const socketTable = WEAPON_LIST.flatMap((weapon) =>
@@ -191,12 +211,22 @@ describe('기본스킬은 기본 공격의 곁수정이 아니다', () => {
     expect(socketTable).toHaveLength(WEAPON_LIST.length * 2);
   });
 
-  it('단일 대상 피해가 기본 공격의 0.75~1.25배 안에 있다', () => {
+  it('비지대형 단일 대상 피해가 기본 공격의 0.75~1.25배 안에 있다', () => {
     const outliers = socketTable
+      .filter((r) => r.kind !== 'area')
       .filter((r) => r.ratio < 0.75 || r.ratio > 1.25)
       .map((r) => `${r.weapon} ${r.name} ${r.ratio.toFixed(2)}배`);
 
     expect(outliers, '기본스킬이 곁수정이 되면 소켓이 선택이 아니게 된다').toEqual([]);
+  });
+
+  it('지대형 단일 대상 피해는 낮게 둘 수 있다', () => {
+    const outliers = socketTable
+      .filter((r) => r.kind === 'area')
+      .filter((r) => r.ratio < 0.25 || r.ratio > 1.25)
+      .map((r) => `${r.weapon} ${r.name} ${r.ratio.toFixed(2)}배`);
+
+    expect(outliers, '지대형은 반경 안의 적을 함께 때리므로 단일 대상 피해 기준을 낮춘다').toEqual([]);
   });
 
   it('무기마다 축이 하나씩 바뀐다', () => {

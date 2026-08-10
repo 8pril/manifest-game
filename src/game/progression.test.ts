@@ -179,6 +179,17 @@ describe('manifestation config', () => {
     expect(configuredSupports(configured, 'bow')).toEqual([]);
   });
 
+  it('보조형스킬 한 개는 한 소켓에만 장착된다', () => {
+    const progress = unlockSupports(unlockWeapons(createInitialProgress(), ['bow']), ['bold-resolve']);
+    const sword = configureManifestation(progress, 'sword', { primarySupportId: 'bold-resolve' });
+    const bow = configureManifestation(sword, 'bow', { primarySupportId: 'bold-resolve' });
+
+    expect(bow.configs.sword.primarySupportId).toBeNull();
+    expect(bow.configs.bow.primarySupportId).toBe('bold-resolve');
+    expect(configuredSupports(bow, 'sword')).toEqual([]);
+    expect(configuredSupports(bow, 'bow').map((support) => support.id)).toEqual(['bold-resolve']);
+  });
+
   it('아직 해금되지 않은 무기 설정은 바꾸지 않는다', () => {
     const progress = createInitialProgress();
 

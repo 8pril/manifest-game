@@ -92,7 +92,7 @@ npm install
 npm run dev      # 개발 서버 (http://localhost:5173)
 npm run build    # 타입 검사 + 프로덕션 빌드 → dist/
 npm run preview  # 빌드 결과 확인 (http://localhost:4173)
-npm run test     # 테스트 343개
+npm run test     # 테스트 368개
 npm run typecheck
 ```
 
@@ -101,6 +101,9 @@ Node 20.19 이상이 필요합니다.
 ### 개발용 진입 파라미터
 
 특정 방이나 무기로 바로 시작할 수 있습니다. **방 번호는 1부터입니다.**
+
+**개발 빌드에서만 동작합니다.** 배포본에서는 조용히 무시되므로, 플레이 링크로 들어온
+사람은 누구나 1번 구역부터 시작합니다.
 
 ```
 http://localhost:5173/?wave=2                  첫 문지기 방부터 시작

@@ -55,6 +55,12 @@ function parseSupports(value: string | null): readonly string[] | undefined {
 }
 
 export function parseDebugStart(search: string, totalRooms: number): DebugStart {
+  return parseDebugStartWithMode(search, totalRooms, true);
+}
+
+export function parseDebugStartWithMode(search: string, totalRooms: number, enabled: boolean): DebugStart {
+  if (!enabled) return { town: false, combo: null };
+
   const params = new URLSearchParams(search);
   const town = params.has('town') && params.get('town') !== '0';
   const wave = Number(params.get('wave'));

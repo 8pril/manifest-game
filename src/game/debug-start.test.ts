@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDebugStart } from './debug-start';
+import { parseDebugStart, parseDebugStartWithMode } from './debug-start';
 
 describe('parseDebugStart', () => {
   it('URL 파라미터로 시작 무기와 방을 지정한다', () => {
@@ -27,6 +27,13 @@ describe('parseDebugStart', () => {
       left: undefined,
       right: undefined,
       roomIndex: undefined,
+      town: false,
+      combo: null,
+    });
+  });
+
+  it('비활성화 상태에서는 URL 파라미터를 전부 무시한다', () => {
+    expect(parseDebugStartWithMode('?left=bow&right=arcane&wave=4&town=1&combo=1&supports=chain', 7, false)).toEqual({
       town: false,
       combo: null,
     });
