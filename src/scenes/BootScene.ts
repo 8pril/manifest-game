@@ -72,7 +72,7 @@ export class BootScene extends Phaser.Scene {
     }
 
     this.add
-      .text(cx, GAME_HEIGHT / 2 - 80, 'NAN 2026 예선 빌드', {
+      .text(cx, GAME_HEIGHT / 2 - 80, 'MANIFEST: LOST ECHOES', {
         fontSize: '48px',
         color: COLORS.text,
         fontStyle: 'bold',

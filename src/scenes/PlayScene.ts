@@ -281,6 +281,33 @@ const WEAPON_SPRITE: Record<WeaponId, string> = {
 const WEAPON_VIEW_SIZE = 34;
 
 /**
+ * 무기 그림에서 **손이 잡는 지점**. 회전 중심이자 손에 붙는 자리다.
+ *
+ * 예전에는 네 무기 모두 `(0.2, 0.5)`를 썼다. 그런데 그림마다 손잡이가 있는 자리가
+ * 다르다. 검은 손잡이가 왼쪽 위 구석인데 `(0.2, 0.5)`는 날 한가운데라, 손잡이와
+ * 자루끝이 통째로 주먹 뒤로 삐져나왔다. 실측하면 6.8px — 장갑 폭(15px)의 절반이다.
+ *
+ * 값은 `public/sprites/weapon-*.png`에 십분율 격자를 씌워 읽었다. 아트를 다시 뽑으면
+ * 같은 방법으로 다시 읽으면 된다.
+ */
+const WEAPON_GRIP_ORIGIN: Record<WeaponId, { x: number; y: number }> = {
+  /** 자루끝과 코등이 사이. 날은 오른쪽 아래로 뻗는다. */
+  sword: { x: 0.13, y: 0.16 },
+  /** 활은 끝이 아니라 한가운데를 잡는다. 화살이 활대를 지나는 지점이다. */
+  bow: { x: 0.5, y: 0.42 },
+  /** 결정을 감은 띠. 뾰족한 쪽이 앞이다. */
+  arcane: { x: 0.3, y: 0.48 },
+  /**
+   * 방패는 원판이 아니라 **뒤에 달린 손잡이 막대**를 잡는다.
+   *
+   * 원판 중심(0.45, 0.45)에 두면 막대가 주먹 밖으로 통째로 나와, 방패에서 뾰족한 것이
+   * 삐져나온 것처럼 보인다. 격자로 재면 막대는 (0.65, 0.63)~(0.90, 0.80)이다.
+   * 그 위에 손을 얹으면 막대가 주먹과 원판 사이에 놓여 손잡이로 읽힌다.
+   */
+  shield: { x: 0.84, y: 0.75 },
+};
+
+/**
  * 손에 든 무기의 깊이. **손이 아니라 그림 속 자리로 정한다.**
  *
  * 양손 다 캐릭터(10)보다 위다. 한 번 아래 자리 무기를 몸 뒤(9.6)로 내렸다가 무기가
@@ -336,8 +363,14 @@ const WEAPON_POSE_ANGLE: Record<WeaponId, number> = {
   bow: 0.72,
   /** 결정이 손 위에 떠 있는 정도. 거의 눕힌다. */
   arcane: -0.2,
-  /** 몸 앞을 막는 자세라 가장 세운다. */
-  shield: -1.15,
+  /**
+   * 원판이 조준 방향 앞을 막게 한다.
+   *
+   * 다른 무기와 달리 손잡이가 그림 오른쪽 아래에 있어, 손에서 원판을 향하는 방향이
+   * -142.4도다. 원판을 앞쪽(-25도)에 세우려면 그만큼 되돌려야 한다.
+   * 손잡이 위치를 바꾸면 이 값도 같이 다시 계산해야 한다.
+   */
+  shield: 2.05,
 };
 
 const ENEMY_SPRITE: Record<EnemyKind, string> = {
@@ -1737,9 +1770,9 @@ export class PlayScene extends Phaser.Scene {
 
   private createWeaponView(): Phaser.GameObjects.Sprite | null {
     if (!this.textures.exists('weapon-sword')) return null;
-    // 손잡이 쪽을 회전 중심으로 둔다. 가운데를 중심으로 돌리면 무기가 손에서 떨어져 나간다.
-    // 깊이는 `updateWeaponViews`가 정한다. 어느 자리에 서는지가 방향에 따라 바뀐다.
-    return this.add.sprite(0, 0, 'weapon-sword').setOrigin(0.2, 0.5).setVisible(false);
+    // 원점은 무기마다 다르다(`WEAPON_GRIP_ORIGIN`). `refreshWeaponViews`가 정한다.
+    // 깊이도 마찬가지다. 어느 자리에 서는지가 방향에 따라 바뀐다.
+    return this.add.sprite(0, 0, 'weapon-sword').setVisible(false);
   }
 
   private createWeaponCore(): Phaser.GameObjects.Arc | null {
@@ -1818,6 +1851,14 @@ export class PlayScene extends Phaser.Scene {
       const pose = WEAPON_POSE_ANGLE[runtime?.weapon.id ?? 'sword'];
       view.setRotation(flipped ? Math.PI - pose : pose);
       view.setFlipY(flipped);
+
+      // **`setFlipY`는 그림만 뒤집고 원점은 그대로 둔다.** 그래서 뒤집으면 손잡이가
+      // 반대편(1 - y)으로 가는데 원점은 제자리에 남아, 무기가 손에서 통째로 떨어진다.
+      // 예전에는 원점 y가 0.5라 뒤집어도 같은 자리였고(0.5는 뒤집힘의 고정점),
+      // 손잡이 위치를 무기마다 따로 잡으면서 비로소 드러난 문제다. 검은 0.16이라
+      // 어긋나는 거리가 (0.5 - 0.16) x 2 x 34px = 23px, 무기 길이의 3분의 2다.
+      const grip = WEAPON_GRIP_ORIGIN[runtime?.weapon.id ?? 'sword'];
+      view.setOrigin(grip.x, flipped ? 1 - grip.y : grip.y);
     }
   }
 

@@ -7035,3 +7035,16 @@ warden: 'enemy-boss1'   // 이런 파일이 없다 (enemy-boss / enemy-boss2 뿐
 - 관련 파일: `src/engine/support.ts`, `src/engine/support.test.ts`, `src/scenes/PlayScene.ts`, `docs/action-tracker.md`, `docs/ai-usage-log.md`
 - 검증: `npm run typecheck`, 371개 테스트, `npm run build`, `git diff --check` 통과.
 - 남은 이슈: 여러 스킬 이름이 긴 보조스킬은 실제 툴팁에서 줄바꿈 위치가 자연스러운지 확인해야 한다.
+
+### 2026-08-10 - 게임 제목 `MANIFEST: LOST ECHOES` 확정
+
+- 단계: 브랜딩 확정 및 제출 문서 마감
+- 사용 AI 도구: Codex
+- 목적: 임시 제목을 대체할 최종 게임 제목을 정하고 게임과 제출물의 표기를 통일한다.
+- 입력 프롬프트 / 지시: 사용자는 단독 `MANIFEST`보다 기억과 무의식 세계의 분위기를 보강한 후보를 검토한 뒤 `MANIFEST: LOST ECHOES`로 확정했다.
+- AI 출력 요약: `MANIFEST`는 무기 실체화와 무의식이 만들어낸 세계를, `LOST ECHOES`는 과거와 연결된 적과 잃어버린 기억의 잔향을 나타내는 제목으로 정리했다.
+- 사람이 검토한 기준: 한국어 사용자도 읽고 발음하기 쉬우며, 핵심 시스템을 담되 결말의 무의식 반전을 직접 누설하지 않아야 한다. 단독 `MANIFEST`보다 작품 식별력이 있어야 한다.
+- 수정한 내용: 부트 화면, 브라우저 제목과 Open Graph 제목, README, 현재 기획·아트·플레이테스트 문서, 제출 문서 3종에 최종 제목을 반영하고 제목 미확정 항목을 제거했다. 과거 AI 활용 로그의 당시 기록은 이력 보존을 위해 수정하지 않았다.
+- 게임/문서 반영 여부: 게임 화면, 웹 메타데이터, 기획 문서와 제출 문서에 반영.
+- 관련 파일: `src/scenes/BootScene.ts`, `index.html`, `README.md`, `docs/concept-brief.md`, `docs/full-concept-implementation-plan.md`, `docs/playtest-brief.md`, `docs/art-spec.md`, `docs/game-scope.md`, `submission/game-description.md`, `submission/ai-technical-report.md`, `submission/team-role-report.md`, `docs/action-tracker.md`, `docs/ai-usage-log.md`
+- 남은 이슈: 실제 타이틀 화면에서 긴 영문 제목의 폭과 배경 대비를 확인한다.
