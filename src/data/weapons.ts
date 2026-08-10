@@ -54,7 +54,7 @@ export function deliveryOf(skill: Skill): Delivery {
  *
  * 투사체·근접은 남아서 중첩되지 않으므로 무기 기본 쿨다운을 쓴다.
  * **지대는 다르다.** 지속시간 동안 여러 장이 겹치면 피해가 발동 주기에 반비례해
- * 뛴다(멸검: 별도 간격 900ms vs 기본 쿨다운 300ms). 그래서 지대형 후보만 별도
+ * 뛴다(멸검: 별도 간격 750ms vs 기본 쿨다운 300ms). 그래서 지대형 후보만 별도
  * 간격을 데이터로 명시한다.
  */
 export function attackIntervalFor(weapon: Weapon, skill: Skill): number {
@@ -84,7 +84,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     status: 'wound',
     color: 0xc9d1e8,
     cooldown: 300,
-    basicSkillIntervals: { annihilation: 900 },
+    basicSkillIntervals: { annihilation: 750 },
     // 검은 짧고 빠르게 벤다.
     swingDuration: 110,
     basic: {

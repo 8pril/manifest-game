@@ -15,6 +15,7 @@ import {
   consumeWound,
   WOUND_CONSUME_PER_STACK,
   WOUND_BURST_DAMAGE,
+  STUN_DURATION,
 } from '@/engine/status';
 
 /** 확률 판정을 항상 통과시키는 난수. */
@@ -22,7 +23,7 @@ const always = () => 0;
 /** 확률 판정을 항상 실패시키는 난수. */
 const never = () => 0.999;
 
-describe('벌어진 상처 - 원안: 1스택씩, 5스택에서 추가피해 후 초기화, 5초 지속', () => {
+describe('벌어진 상처 - 기획: 1스택씩, 5스택에서 추가피해 후 초기화, 지속시간 무한', () => {
   it('명중할 때마다 1스택씩 쌓인다', () => {
     const host = createStatusHost();
     applyStatus(host, 'wound', always);
@@ -46,25 +47,27 @@ describe('벌어진 상처 - 원안: 1스택씩, 5스택에서 추가피해 후 
     expect(applyStatus(host, 'wound', never).applied).toBe(true);
   });
 
-  it('5초가 지나면 사라진다', () => {
+  it('시간이 아무리 지나도 스택이 사라지지 않는다', () => {
+    // 상처만 만료되지 않는다. 다른 무기로 소모하거나 5스택으로 터뜨리는 것이 유일한
+    // 해소 수단이라, 시간이 먼저 지웠다면 두 규칙 다 발동 기회를 잃는다.
     const host = createStatusHost();
     applyStatus(host, 'wound', always);
-    tickStatuses(host, 4.9);
+    tickStatuses(host, 600);
     expect(hasStatus(host, 'wound')).toBe(true);
-    tickStatuses(host, 0.2);
-    expect(hasStatus(host, 'wound')).toBe(false);
-  });
-
-  it('다시 명중하면 지속시간이 갱신된다', () => {
-    const host = createStatusHost();
-    applyStatus(host, 'wound', always);
-    tickStatuses(host, 4);
-    applyStatus(host, 'wound', always);
-    expect(findStatus(host, 'wound')?.remaining).toBe(STATUS_RULES.wound.duration);
+    expect(findStatus(host, 'wound')?.stacks).toBe(1);
   });
 });
 
-describe('약점 노출 - 원안: 30% 확률, 받는 피해 10% 증가, 5초', () => {
+describe('약점 노출 - 기획: 30% 확률, 받는 피해 10% 증가, 3초', () => {
+  it('3초가 지나면 사라진다', () => {
+    const host = createStatusHost();
+    applyStatus(host, 'exposed', always);
+    tickStatuses(host, 2.9);
+    expect(hasStatus(host, 'exposed')).toBe(true);
+    tickStatuses(host, 0.2);
+    expect(hasStatus(host, 'exposed')).toBe(false);
+  });
+
   it('확률 판정에 실패하면 부여되지 않는다', () => {
     const host = createStatusHost();
     expect(applyStatus(host, 'exposed', never).applied).toBe(false);
@@ -121,7 +124,7 @@ describe('낙인 - 원안: 7% 확률, 공격 시 소비되며 비전 흐름 부�
   });
 });
 
-describe('균열 - 원안: 10% 확률로 기절 2초, 이후 7초간 재기절 불가', () => {
+describe('균열 - 기획: 10% 확률로 균열 3초, 균열이 기절 2초를 유발, 이후 7초간 재기절 불가', () => {
   it('부여되면 기절한다', () => {
     const host = createStatusHost();
     expect(isStunned(host)).toBe(false);
@@ -129,11 +132,18 @@ describe('균열 - 원안: 10% 확률로 기절 2초, 이후 7초간 재기절 �
     expect(isStunned(host)).toBe(true);
   });
 
-  it('2초 뒤 기절이 풀린다', () => {
+  it('기절이 균열보다 먼저 풀린다', () => {
+    // **균열과 기절은 다른 것이다.** 기절 2초가 끝나 적이 다시 움직여도 균열은
+    // 1초 더 붙어 있고, 그 1초 동안 `균열 공명`의 피해 증폭이 산다.
     const host = createStatusHost();
     applyStatus(host, 'fracture', always);
-    tickStatuses(host, 2.1);
+
+    tickStatuses(host, STUN_DURATION + 0.1);
     expect(isStunned(host)).toBe(false);
+    expect(hasStatus(host, 'fracture')).toBe(true);
+
+    tickStatuses(host, STATUS_RULES.fracture.duration - STUN_DURATION);
+    expect(hasStatus(host, 'fracture')).toBe(false);
   });
 
   it('기절이 풀려도 7초 동안은 다시 기절하지 않는다', () => {
@@ -163,11 +173,11 @@ describe('tickStatuses', () => {
     applyStatus(host, 'fracture', always);
     expect(host.statuses).toHaveLength(3);
 
-    // 균열(2초)만 먼저 만료된다
-    tickStatuses(host, 2.1);
+    // 약점(3초)과 균열(3초)은 만료되고 상처는 남는다.
+    tickStatuses(host, 3.1);
     expect(hasStatus(host, 'fracture')).toBe(false);
+    expect(hasStatus(host, 'exposed')).toBe(false);
     expect(hasStatus(host, 'wound')).toBe(true);
-    expect(hasStatus(host, 'exposed')).toBe(true);
   });
 
   it('removeStatus로 직접 제거할 수 있다', () => {

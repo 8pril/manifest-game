@@ -57,6 +57,7 @@
 | `drop-item.png` | 보스 바닥 드랍 | 32px | 96×96 | `#ffd166` 금색 |
 | `key-upper.png` | 윗길 열쇠 | 30px | 96×96 | `#9ae6a0` 연녹색 |
 | `key-lower.png` | 아랫길 열쇠 | 30px | 96×96 | `#ffc55c` 호박색 |
+| `potion.png` | HUD 충전형 물약 | 26×42px (세로형) | 59×96 | `#ff4054` 붉은색 |
 
 ### 손에 든 무기
 
@@ -329,6 +330,34 @@ texture, bold silhouette readable at 32 pixels, transparent background,
 no shadow, centered
 ```
 
+**HUD 충전형 물약** — 실제 충전량은 코드에서 병 내부 액체로 그린다
+
+아트 자체에 액체가 차 있으면 `potionCharge`와 충돌한다. 병은 비어 있어야 하고,
+빨간 충전 상태는 `PlayScene`이 아래에서 위로 채운다.
+
+이 아트에는 다른 스프라이트에 없는 조건이 둘 있다.
+
+**안쪽이 투명하게 뚫려 있어야 한다.** 액체를 병보다 **뒤에** 깔아야 유리에 담긴 것처럼
+보이고 테두리와 코르크가 살아남는데, 안쪽이 불투명하면 뒤에 깐 액체가 아예 안 보인다.
+처음 생성본이 그랬다. 눈으로는 비어 보여도 안쪽에 흐린 유리색이 덮여 있었다.
+**알파 히스토그램으로 확인한다** — 병 중앙 픽셀의 알파가 0이어야 한다.
+
+**테두리가 밝아야 한다.** 안쪽을 뚫으면 병은 윤곽선만 남는다. 어두운 던전 팔레트에
+맞춰 어두운 선으로 뽑으면 26px에서 사라진다. 재생성본은 윤곽 밝기를 38→125로 올렸다.
+
+```
+A small EMPTY healing potion bottle icon for a dark top-down fantasy action game HUD.
+The bottle is drawn as an OUTLINE ONLY: a bright light-grey glass rim, a short neck, a cork stopper, and a metal collar.
+IMPORTANT: the entire inside of the glass must be a fully transparent CUT-OUT — pure alpha 0, not white, not grey, not tinted glass, not frosted. The game draws the red charge fill BEHIND the bottle and it must show through.
+No liquid, no half-filled potion, no red fluid, no glowing contents, no colored fill, no shading inside the glass.
+The outline must be bright enough to read against a dark background at 26 pixels wide.
+Centered on transparent background, no floor, no shadow, no text, no watermark.
+```
+
+병 안쪽 폭은 `PlayScene`이 **스프라이트를 행마다 훑어서** 잰다(`potionBodySpans`).
+숫자를 손으로 적어 두면 아트를 다시 뽑을 때마다 다시 맞춰야 하고, 실제로 폭을 고정한
+사각형으로 채웠을 때 병이 좁아지는 목과 바닥에서 액체가 유리 밖으로 삐져나왔다.
+
 **열쇠** — 봉인된 문을 여는 두 개
 
 윗길과 아랫길에서 하나씩 나온다. **한 벌로 읽혀야 한다.**
@@ -590,6 +619,7 @@ model=gpt-image-1  size=1024x1024  background=transparent  output_format=png  n=
 | `enemy-boss-glutton.png` | gpt-image-1 | 2026-08-10 | 이 문서 `아랫길 보스 굴의 포식자` 항목 | 없음 |
 | `npc-keeper.png` | gpt-image-1 | 2026-08-03 | 이 문서 `마을 관리인 NPC` 항목 | 없음 |
 | `drop-item.png` | gpt-image-1 | 2026-08-03 | 이 문서 `바닥 드랍 아이템` 항목 | 없음 |
+| `potion.png` | gpt-image-1 | 2026-08-10 (안쪽 뚫린 판으로 재생성) | 이 문서 `HUD 충전형 물약` 항목 | 알파 60 미만 제거 후 크롭, 윤곽 밝기 38→125. 실제 충전량은 코드가 병 뒤에 표시 |
 | `key-upper.png` | gpt-image-1 | 2026-08-10 | 이 문서 `열쇠` 항목 | 없음 |
 | `key-lower.png` | **`key-upper.png`에서 파생** | 2026-08-10 | 이 문서 `열쇠` 항목 (색조만 이동) | 없음 |
 | `bolt-sword.png` | gpt-image-1 | 2026-08-03 | 이 문서 `투사체` 항목, 색 `#c9d1e8` | 없음 |

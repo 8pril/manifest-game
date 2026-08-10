@@ -18,19 +18,35 @@ export interface StatusRule {
 }
 
 /**
- * 원안 수치:
- *  - 벌어진 상처: 명중 시 1스택, 5스택 도달 시 추가피해 후 초기화, 5초 지속
- *  - 약점 노출  : 명중 시 30% 확률, 받는 피해 10% 증가, 5초 지속
- *  - 낙인       : 명중 시 7% 확률로 부착(5초). 부착된 적 공격 시 제거되며
+ * 기획 수치 (2026-08-10 개정):
+ *  - 벌어진 상처: 검 명중 시 1스택, 5스택 도달 시 추가피해 후 초기화.
+ *                 **스택은 만료되지 않는다.** 적이 죽거나 소모될 때까지 남는다.
+ *  - 약점 노출  : 활 명중 시 30% 확률, 받는 피해 10% 증가, 3초 지속
+ *  - 낙인       : 비전 명중 시 7% 확률로 부착(5초). 부착된 적 공격 시 제거되며
  *                 플레이어가 '비전 흐름'(비전 피해 25% 증폭, 5초) 획득
- *  - 균열       : 명중 시 10% 확률로 기절 2초. 한번 기절한 적은 7초간 재기절 불가
+ *  - 균열       : 방패 명중 시 10% 확률로 부여(3초). **균열이 기절(2초)을 유발한다.**
+ *                 한번 균열로 기절한 적은 7초간 재기절 불가
+ *
+ * 개정 전에는 상처 5초, 약점 5초였고 **균열과 기절이 같은 것**이었다(둘 다 2초).
+ * 지금은 균열이 기절보다 1초 더 남는다. 기절이 풀린 뒤에도 균열은 붙어 있으므로,
+ * `균열 공명`(균열 대상 피해 50% 증폭)이 적이 다시 움직이기 시작한 1초 동안에도 산다.
  */
 export const STATUS_RULES: Record<StatusKind, StatusRule> = {
-  wound: { label: '벌어진 상처', chance: 1, duration: 5, maxStacks: 5 },
-  exposed: { label: '약점 노출', chance: 0.3, duration: 5, maxStacks: 1 },
+  // 만료 검사가 `remaining <= 0`이라 무한대를 넣으면 그대로 만료에서 빠진다.
+  // 상처만 예외로 두는 분기를 `tickStatuses`에 넣는 것보다 규칙 표에 적는 편이 낫다.
+  wound: { label: '벌어진 상처', chance: 1, duration: Number.POSITIVE_INFINITY, maxStacks: 5 },
+  exposed: { label: '약점 노출', chance: 0.3, duration: 3, maxStacks: 1 },
   brand: { label: '낙인', chance: 0.07, duration: 5, maxStacks: 1 },
-  fracture: { label: '균열', chance: 0.1, duration: 2, maxStacks: 1 },
+  fracture: { label: '균열', chance: 0.1, duration: 3, maxStacks: 1 },
 };
+
+/**
+ * 균열이 유발하는 기절의 길이.
+ *
+ * 균열 지속(3초)보다 짧다. **균열과 기절은 다른 것이다.** 예전에는 균열이 붙어 있는
+ * 동안이 곧 기절이라 둘을 나눌 수 없었다.
+ */
+export const STUN_DURATION = 2;
 
 /** 벌어진 상처가 최대 중첩에 도달했을 때 터지는 추가 피해. */
 export const WOUND_BURST_DAMAGE = 90;
@@ -65,10 +81,12 @@ export interface StatusHost {
   statuses: StatusInstance[];
   /** 상태별 재부여 면역 남은 시간(초). */
   immunity: Partial<Record<StatusKind, number>>;
+  /** 남은 기절 시간(초). 균열이 걸릴 때 채워지고 균열보다 먼저 끝난다. */
+  stun: number;
 }
 
 export function createStatusHost(): StatusHost {
-  return { statuses: [], immunity: {} };
+  return { statuses: [], immunity: {}, stun: 0 };
 }
 
 export function findStatus(host: StatusHost, kind: StatusKind): StatusInstance | undefined {
@@ -105,7 +123,10 @@ export function applyStatus(
   const existing = findStatus(host, kind);
   if (!existing) {
     host.statuses.push({ kind, stacks: 1, remaining: rule.duration });
-    if (kind === 'fracture') host.immunity.fracture = FRACTURE_IMMUNITY;
+    if (kind === 'fracture') {
+      host.stun = STUN_DURATION;
+      host.immunity.fracture = FRACTURE_IMMUNITY;
+    }
     return { applied: true, burst: false };
   }
 
@@ -130,6 +151,8 @@ export function removeStatus(host: StatusHost, kind: StatusKind): void {
 
 /** 시간을 진행시켜 만료된 상태와 면역을 정리한다. */
 export function tickStatuses(host: StatusHost, deltaSeconds: number): void {
+  host.stun = Math.max(0, host.stun - deltaSeconds);
+
   for (let i = host.statuses.length - 1; i >= 0; i--) {
     host.statuses[i].remaining -= deltaSeconds;
     if (host.statuses[i].remaining <= 0) host.statuses.splice(i, 1);
@@ -147,9 +170,14 @@ export function incomingDamageMultiplier(host: StatusHost): number {
   return hasStatus(host, 'exposed') ? 1 + EXPOSED_DAMAGE_INCREASE : 1;
 }
 
-/** 기절 상태인지. 기절한 적은 움직이지 않는다. */
+/**
+ * 기절 상태인지. 기절한 적은 움직이지 않는다.
+ *
+ * **균열이 붙어 있는지가 아니라 기절 시계를 본다.** 균열이 기절보다 1초 더 남으므로
+ * 균열 유무로 판정하면 적이 1초 더 굳는다.
+ */
 export function isStunned(host: StatusHost): boolean {
-  return hasStatus(host, 'fracture');
+  return host.stun > 0;
 }
 
 /**

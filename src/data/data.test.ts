@@ -222,6 +222,7 @@ describe('무기 데이터 무결성', () => {
     expect(deliveryOf(annihilation)).toBe('area');
     expect(deliveryOf(fractureWave)).toBe('area');
     expect(attackIntervalFor(sword, annihilation)).toBe(sword.basicSkillIntervals?.annihilation);
+    expect(attackIntervalFor(sword, annihilation)).toBe(750);
     expect(attackIntervalFor(shield, fractureWave)).toBe(shield.basicSkillIntervals?.['fracture-wave']);
     expect(attackIntervalFor(sword, annihilation)).toBeGreaterThan(sword.cooldown);
     expect(attackIntervalFor(shield, fractureWave)).toBeGreaterThan(shield.cooldown);

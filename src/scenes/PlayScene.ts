@@ -44,6 +44,7 @@ import {
   consumeBrand,
   incomingDamageMultiplier,
   hasStatus,
+  findStatus,
   STATUS_RULES,
   WOUND_BURST_DAMAGE,
   consumeWound,
@@ -52,6 +53,7 @@ import {
   ARCANE_FLOW_DURATION,
   EXPOSED_DAMAGE_INCREASE,
   FRACTURE_IMMUNITY,
+  STUN_DURATION,
   type StatusKind,
 } from '@/engine/status';
 import {
@@ -433,6 +435,69 @@ const UPPER_BRANCH_ROOM_INDEX = 3;
 const LOWER_BRANCH_ROOM_INDEX = 4;
 const SEALED_ROOM_INDEX = 5;
 
+/**
+ * 전체 지도의 배치.
+ *
+ * **방의 실제 문 위치를 그대로 그린다.** 갈림길 허브는 위·아래·오른쪽 세 방향에 문이
+ * 있으므로 지도에서도 위·아래는 허브와 **같은 x**에, 봉인된 문은 오른쪽에 둔다.
+ * 보기 좋으라고 대각선으로 벌리면 지도와 실제 방이 어긋나 길을 잘못 찾게 된다.
+ */
+/**
+ * HUD 물약 아이콘 규격.
+ *
+ * 몸통 비율은 `public/sprites/potion.png`를 실측해 얻었다(몸통이 세로 0.38~0.97,
+ * 폭은 아이콘의 0.72). 아트를 다시 뽑으면 이 셋만 다시 재면 된다.
+ */
+const POTION_ICON_W = 16;
+const POTION_ICON_H = 26;
+const POTION_LIQUID_COLOR = 0xc92f46;
+/** HUD 물약 아이콘의 중심. 만드는 곳과 갱신하는 곳이 같은 값을 봐야 액체가 병에 맞는다. */
+/**
+ * 왼쪽 위 상태 표시의 배치.
+ *
+ * 예전에는 430×126짜리 반투명 판을 깔고 그 안에 다섯 줄을 넣었다. 화면 왼쪽 위가
+ * 통째로 덮여서 그쪽에서 다가오는 적이 판 뒤에 숨었다. **판은 정보가 아니라 배경이라
+ * 가려도 되는 것이 아니었다.**
+ *
+ * 판을 없애고 글자마다 어두운 외곽선을 줬다. 가려지는 넓이가 판 넓이에서 글자 넓이로
+ * 줄고, 밝은 바닥 위에서도 읽힌다. 오른쪽 위 조작 힌트가 이미 이 방식이라 표현도
+ * 화면 안에서 일관된다. 가로도 430에서 200으로 줄여 한 칸에 세로로 쌓았다.
+ */
+const HUD_X = 24;
+const HUD_BAR_W = 150;
+/**
+ * 막대 오른쪽 글자 기둥과 표시 전체의 오른쪽 끝.
+ *
+ * 숫자를 막대 **위에** 겹쳐 찍어 봤는데, 막대가 줄면 글자 밑이 초록에서 어두운 바탕으로
+ * 바뀌어 어느 쪽에서도 읽히게 하려면 글자에 테두리를 둘러야 했다. 테두리가 보기 싫으면
+ * 겹치기를 포기하는 게 맞다. 막대를 200에서 150으로 줄이고 남은 자리에 숫자를 뺐다.
+ */
+const HUD_LABEL_X = HUD_X + HUD_BAR_W + 10;
+const HUD_W = 246;
+/**
+ * 줄의 세로 위치.
+ *
+ * **보호막 줄은 없을 때가 더 많다.** 방패를 들지 않으면 통째로 숨는데, 자리를 고정해
+ * 두면 그 자리가 빈 구멍으로 남아 위아래가 따로 노는 것처럼 보인다. 숨을 때는
+ * 아래 줄들이 `HUD_ROW_GAP`만큼 올라온다.
+ */
+const HUD_HP_Y = 28;
+const HUD_SHIELD_Y = 48;
+const HUD_POTION_Y = 70;
+const HUD_ROOM_Y = 100;
+const HUD_HANDS_Y = 118;
+/**
+ * 보호막 줄이 숨었을 때 아래가 올라오는 양.
+ *
+ * 두 줄의 간격(22)이 아니라 **보호막 막대가 차지하던 세로(10)와 그 아래 틈(4)**이다.
+ * 위 틈(8)은 어차피 다음 줄에 필요하다. 22를 그대로 올리면 물약 아이콘이 다른 줄보다
+ * 두 배 높아서(26) 체력 막대에 그대로 붙는다. 이 값이면 체력↔물약 간격이 보호막이
+ * 있을 때의 체력↔보호막 간격과 같아진다.
+ */
+const HUD_ROW_GAP = 14;
+/** 병 아이콘의 중심 x. 막대 왼쪽 끝과 병 왼쪽 끝이 맞아야 줄들이 한 기둥으로 선다. */
+const POTION_ICON_X = HUD_X + POTION_ICON_W / 2;
+
 const WORLD_MAP_NODES: readonly WorldMapNode[] = [
   { kind: 'room', roomIndex: 0, x: 185, y: 250 },
   { kind: 'room', roomIndex: 1, x: 315, y: 250 },
@@ -476,14 +541,22 @@ export class PlayScene extends Phaser.Scene {
   /** 적이 쏜 투사체. 플레이어 투사체와 충돌 대상이 반대라 따로 관리한다. */
   private enemyShots: { state: Projectile; view: Phaser.GameObjects.Arc | Phaser.GameObjects.Sprite; damage: number }[] = [];
 
-  private hud!: Phaser.GameObjects.Text;
+  /** 보호막 줄이 숨었을 때 아래 줄들이 올라오는 양. `refreshHud`가 정한다. */
+  private hudRowShift = 0;
+  private hpText!: Phaser.GameObjects.Text;
+  private shieldText!: Phaser.GameObjects.Text;
+  private roomText!: Phaser.GameObjects.Text;
+  private statsText!: Phaser.GameObjects.Text;
+  private handsText!: Phaser.GameObjects.Text;
+  private hudNotice!: Phaser.GameObjects.Text;
   private hpBarFill!: Phaser.GameObjects.Rectangle;
   private shieldBarBack!: Phaser.GameObjects.Rectangle;
   private shieldBarFill!: Phaser.GameObjects.Rectangle;
   private statusLegend!: Phaser.GameObjects.Container;
-  private potionBottleBack!: Phaser.GameObjects.Rectangle;
-  private potionBottleFill!: Phaser.GameObjects.Rectangle;
-  private potionBottleNeck!: Phaser.GameObjects.Rectangle;
+  private potionBottleFrame!: ShapeOrSprite;
+  private potionLiquid!: Phaser.GameObjects.Graphics;
+  /** 병 안쪽 폭을 스프라이트에서 한 번 재서 캐시한다. */
+  private potionSpanCache: readonly { y: number; half: number }[] | null = null;
   private potionText!: Phaser.GameObjects.Text;
   private comboBadges!: { left: ComboBadge; right: ComboBadge };
   /** 콤보가 찼을 때 플레이어 주위에 도는 링. 손마다 하나씩. */
@@ -1832,16 +1905,27 @@ export class PlayScene extends Phaser.Scene {
       state: enemy,
       view: this.spriteOrShape(ENEMY_SPRITE[enemy.kind], enemy.x, enemy.y, stats.radius * 2, stats.color),
       hpBar: this.add.rectangle(enemy.x, enemy.y - stats.radius - 9, stats.radius * 2, 4, 0x6ee7a8).setDepth(6),
-      statusDots: STATUS_ORDER.map((status, index) => this.statusMark(enemy.x + (index - 1.5) * 13, enemy.y - stats.radius - 20, status)),
+      statusDots: STATUS_ORDER.map((status, index) => this.statusMark(enemy.x + (index - 1.5) * 15, enemy.y - stats.radius - 20, status)),
     };
   }
 
   private statusMark(x: number, y: number, status: StatusKind): Phaser.GameObjects.Container {
     const badge = this.add
-      .circle(0, 0, 6, STATUS_COLORS[status], 0.95)
+      .circle(0, 0, status === 'wound' ? 8 : 6, STATUS_COLORS[status], 0.95)
       .setStrokeStyle(2, 0x10131d, 0.95);
+    const children: Phaser.GameObjects.GameObject[] = [badge];
+    const container = this.add.container(x, y, children).setDepth(7).setVisible(false);
 
-    return this.add.container(x, y, [badge]).setDepth(7).setVisible(false);
+    if (status === 'wound') {
+      const stackText = this.add
+        .text(0, 0, '', { fontSize: '9px', color: '#ffffff', fontStyle: 'bold' })
+        .setOrigin(0.5)
+        .setResolution(2);
+      container.add(stackText);
+      container.setData('stackText', stackText);
+    }
+
+    return container;
   }
 
   private cloneEnemy(enemy: Enemy): Enemy {
@@ -2125,6 +2209,17 @@ export class PlayScene extends Phaser.Scene {
       : null;
   }
 
+  /** 위·아래 분기에서 시험장으로 돌아올 때 통과한 문 바로 안쪽에 선다. */
+  private branchReturnSpawn(fromRoomIndex: number): { x: number; y: number } | undefined {
+    const trial = ROOMS[TRIAL_ROOM_INDEX];
+    if (!trial) return undefined;
+
+    const inset = WALL + PLAYER_RADIUS + 32;
+    if (fromRoomIndex === UPPER_BRANCH_ROOM_INDEX) return { x: trial.width / 2, y: inset };
+    if (fromRoomIndex === LOWER_BRANCH_ROOM_INDEX) return { x: trial.width / 2, y: trial.height - inset };
+    return undefined;
+  }
+
   /** 열린 출구에 닿으면 다음 방으로 넘어간다. */
   private checkExitReached(): void {
     if (this.run.phase !== 'combat') return;
@@ -2140,12 +2235,14 @@ export class PlayScene extends Phaser.Scene {
     if (!near) return;
 
     this.exitOpen = false;
+    const fromRoomIndex = this.run.roomIndex;
     const returnTarget = this.branchReturnTarget();
+    const returnSpawn = returnTarget === TRIAL_ROOM_INDEX ? this.branchReturnSpawn(fromRoomIndex) : undefined;
     this.run = returnTarget === null ? clearRoom(this.run) : clearRoomTo(this.run, returnTarget);
     this.saveCurrentProgress();
 
     if (this.run.phase === 'town') this.enterTownRoom();
-    else this.enterRoom();
+    else this.enterRoom(undefined, returnSpawn);
 
     if (DEBUG_ENABLED) this.publishDebug();
   }
@@ -2785,8 +2882,13 @@ export class PlayScene extends Phaser.Scene {
 
     for (const [index, kind] of STATUS_ORDER.entries()) {
       const dot = entity.statusDots[index];
-      dot.setVisible(hasStatus(enemy, kind));
-      dot.setPosition(enemy.x + (index - 1.5) * 13, enemy.y - radius - 20);
+      const status = findStatus(enemy, kind);
+      dot.setVisible(Boolean(status));
+      dot.setPosition(enemy.x + (index - 1.5) * 15, enemy.y - radius - 20);
+      if (kind === 'wound') {
+        const stackText = dot.getData('stackText') as Phaser.GameObjects.Text | undefined;
+        stackText?.setText(status ? String(status.stacks) : '');
+      }
     }
   }
 
@@ -3255,31 +3357,66 @@ export class PlayScene extends Phaser.Scene {
 
   // ───────────────────────── HUD와 오버레이
 
-  private buildHud(): void {
-    const barBack = this.add.rectangle(screenX(24), screenY(26), 240, 14, 0x2a2f42).setOrigin(0, 0.5).setDepth(19);
-    this.hpBarFill = this.add.rectangle(screenX(24), screenY(26), 240, 14, 0x6ee7a8).setOrigin(0, 0.5).setDepth(20);
-    this.shieldBarBack = this.add.rectangle(screenX(24), screenY(44), 240, 10, 0x20263a).setOrigin(0, 0.5).setDepth(19);
-    this.shieldBarFill = this.add.rectangle(screenX(24), screenY(44), 240, 10, 0x7dd3fc).setOrigin(0, 0.5).setDepth(20);
-    this.hud = this.add
-      .text(screenX(24), screenY(58), '', { fontSize: '14px', color: COLORS.text, lineSpacing: 3 })
-      .setDepth(20);
-    this.statusLegend = this.createStatusLegend(screenX(VIEW_WIDTH - 560), screenY(82));
-    this.potionBottleBack = this.add
-      .rectangle(screenX(36), screenY(152), 24, 34, 0x10141f, 0.82)
-      .setStrokeStyle(2, 0x4a2230, 0.95)
-      .setDepth(19);
-    this.potionBottleFill = this.add
-      .rectangle(screenX(36), screenY(166), 18, 28, 0xff4054, 0.86)
-      .setOrigin(0.5, 1)
-      .setDepth(20);
-    this.potionBottleNeck = this.add
-      .rectangle(screenX(36), screenY(132), 12, 10, 0x10141f, 0.86)
-      .setStrokeStyle(2, 0x4a2230, 0.95)
-      .setDepth(19);
-    this.potionText = this.add
-      .text(screenX(58), screenY(148), '', { fontSize: '13px', color: COLORS.textDim, fontStyle: 'bold' })
+  /**
+   * 판 없이 바닥 위에 얹는 글자.
+   *
+   * **테두리는 두르지 않는다.** 획이 서로 먹어 글자가 뭉쳐 보인다. 대신 옅은 그림자만
+   * 깔아 밝은 타일 위에서 묻히지 않게 한다.
+   */
+  private hudText(x: number, y: number, fontSize: string, color: string): Phaser.GameObjects.Text {
+    return this.add
+      .text(x, y, '', { fontSize, color, fontStyle: 'bold' })
+      .setShadow(1, 1, '#05060a', 4, false, true)
       .setOrigin(0, 0.5)
       .setDepth(20);
+  }
+
+  private buildHud(): void {
+    const barBack = this.add
+      .rectangle(screenX(HUD_X), screenY(HUD_HP_Y), HUD_BAR_W, 14, 0x161b28, 0.92)
+      .setOrigin(0, 0.5)
+      .setStrokeStyle(1, 0x05060a, 0.9)
+      .setDepth(18);
+    this.hpBarFill = this.add
+      .rectangle(screenX(HUD_X), screenY(HUD_HP_Y), HUD_BAR_W, 14, 0x6ee7a8)
+      .setOrigin(0, 0.5)
+      .setDepth(19);
+    this.hpText = this.hudText(screenX(HUD_LABEL_X), screenY(HUD_HP_Y), '12px', COLORS.text);
+    this.shieldBarBack = this.add
+      .rectangle(screenX(HUD_X), screenY(HUD_SHIELD_Y), HUD_BAR_W, 10, 0x161b28, 0.92)
+      .setOrigin(0, 0.5)
+      .setStrokeStyle(1, 0x05060a, 0.9)
+      .setDepth(18);
+    this.shieldBarFill = this.add
+      .rectangle(screenX(HUD_X), screenY(HUD_SHIELD_Y), HUD_BAR_W, 10, 0x7dd3fc)
+      .setOrigin(0, 0.5)
+      .setDepth(19);
+    this.shieldText = this.hudText(screenX(HUD_LABEL_X), screenY(HUD_SHIELD_Y), '11px', '#d8f3ff');
+    // **전투 수치는 물약 줄의 오른쪽 끝에 붙인다.** 방 이름과 한 줄에 두면 둘 다
+    // 100 남짓이라 가운데에서 서로 닿아 한 덩어리로 읽혔다. 물약 줄은 오른쪽이 비어 있다.
+    this.statsText = this.hudText(screenX(HUD_X + HUD_W), screenY(HUD_POTION_Y), '12px', COLORS.textDim)
+      .setOrigin(1, 0.5);
+    this.roomText = this.hudText(screenX(HUD_X), screenY(HUD_ROOM_Y), '12px', COLORS.text);
+    this.handsText = this.hudText(screenX(HUD_X), screenY(HUD_HANDS_Y), '12px', COLORS.textDim);
+    // **출구 안내는 왼쪽 구석에서 꺼낸다.** 방을 정리한 순간에만 뜨는 알림이라
+    // 상태 표시 틈에 끼워 두면 놓친다. 콤보 배지 위, 화면 한가운데에 띄운다.
+    this.hudNotice = this.hudText(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 106), '15px', COLORS.accentText)
+      .setOrigin(0.5, 0.5);
+    this.statusLegend = this.createStatusLegend(screenX(VIEW_WIDTH - 560), screenY(82));
+    // **액체가 병보다 뒤에 있어야 한다.** 병 그림은 안쪽이 뚫린 테두리라, 뒤에 깔면
+    // 유리 안에 담긴 것처럼 보이고 테두리와 코르크가 그대로 살아난다. 위에 덮으면
+    // 아트를 쓰고도 아트가 안 보인다.
+    this.potionLiquid = this.add.graphics().setDepth(20);
+    this.potionBottleFrame = this.textures.exists('potion')
+      ? this.add
+          .sprite(screenX(POTION_ICON_X), screenY(HUD_POTION_Y), 'potion')
+          .setDisplaySize(POTION_ICON_W, POTION_ICON_H)
+          .setDepth(21)
+      : this.add
+          .rectangle(screenX(POTION_ICON_X), screenY(HUD_POTION_Y), POTION_ICON_W, POTION_ICON_H, 0x10141f, 0.82)
+          .setStrokeStyle(2, 0x8ea4ff, 0.95)
+          .setDepth(21);
+    this.potionText = this.hudText(screenX(POTION_ICON_X + 16), screenY(HUD_POTION_Y), '11px', COLORS.textDim);
     this.comboBadges = {
       left: this.createComboBadge(screenX(VIEW_WIDTH / 2 - 142), screenY(VIEW_HEIGHT - 54), '왼손'),
       right: this.createComboBadge(screenX(VIEW_WIDTH / 2 + 142), screenY(VIEW_HEIGHT - 54), '오른손'),
@@ -3302,14 +3439,18 @@ export class PlayScene extends Phaser.Scene {
     // 카메라가 방을 따라 움직여도 HUD는 화면에 붙어 있어야 한다.
     pinToScreen(
       barBack,
+      this.hpText,
       this.hpBarFill,
+      this.shieldText,
       this.shieldBarBack,
       this.shieldBarFill,
-      this.hud,
+      this.roomText,
+      this.statsText,
+      this.handsText,
+      this.hudNotice,
       this.statusLegend,
-      this.potionBottleBack,
-      this.potionBottleFill,
-      this.potionBottleNeck,
+      this.potionBottleFrame,
+      this.potionLiquid,
       this.potionText,
       hint,
       ...this.comboBadgeObjects(this.comboBadges.left),
@@ -3458,23 +3599,29 @@ export class PlayScene extends Phaser.Scene {
     const inTown = this.run.phase === 'town';
     const shieldVisible = hasActiveShield(this.run);
     const shieldActive = this.shieldProtectionActive();
-    this.hpBarFill.width = (240 * this.run.hp) / this.run.maxHp;
+    this.hpText.setText(`체력 ${Math.ceil(this.run.hp)} / ${this.run.maxHp}`);
+    this.hpBarFill.width = (HUD_BAR_W * this.run.hp) / this.run.maxHp;
+    this.shieldText
+      .setText(`보호막 ${Math.ceil(this.run.shieldEnergy)} / ${SHIELD_ENERGY_MAX}`)
+      .setVisible(shieldVisible)
+      .setAlpha(shieldActive ? 1 : 0.6);
     this.shieldBarBack.setVisible(shieldVisible).setAlpha(shieldActive ? 0.95 : 0.35);
-    this.shieldBarFill.width = (240 * this.run.shieldEnergy) / SHIELD_ENERGY_MAX;
+    this.shieldBarFill.width = (HUD_BAR_W * this.run.shieldEnergy) / SHIELD_ENERGY_MAX;
     this.shieldBarFill.setVisible(shieldVisible).setAlpha(shieldActive ? 1 : 0.45);
 
+    // 보호막 줄이 없으면 그 자리를 비워 두지 않고 아래를 끌어올린다.
+    this.hudRowShift = shieldVisible ? 0 : HUD_ROW_GAP;
+    this.statsText.y = screenY(HUD_POTION_Y - this.hudRowShift);
+    this.roomText.y = screenY(HUD_ROOM_Y - this.hudRowShift);
+    this.handsText.y = screenY(HUD_HANDS_Y - this.hudRowShift);
+
     const hands = describeByHand(this.run.loadout);
-    this.hud.setText(
-      [
-        `체력 ${Math.ceil(this.run.hp)} / ${this.run.maxHp}`,
-        ...(shieldVisible ? [`보호막 ${Math.ceil(this.run.shieldEnergy)} / ${SHIELD_ENERGY_MAX}`] : []),
-        inTown ? `마을   NPC 근처 F 대화   오른쪽 출구로 이동` : `${wave?.label ?? '-'} (${this.run.roomIndex + 1}/${TOTAL_ROOMS})   남은 적 ${remaining}   처치 ${this.run.kills}`,
-        ...hands.map(
-          (h) => `${h.hand} ${h.weapon}` + (h.lines.length ? `   ${h.lines.join('  ·  ')}` : ''),
-        ),
-        ...(this.exitOpen && !inTown ? ['방을 정리했다. 출구로 이동 →'] : []),
-      ].join('\n'),
-    );
+    this.roomText.setText(inTown ? '마을 · F 관리인 대화' : `${wave?.label ?? '-'}  ${this.run.roomIndex + 1}/${TOTAL_ROOMS}`);
+    this.statsText.setText(inTown ? '→ 오른쪽 출구' : `적 ${remaining}  ·  처치 ${this.run.kills}`);
+    this.handsText.setText(hands.map((hand) => `${hand.hand} ${hand.weapon}`).join('  ·  '));
+    this.hudNotice
+      .setText(this.exitOpen && !inTown ? '방 정리 완료 · 출구로 이동 →' : '')
+      .setVisible(this.exitOpen && !inTown);
     this.updateStatusLegend();
     this.updatePotionHud();
     this.updateComboText();
@@ -3487,16 +3634,98 @@ export class PlayScene extends Phaser.Scene {
 
   private updatePotionHud(): void {
     const fillRatio = Phaser.Math.Clamp(this.run.potionCharge / POTION_MAX_CHARGE, 0, 1);
-    const x = screenX(36);
-    const bottom = screenY(82 + this.hud.height + 34);
-    const fillHeight = 28 * fillRatio;
+    // 아이콘 중심. 병과 액체가 같은 기준점을 써야 액체가 유리 안에 머문다.
+    const x = screenX(POTION_ICON_X);
+    const centerY = screenY(HUD_POTION_Y - this.hudRowShift);
 
-    this.potionBottleBack.setPosition(x, bottom - 14);
-    this.potionBottleNeck.setPosition(x, bottom - 34);
-    this.potionBottleFill.setPosition(x, bottom).setSize(18, fillHeight);
+    this.potionBottleFrame.setPosition(x, centerY);
+    this.drawPotionLiquid(x, centerY, fillRatio);
     this.potionText
-      .setPosition(screenX(58), bottom - 15)
-      .setText(`Q 물약 ${Math.floor(this.run.potionCharge)} / ${POTION_MAX_CHARGE}`);
+      .setPosition(x + POTION_ICON_W / 2 + 9, centerY)
+      .setText(`Q  ${Math.floor(this.run.potionCharge)} / ${POTION_MAX_CHARGE}`);
+  }
+
+  /**
+   * 병 안쪽의 가로 폭을 **스프라이트에서 직접 읽는다.**
+   *
+   * 병은 위아래로 좁아지므로 폭이 고정된 사각형으로 채우면 목과 바닥에서 유리 밖으로
+   * 삐져나온다. 실제로 100%와 10% 구간에서 넘쳤다. 손으로 병 윤곽을 따라 좌표를 적는
+   * 방법도 있지만, 그러면 아트를 다시 뽑을 때마다 다시 맞춰야 한다.
+   *
+   * 그림에서 재면 아트가 바뀌어도 저절로 따라간다. 한 번 재고 캐시한다.
+   */
+  private potionBodySpans(): readonly { y: number; half: number }[] {
+    if (this.potionSpanCache) return this.potionSpanCache;
+
+    const spans: { y: number; half: number }[] = [];
+    const texture = this.textures.get('potion');
+    const source = texture?.getSourceImage() as HTMLImageElement | HTMLCanvasElement | undefined;
+    if (source) {
+      const canvas = this.textures.createCanvas(`potion-probe-${Date.now()}`, source.width, source.height);
+      if (canvas) {
+        canvas.draw(0, 0, source);
+        for (let row = 0; row < source.height; row++) {
+          let left = -1;
+          let right = -1;
+          for (let col = 0; col < source.width; col++) {
+            if (canvas.getPixel(col, row).alpha > 120) {
+              if (left < 0) left = col;
+              right = col;
+            }
+          }
+          if (left < 0) continue;
+          const width = right - left;
+          // 코르크와 목은 액체가 차지 않는다. 몸통으로 볼 만큼 넓은 행만 남긴다.
+          if (width < source.width * 0.55) continue;
+          spans.push({
+            y: (row / source.height - 0.5) * POTION_ICON_H,
+            half: (width / 2 / source.width) * POTION_ICON_W,
+          });
+        }
+        canvas.destroy();
+      }
+    }
+    this.potionSpanCache = spans;
+    return spans;
+  }
+
+  /**
+   * 병 안에 찬 액체.
+   *
+   * 병 그림의 안쪽이 뚫려 있어 **뒤에 깔기만 하면** 유리 안에 담긴 것처럼 보인다.
+   * 위에 덮으면 아트를 쓰고도 테두리와 코르크가 가려진다.
+   */
+  private drawPotionLiquid(x: number, y: number, fillRatio: number): void {
+    this.potionLiquid.clear().setPosition(0, 0);
+    if (fillRatio <= 0) return;
+
+    const spans = this.potionBodySpans();
+    if (!spans.length) {
+      // 스프라이트가 없는 환경. 폴백 사각형에 맞춰 단순하게 채운다.
+      const half = (POTION_ICON_W * 0.72) / 2;
+      const bottom = y + POTION_ICON_H / 2;
+      const height = POTION_ICON_H * fillRatio;
+      this.potionLiquid.fillStyle(POTION_LIQUID_COLOR, 0.92).fillRect(x - half, bottom - height, half * 2, height);
+      return;
+    }
+
+    const top = spans[0].y;
+    const bottom = spans[spans.length - 1].y;
+    const surface = bottom - (bottom - top) * fillRatio;
+
+    this.potionLiquid.fillStyle(POTION_LIQUID_COLOR, 0.92);
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
+      if (span.y < surface) continue;
+      const next = spans[i + 1]?.y ?? span.y + 1;
+      this.potionLiquid.fillRect(x - span.half, y + span.y, span.half * 2, next - span.y + 0.5);
+    }
+    if (fillRatio < 1) {
+      const at = spans.find((span) => span.y >= surface) ?? spans[spans.length - 1];
+      this.potionLiquid
+        .lineStyle(1, 0xff7180, 0.95)
+        .lineBetween(x - at.half, y + surface, x + at.half, y + surface);
+    }
   }
 
   private updateComboText(): void {
@@ -3584,8 +3813,8 @@ export class PlayScene extends Phaser.Scene {
     }
     return [
       '그 장갑은 네가 지나온 싸움을 기억한다.',
-      '먼저 무기 설정에서 전투 중 R링에 띄울 왼손과 오른손 후보를 정해 두어라.',
-      '그다음 기술 설정에서 무기마다 기본스킬을 끼워라. 끼운 순간 평소 치는 공격의 형태가 바뀐다.',
+      '먼저 무기 설정에서 전투 중 R링에 띄울 왼손과 오른손 후보 무기를 정해 두어라.',
+      '기술 설정에서 각 무기별 스킬을 장착할 수 있다. 장착된 스킬로 인해 기본 공격의 형태가 달라진다.',
     ].join('\n');
   }
 
@@ -3904,9 +4133,13 @@ export class PlayScene extends Phaser.Scene {
    * 부분 갱신을 하지 않는 이유는 이 패널이 서로 물려 있기 때문이다. 칸을 하나
    * 채우면 인벤토리에서 그 항목이 빠지고, 점멸 대상이 바뀌고, 다른 칸의 후보도
    * 달라진다. 조각마다 갱신 경로를 만들면 어긋나는 곳이 생긴다.
-   */
+  */
   private renderTown(): void {
+    // 탭·필터 전환은 패널을 통째로 다시 그린다. 기존 오버레이를 닫는 과정에서
+    // 읽기 전용 상태까지 초기화하면 전투 인벤토리가 마을 설정 화면으로 승격된다.
+    const readOnly = this.townReadOnly;
     if (this.overlay) this.closeOverlay();
+    this.townReadOnly = readOnly;
     // 다시 그리면 칸이 새로 만들어져 `pointerout`이 오지 않는다. 남은 설명을 먼저 지운다.
     this.hideTownTip();
 
@@ -4121,7 +4354,9 @@ export class PlayScene extends Phaser.Scene {
     // 하나씩 눌러 보는 것 말고는 알 방법이 없다.
     if (!skill) return `${support.requires.join('·')} 스킬에만 붙는다`;
 
-    const lines: string[] = [`${skill.name}에 붙는다`];
+    const last = skill.name.charCodeAt(skill.name.length - 1) - 0xac00;
+    const conjunction = last >= 0 && last <= 0x2ba3 && last % 28 !== 0 ? '과' : '와';
+    const lines: string[] = [`${skill.name}${conjunction} 연결 가능`];
 
     const before = resolveSkill(skill, []).stats;
     const after = resolveSkill(skill, [support]).stats;
@@ -4167,16 +4402,14 @@ export class PlayScene extends Phaser.Scene {
   /**
    * 항목 설명을 띄운다.
    *
-   * **어느 무기 기준인지가 중요하다.** 채우기를 기다리는 칸이 있으면 그 무기 기준으로,
-   * 없으면 보유한 무기 전부에 대해 보여준다. 같은 보조형스킬도 무기마다 결과가 다르다.
-   *
-   * `scope`는 이미 장착된 칸에 올렸을 때 쓴다. 그 칸의 무기 기준으로만 보여준다.
+   * 보조·연계 스킬은 어디에서 마우스오버해도 전체 호환 관계를 보여준다. 현재 선택한
+   * 슬롯이나 무기 해금 상태에 따라 목록이 달라지면 같은 아이템의 규칙이 상황마다
+   * 다르게 보이기 때문이다.
    */
   private showTownTip(
     item: InventoryItem,
     x: number,
     y: number,
-    scope?: WeaponId,
     avoid?: { x: number; y: number; w: number; h: number },
   ): void {
     this.hideTownTip();
@@ -4221,6 +4454,10 @@ export class PlayScene extends Phaser.Scene {
       support.description,
     ].join('\n');
 
+    const compatibleWeapons = WEAPON_IDS.filter((id) => this.supportEffectFor(id, support) !== notAttachable);
+    const blocks = compatibleWeapons.map((id) => `[${weaponOf(id).name}]\n${this.supportEffectFor(id, support)}`);
+    const body = blocks.length ? blocks.join('\n\n') : '붙일 수 있는 무기가 없다';
+
     const pending = this.townPendingSlot;
 
     // **넣을 수 없는 칸을 눌러둔 상태면 그것부터 말한다.**
@@ -4235,19 +4472,9 @@ export class PlayScene extends Phaser.Scene {
             : item.slot !== pending.slot
               ? `이것은 ${this.slotKindOf(item.slot).label} 스킬이라 ${this.slotKindOf(pending.slot).label} 칸에 안 들어간다`
               : `이것은 ${support.requires.join('·')} 스킬에만 붙어서 이 무기에는 안 들어간다`;
-      this.drawTownTip(`${head}\n\n${reason}`, x, y, false, avoid);
+      this.drawTownTip(`${head}\n\n${body}\n\n[현재 선택]\n${reason}`, x, y, false, avoid);
       return;
     }
-
-    const weapons: WeaponId[] =
-      scope !== undefined
-        ? [scope]
-        : pending !== null && pending.kind === 'support'
-          ? [pending.weapon]
-          : this.run.progress.unlockedWeapons.filter((id) => this.supportEffectFor(id, support) !== notAttachable);
-
-    const blocks = weapons.map((id) => `[${weaponOf(id).name}]\n${this.supportEffectFor(id, support)}`);
-    const body = blocks.length ? blocks.join('\n\n') : '붙일 수 있는 무기가 없다';
     const statusBody = statusBehavior ? `\n\n[필요한 상태]\n${this.statusTipText(statusBehavior.status)}` : '';
 
     this.drawTownTip(`${head}\n\n${body}${statusBody}`, x, y, true, avoid);
@@ -4284,28 +4511,44 @@ export class PlayScene extends Phaser.Scene {
     return [`상태: ${STATUS_RULES[kind].label}`, ...this.statusHelpLines(kind)].join('\n');
   }
 
+  /**
+   * 상태이상 설명.
+   *
+   * 문구는 기획이 적어 준 표현을 그대로 쓴다. 예전에는 첫 줄을 `무기명 + 확률`로
+   * 한 틀에서 찍어냈는데, 기획 표현이 상태마다 다르다(`부여` / `부착`, 괄호 안
+   * 지속시간의 유무). 틀을 억지로 늘리는 대신 상태마다 제 문장을 들고 있게 했다.
+   *
+   * 숫자는 가능한 한 규칙 상수에서 끌어 쓴다. 손으로 적으면 밸런스를 만질 때
+   * 조용히 어긋난다.
+   */
   private statusHelpLines(kind: StatusKind): string[] {
     const rule = STATUS_RULES[kind];
     const chance = rule.chance >= 1 ? '항상' : `${Math.round(rule.chance * 100)}%`;
-    const source = this.statusSourceText(kind, chance);
-    const effects: Record<StatusKind, string[]> = {
+    const lines: Record<StatusKind, string[]> = {
       wound: [
+        this.statusSourceText(kind, chance),
+        '스택이 무한한 지속시간을 가짐',
         `${rule.maxStacks}스택이면 상처 폭발 ${WOUND_BURST_DAMAGE} 피해 후 초기화`,
         `다른 무기로 때리면 스택당 ${WOUND_CONSUME_PER_STACK} 피해를 주고 소모`,
       ],
-      exposed: [`대상이 받는 피해 +${Math.round(EXPOSED_DAMAGE_INCREASE * 100)}%`],
+      exposed: [
+        `활 명중 시 ${chance} 확률로 부여 (${rule.duration}초)`,
+        `대상이 받는 피해 +${Math.round(EXPOSED_DAMAGE_INCREASE * 100)}%`,
+      ],
       brand: [
-        '낙인 대상을 다시 때리면 낙인이 사라진다',
+        `비전 명중 시 ${chance} 확률로 적에게 낙인 부착`,
+        '낙인이 부착된 대상을 다시 공격 시 플레이어가 비전 흐름 획득',
         `비전 흐름: 비전 피해 +${Math.round(ARCANE_FLOW_MORE * 100)}% (${ARCANE_FLOW_DURATION}초)`,
       ],
       fracture: [
-        `기절 ${rule.duration}초`,
-        `${FRACTURE_IMMUNITY}초 동안 재기절 면역`,
+        `방패 공격 명중 시 ${chance} 확률로 적에게 균열 부여 (${rule.duration}초)`,
+        `균열이 적에게 기절을 유발(${STUN_DURATION}초)`,
+        `한번 균열로 인해 기절한 적은 ${FRACTURE_IMMUNITY}초 동안 재기절 면역`,
         '방패 넉백으로 벽에 부딪히면 확정 기절',
         '보스는 기본적으로 기절·넉백 면역',
       ],
     };
-    return [source, ...effects[kind]];
+    return lines[kind];
   }
 
   private statusSourceText(kind: StatusKind, chance: string): string {
@@ -4455,7 +4698,8 @@ export class PlayScene extends Phaser.Scene {
         this.renderTown();
       });
     } else {
-      rect.setAlpha(0.75);
+      // 설명 호버만 남긴다. 클릭과 드롭 대상으로는 등록하지 않는다.
+      rect.setInteractive().setAlpha(0.75);
     }
 
     // **넣고 나서도 설명이 보여야 한다.**
@@ -4465,7 +4709,7 @@ export class PlayScene extends Phaser.Scene {
     // 좌표는 오버레이 컨테이너의 지역 좌표다. 포인터의 월드 좌표를 그대로 넘기면
     // 컨테이너가 카메라에 핀으로 붙어 있어 엉뚱한 곳에 뜬다.
     if (item !== null && item.kind === 'support' && target.kind === 'support') {
-      rect.on('pointerover', () => this.showTownTip(item, x + w + 10, y, target.weapon, { x, y, w, h }));
+      rect.on('pointerover', () => this.showTownTip(item, x + w + 10, y, { x, y, w, h }));
       rect.on('pointerout', () => this.hideTownTip());
     }
 
@@ -4516,6 +4760,8 @@ export class PlayScene extends Phaser.Scene {
 
   /** 칸에 항목을 넣거나(`item`) 비운다(`null`). */
   private applyTownSlot(target: TownSlotTarget, item: InventoryItem | null): void {
+    if (this.townReadOnly) return;
+
     if (target.kind === 'wheel') {
       const weapon = item && item.kind === 'weapon' ? item.id : null;
       // 1번 칸을 바꾸면 손에 드는 무기도 바뀌어야 한다. 마을을 나갈 때까지 미루면
@@ -4597,16 +4843,25 @@ export class PlayScene extends Phaser.Scene {
     const sortY = inv.y + inv.h - 26;
     const sortRect = this.add
       .rectangle(inv.x + inv.w / 2, sortY, 130, 32, 0x141824, 0.96)
-      .setStrokeStyle(1, 0x3a4059, 0.9)
-      .setInteractive({ useHandCursor: true });
-    sortRect.on('pointerdown', () => {
-      this.run = { ...this.run, progress: sortInventory(this.run.progress) };
-      this.saveCurrentProgress();
-      this.renderTown();
-    });
+      .setStrokeStyle(1, 0x3a4059, 0.9);
+    if (!this.townReadOnly) {
+      sortRect.setInteractive({ useHandCursor: true });
+      sortRect.on('pointerdown', () => {
+        this.run = { ...this.run, progress: sortInventory(this.run.progress) };
+        this.saveCurrentProgress();
+        this.renderTown();
+      });
+    } else {
+      sortRect.setAlpha(0.45);
+    }
     container.add(sortRect);
     container.add(
-      this.add.text(inv.x + inv.w / 2, sortY, '자동정렬', { fontSize: '14px', color: COLORS.text }).setOrigin(0.5),
+      this.add
+        .text(inv.x + inv.w / 2, sortY, '자동정렬', {
+          fontSize: '14px',
+          color: this.townReadOnly ? COLORS.textDim : COLORS.text,
+        })
+        .setOrigin(0.5),
     );
   }
 
@@ -4635,8 +4890,9 @@ export class PlayScene extends Phaser.Scene {
 
     const rect = this.add
       .rectangle(x + size / 2, y + size / 2, size, size, 0x161b28, 0.95)
-      .setStrokeStyle(1, 0x2f3648, 0.9)
-      .setInteractive({ useHandCursor: true, draggable: true, dropZone: true });
+      .setStrokeStyle(1, 0x2f3648, 0.9);
+    if (this.townReadOnly) rect.setInteractive();
+    else rect.setInteractive({ useHandCursor: true, draggable: true, dropZone: true });
     rect.setData('cellIndex', index);
     container.add(rect);
 
@@ -4708,6 +4964,7 @@ export class PlayScene extends Phaser.Scene {
     }
 
     rect.on('pointerdown', () => {
+      if (this.townReadOnly) return;
       if (!item) return;
       if (pending === null) return;
       if (!this.townSlotAccepts(pending, item)) {
@@ -4720,7 +4977,7 @@ export class PlayScene extends Phaser.Scene {
     // 올려두면 이 항목이 **그 무기에서** 무엇을 하는지 알려준다.
     // 설명문만으로는 무기마다 다른 결과를 알 수 없다.
     rect.on('pointerover', () => {
-      if (item) this.showTownTip(item, x + size + 10, y, undefined, { x, y, w: size, h: size });
+      if (item) this.showTownTip(item, x + size + 10, y, { x, y, w: size, h: size });
     });
     rect.on('pointerout', () => this.hideTownTip());
     rect.setData('dragParts', parts);
@@ -4734,7 +4991,7 @@ export class PlayScene extends Phaser.Scene {
    */
   private setupTownDragAndDrop(): void {
     this.input.on('dragstart', (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject) => {
-      if (this.overlayKind !== 'town-config') return;
+      if (this.overlayKind !== 'town-config' || this.townReadOnly) return;
       const index = obj.getData('cellIndex');
       if (typeof index === 'number') {
         this.townDragSource = { kind: 'inventory', index };
@@ -4747,7 +5004,7 @@ export class PlayScene extends Phaser.Scene {
     });
 
     this.input.on('drag', (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject, x: number, y: number) => {
-      if (this.overlayKind !== 'town-config') return;
+      if (this.overlayKind !== 'town-config' || this.townReadOnly) return;
       if (this.townDragSource?.kind === 'townSlot') {
         // 장착 슬롯 자체는 dropZone이기도 하다. 원본 사각형을 포인터 아래로 끌고 가면
         // 드롭 순간에 대상 슬롯이 아니라 자기 자신이 잡힐 수 있어, 슬롯끼리 교체가
@@ -4761,12 +5018,12 @@ export class PlayScene extends Phaser.Scene {
     });
 
     this.input.on('drop', (_p: Phaser.Input.Pointer, _obj: Phaser.GameObjects.GameObject, zone: Phaser.GameObjects.GameObject) => {
-      if (this.overlayKind !== 'town-config') return;
+      if (this.overlayKind !== 'town-config' || this.townReadOnly) return;
       this.handleTownDrop(zone);
     });
 
     this.input.on('dragend', (_p: Phaser.Input.Pointer, _obj: Phaser.GameObjects.GameObject, dropped: boolean) => {
-      if (this.overlayKind !== 'town-config') return;
+      if (this.overlayKind !== 'town-config' || this.townReadOnly) return;
       this.townDragSource = null;
       this.destroyTownDragGhost();
       // 놓을 곳이 아니면 원래 자리로 돌아가야 한다. 다시 그리는 것이 가장 확실하다.
@@ -4832,6 +5089,8 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private handleTownDrop(zone: Phaser.GameObjects.GameObject): void {
+    if (this.townReadOnly) return;
+
     const source = this.townDragSource;
     this.townDragSource = null;
     if (source === null) return;
@@ -4871,6 +5130,8 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private handleTownSlotDrop(from: TownSlotTarget, to: TownSlotTarget): void {
+    if (this.townReadOnly) return;
+
     if (this.sameTownSlot(from, to)) {
       this.renderTown();
       return;
@@ -5062,13 +5323,25 @@ export class PlayScene extends Phaser.Scene {
     );
     this.addOverlayCloseButton(container, panel.x + panel.w - 28, panel.y + 30, () => this.closeMap());
 
+    const missing = missingKeys(this.run.progress.ownedKeys);
     for (const [from, to] of WORLD_MAP_LINKS) {
       const a = WORLD_MAP_NODES[from];
       const b = WORLD_MAP_NODES[to];
       const known = this.worldMapNodeKnown(a) || this.worldMapNodeKnown(b);
+      // 봉인된 문으로 가는 길은 열쇠가 다 모이기 전까지 붉게 둔다. 선이 다 같으면
+      // 왜 못 지나가는지 지도만 봐서는 알 수 없다.
+      const sealed =
+        (a.kind === 'room' && a.roomIndex === SEALED_ROOM_INDEX)
+        || (b.kind === 'room' && b.roomIndex === SEALED_ROOM_INDEX);
+      const locked = sealed && missing.length > 0;
       container.add(
         this.add
-          .line(0, 0, panel.x + a.x, panel.y + a.y, panel.x + b.x, panel.y + b.y, known ? 0x4b5874 : 0x2a2f42, known ? 0.85 : 0.45)
+          .line(
+            0, 0,
+            panel.x + a.x, panel.y + a.y, panel.x + b.x, panel.y + b.y,
+            locked ? 0x7a4048 : known ? 0x4b5874 : 0x2a2f42,
+            locked ? 0.9 : known ? 0.85 : 0.45,
+          )
           .setOrigin(0),
       );
     }
@@ -5079,7 +5352,7 @@ export class PlayScene extends Phaser.Scene {
 
     container.add(
       this.add
-        .text(panel.x + 28, panel.y + panel.h - 34, '회색 구역은 아직 가보지 않은 곳이다', {
+        .text(panel.x + 28, panel.y + panel.h - 34, this.worldMapLegend(), {
           fontSize: '14px',
           color: COLORS.textDim,
         })
@@ -5088,6 +5361,12 @@ export class PlayScene extends Phaser.Scene {
 
     this.overlay = container;
     this.overlayKind = 'map';
+  }
+
+  private worldMapLegend(): string {
+    const missing = missingKeys(this.run.progress.ownedKeys);
+    if (!missing.length) return '회색 구역은 아직 가보지 않은 곳이다';
+    return `회색 구역은 아직 가보지 않은 곳이다   ·   붉은 길은 봉인 — ${missing.map((k) => k.name).join(' · ')} 필요`;
   }
 
   private drawWorldMapNode(
@@ -5100,19 +5379,24 @@ export class PlayScene extends Phaser.Scene {
     const current = this.worldMapNodeCurrent(node);
     const cleared = this.worldMapNodeCleared(node);
     const label = node.kind === 'town' ? '마을' : ROOMS[node.roomIndex]?.label ?? `구역 ${node.roomIndex + 1}`;
+    // **마을은 가보기 전에도 이름을 보인다.** 번호가 없는 항목이라 `미확인`으로 두면
+    // 이름도 번호도 없는 빈 상자가 되어 고장난 것처럼 보인다. 첫 보스를 잡으면
+    // 반드시 지나는 곳이라 감출 이유도 없다.
+    const showLabel = known || node.kind === 'town';
     const index = node.kind === 'town' ? '' : `${node.roomIndex + 1}`;
     const fill = current ? 0x2b3350 : known ? 0x141824 : 0x1a1c22;
     const stroke = current ? COLORS.accent : cleared ? 0x6ea8ff : known ? 0x3a4059 : 0x2a2f42;
     const alpha = known ? 0.98 : 0.62;
 
+    // 높이는 `현재` 라벨까지 담아야 한다. 68로는 글자가 아래 테두리를 넘어갔다.
     container.add(
       this.add
-        .rectangle(x, y, node.kind === 'town' ? 96 : 108, node.kind === 'town' ? 58 : 68, fill, alpha)
+        .rectangle(x, y, node.kind === 'town' ? 96 : 112, node.kind === 'town' ? 62 : 84, fill, alpha)
         .setStrokeStyle(current ? 3 : 2, stroke, current ? 1 : 0.8),
     );
     container.add(
       this.add
-        .text(x, y - 12, known ? label : '미확인', {
+        .text(x, y - 20, showLabel ? label : '미확인', {
           fontSize: node.kind === 'town' ? '15px' : '13px',
           color: known ? COLORS.text : '#717786',
           fontStyle: current ? 'bold' : undefined,
@@ -5124,7 +5408,7 @@ export class PlayScene extends Phaser.Scene {
     if (index) {
       container.add(
         this.add
-          .text(x, y + 16, index, {
+          .text(x, y + 6, index, {
             fontSize: '12px',
             color: current ? COLORS.accentText : known ? COLORS.textDim : '#5a6070',
             fontStyle: 'bold',
@@ -5135,7 +5419,7 @@ export class PlayScene extends Phaser.Scene {
     if (current) {
       container.add(
         this.add
-          .text(x, y + 34, '현재', { fontSize: '12px', color: COLORS.accentText, fontStyle: 'bold' })
+          .text(x, y + 26, '현재', { fontSize: '12px', color: COLORS.accentText, fontStyle: 'bold' })
           .setOrigin(0.5),
       );
     }

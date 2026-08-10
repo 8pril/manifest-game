@@ -37,6 +37,7 @@ export const SPRITE_KEYS = [
   'weapon-arcane',
   'weapon-shield',
   'combo-ring',
+  'potion',
 ] as const;
 
 export class BootScene extends Phaser.Scene {
