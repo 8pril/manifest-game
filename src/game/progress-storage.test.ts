@@ -67,6 +67,7 @@ describe('progress storage', () => {
       progress,
       roomStartProgress: progress,
       roomStartKills: 8,
+      clearedRooms: [1, 2],
       kills: 11,
       gained: { weapons: ['bow'], basicSkills: ['scattershot'], supports: ['linked-momentum'], keys: [] },
       elapsed: 71.5,
@@ -88,6 +89,7 @@ describe('progress storage', () => {
       progress,
       roomStartProgress: progress,
       roomStartKills: 4,
+      clearedRooms: [1],
       kills: 4,
       elapsed: 22,
     };
@@ -111,6 +113,7 @@ describe('progress storage', () => {
       progress,
       roomStartProgress: progress,
       roomStartKills: 0,
+      clearedRooms: [],
       kills: 0,
       elapsed: 0,
     }, store);

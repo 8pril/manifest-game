@@ -13,9 +13,9 @@ import {
 import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effects';
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
-import { attackIntervalFor, deliveryOf, weaponOf, WEAPON_IDS, WEAPON_LIST, type Weapon, type WeaponId } from '@/data/weapons';
+import { attackIntervalFor, basicSkillsOf, deliveryOf, weaponOf, WEAPON_IDS, WEAPON_LIST, type Weapon, type WeaponId } from '@/data/weapons';
 import { SUPPORTS, findSupport } from '@/data/supports';
-import { missingKeys } from '@/data/keys';
+import { findKey, missingKeys } from '@/data/keys';
 import { canAttach, findBehavior, resolveSkill, supportSlotType, type Behavior, type Skill, type Support } from '@/engine/support';
 import type { Stat } from '@/engine/modifiers';
 import {
@@ -102,8 +102,11 @@ import { grantEmpower, empowerMore, spendEmpower, tickEmpower, type EmpowerByHan
 import {
   createRun,
   clearRoom,
+  clearRoomTo,
   collectRoomReward,
   leaveTown,
+  markCurrentRoomCleared,
+  moveToRoom,
   retryCurrentRoom,
   damagePlayer as applyPlayerDamage,
   usePotion,
@@ -202,6 +205,9 @@ const TOWN_HEIGHT = 900;
 const TOWN_NPC_RADIUS = 92;
 /** 방패 스윙 중에는 보스 CC가 안 통해도 버티는 역할을 갖는다. */
 const SHIELD_GUARD_DAMAGE_TAKEN = 0.45;
+/** 보스 강공격을 맞았을 때 플레이어가 밀려나는 거리. */
+const BOSS_CHARGE_PLAYER_KNOCKBACK = 92;
+const BOSS_SHOCK_PLAYER_KNOCKBACK = 76;
 
 /**
  * 스프라이트가 있으면 스프라이트, 없으면 도형.
@@ -240,6 +246,12 @@ const SPRITE_SCALE = 1.4;
 const PLAYER_SPRITE_SCALE = 1.7;
 
 /** 무기별 투사체 이미지. 방패는 투사체를 쓰지 않아 검 이미지를 공유한다. */
+/** 열쇠 스프라이트. `data/keys.ts`의 id와 짝을 맞춘다. */
+const KEY_SPRITE: Record<string, string> = {
+  'key-upper': 'key-upper',
+  'key-lower': 'key-lower',
+};
+
 const BOLT_SPRITE: Record<WeaponId, string> = {
   sword: 'bolt-sword',
   bow: 'bolt-bow',
@@ -390,7 +402,7 @@ interface ComboBadge {
 interface RewardDrop {
   reward: RoomReward;
   label: string;
-  kind: 'weapon' | 'comboSkill' | 'support' | 'synergy';
+  kind: 'weapon' | 'comboSkill' | 'support' | 'synergy' | 'key';
   color: number;
   iconKey?: string;
   x: number;
@@ -406,16 +418,29 @@ type WorldMapNode =
   | { kind: 'room'; roomIndex: number; x: number; y: number }
   | { kind: 'town'; x: number; y: number };
 
+type TrialExitSide = 'top' | 'bottom' | 'right';
+
+interface TrialExit {
+  side: TrialExitSide;
+  target: number;
+  body: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
+  label: Phaser.GameObjects.Text;
+}
+
+const TRIAL_ROOM_INDEX = 2;
+const UPPER_BRANCH_ROOM_INDEX = 3;
+const LOWER_BRANCH_ROOM_INDEX = 4;
+const SEALED_ROOM_INDEX = 5;
+
 const WORLD_MAP_NODES: readonly WorldMapNode[] = [
-  { kind: 'room', roomIndex: 0, x: 120, y: 250 },
-  { kind: 'room', roomIndex: 1, x: 250, y: 250 },
-  { kind: 'town', x: 380, y: 250 },
-  { kind: 'room', roomIndex: 2, x: 510, y: 250 },
-  { kind: 'room', roomIndex: 3, x: 640, y: 250 },
-  { kind: 'room', roomIndex: 4, x: 770, y: 160 },
-  { kind: 'room', roomIndex: 5, x: 770, y: 340 },
-  { kind: 'room', roomIndex: 6, x: 900, y: 250 },
-  { kind: 'room', roomIndex: 7, x: 1030, y: 250 },
+  { kind: 'room', roomIndex: 0, x: 185, y: 250 },
+  { kind: 'room', roomIndex: 1, x: 315, y: 250 },
+  { kind: 'town', x: 445, y: 250 },
+  { kind: 'room', roomIndex: 2, x: 575, y: 250 },
+  { kind: 'room', roomIndex: 3, x: 575, y: 130 },
+  { kind: 'room', roomIndex: 4, x: 575, y: 370 },
+  { kind: 'room', roomIndex: 5, x: 765, y: 250 },
+  { kind: 'room', roomIndex: 6, x: 955, y: 250 },
 ] as const;
 
 const WORLD_MAP_LINKS: readonly [number, number][] = [
@@ -423,11 +448,9 @@ const WORLD_MAP_LINKS: readonly [number, number][] = [
   [1, 2],
   [2, 3],
   [3, 4],
-  [4, 5],
-  [4, 6],
-  [5, 7],
+  [3, 5],
+  [3, 6],
   [6, 7],
-  [7, 8],
 ] as const;
 
 interface TownNpc {
@@ -540,6 +563,8 @@ export class PlayScene extends Phaser.Scene {
   private bounds = { minX: WALL, minY: WALL, maxX: GAME_WIDTH - WALL, maxY: GAME_HEIGHT - WALL };
   private exit!: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
   private exitLabel!: Phaser.GameObjects.Text;
+  private trialExits: TrialExit[] = [];
+  private sealedDoorHintReadyAt = 0;
   private roomFloor: Phaser.GameObjects.GameObject[] = [];
   /** 방을 정리해 출구가 열렸는지. */
   private exitOpen = false;
@@ -873,7 +898,7 @@ export class PlayScene extends Phaser.Scene {
     // 끼웠으면 계속 그것이 나가고, 비웠으면 무기 본래의 공격이 나간다.
     const skill = equippedBasicSkill(this.run.progress, runtime.weapon.id);
     // 형태가 바뀌면 간격도 그 스킬의 것을 쓴다. 지대형은 겹치면 피해가 곱으로
-    // 불어나므로 `comboInterval`로 늦춘다. 그 이유는 `attackIntervalFor` 참고.
+    // 불어나므로 기본스킬 후보용 별도 간격으로 늦춘다. 그 이유는 `attackIntervalFor` 참고.
     runtime.readyAt = this.time.now + attackIntervalFor(runtime.weapon, skill);
     // 첫 소켓에 끼운 기본스킬도 이제는 "기본 공격"이다. 옛 콤보 전환 시절처럼
     // `basic: false`로 넘기면 콤보형 연계를 붙여도 콤보가 오르지 않는다.
@@ -1271,6 +1296,8 @@ export class PlayScene extends Phaser.Scene {
     this.clearTransientOverlays();
     this.rewardDrops = [];
     this.townNpc = null;
+    this.trialExits = [];
+    this.sealedDoorHintReadyAt = 0;
     this.destroyPortal(this.combatPortal);
     this.combatPortal = null;
     this.destroyPortal(this.townReturnPortal);
@@ -1311,20 +1338,27 @@ export class PlayScene extends Phaser.Scene {
     this.roomFloor.push(this.toneView(cx, cy, room.width, room.height, room.tone));
 
     // 출구는 오른쪽 벽 가운데. 방을 정리하기 전에는 닫혀 있다.
+    // 해금 시험장은 별도의 위/아래/오른쪽 문을 쓰므로 기본 출구는 감춰 둔다.
     this.exit = this.exitView(room.width - WALL / 2, cy, 0x2a2f42);
     this.exitLabel = this.add
       .text(room.width - WALL - 110, cy, '', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' })
       .setOrigin(0.5)
       .setDepth(2);
     this.roomFloor.push(this.exit, this.exitLabel);
+    if (this.run.roomIndex === TRIAL_ROOM_INDEX) {
+      this.exit.setVisible(false);
+      this.exitLabel.setVisible(false);
+      this.createTrialExits(room.width, room.height);
+    }
 
     // 플레이어는 왼쪽에서 들어온다. 포탈 복귀 때만 열었던 자리로 돌아온다.
     this.player.setPosition(restoredPlayer?.x ?? WALL + 90, restoredPlayer?.y ?? cy);
     followInRoom(this, this.player, room.width, room.height);
 
+    const roomAlreadyCleared = this.run.clearedRooms.includes(this.run.roomIndex);
     if (restoredEnemies) {
       for (const enemy of restoredEnemies) this.enemies.push(this.createEnemyEntityFromState(this.cloneEnemy(enemy)));
-    } else {
+    } else if (!roomAlreadyCleared) {
       for (const spawn of room.spawns) {
         for (let i = 0; i < spawn.count; i++) {
           const at = this.edgeSpawnPoint();
@@ -1337,6 +1371,9 @@ export class PlayScene extends Phaser.Scene {
       tintView(this.exit, COLORS.accent);
       this.exitLabel.setText(room.entersTown ? '마을 →' : '출구 →');
       this.tweens.add({ targets: this.exit, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
+    } else if (roomAlreadyCleared) {
+      if (this.run.roomIndex === TRIAL_ROOM_INDEX) this.openTrialExits();
+      else this.openStandardExit(room);
     }
     this.refreshHud();
   }
@@ -1885,6 +1922,14 @@ export class PlayScene extends Phaser.Scene {
     if (this.enemies.some((e) => isAlive(e.state))) return;
     if (this.rewardDrops.some((drop) => !drop.collected)) return;
 
+    if (this.run.roomIndex === TRIAL_ROOM_INDEX) {
+      this.run = markCurrentRoomCleared(this.run);
+      this.saveCurrentProgress();
+      this.openTrialExits();
+      if (DEBUG_ENABLED) this.publishDebug();
+      return;
+    }
+
     if (this.run.roomIndex >= TOTAL_ROOMS - 1) {
       this.resultScheduled = true;
       this.run = clearRoom(this.run);
@@ -1911,27 +1956,125 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
+    this.openStandardExit(room);
+  }
+
+  private openStandardExit(room: (typeof ROOMS)[number] | undefined): void {
     this.exitOpen = true;
     tintView(this.exit, COLORS.accent);
-    this.exitLabel.setText(room?.entersTown ? '마을 →' : '출구 →');
+    const label = this.branchReturnTarget() === TRIAL_ROOM_INDEX ? '시험장 →' : room?.entersTown ? '마을 →' : '출구 →';
+    this.exitLabel.setText(label);
     this.tweens.add({ targets: this.exit, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
+  }
+
+  private createTrialExits(width: number, height: number): void {
+    const cx = width / 2;
+    const cy = height / 2;
+    const missing = missingKeys(this.run.progress.ownedKeys);
+    const rightColor = missing.length === 0 ? COLORS.accent : 0x3a2a2f;
+    const exits: TrialExit[] = [
+      {
+        side: 'top',
+        target: UPPER_BRANCH_ROOM_INDEX,
+        body: this.add.rectangle(cx, WALL / 2, EXIT_SIZE, WALL, 0x2f6b4a).setDepth(1),
+        label: this.add.text(cx, WALL + 24, '윗길 제단 ↑', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' }).setOrigin(0.5),
+      },
+      {
+        side: 'bottom',
+        target: LOWER_BRANCH_ROOM_INDEX,
+        body: this.add.rectangle(cx, height - WALL / 2, EXIT_SIZE, WALL, 0x6b5a2f).setDepth(1),
+        label: this.add.text(cx, height - WALL - 24, '아랫길 굴 ↓', { fontSize: '17px', color: COLORS.accentText, fontStyle: 'bold' }).setOrigin(0.5),
+      },
+      {
+        side: 'right',
+        target: SEALED_ROOM_INDEX,
+        body: this.exitView(width - WALL / 2, cy, rightColor),
+        label: this.add
+          .text(width - WALL - 124, cy, missing.length === 0 ? '봉인 해제 →' : '봉인된 문', {
+            fontSize: '17px',
+            color: missing.length === 0 ? COLORS.accentText : '#ffb4a2',
+            fontStyle: 'bold',
+          })
+          .setOrigin(0.5),
+      },
+    ];
+
+    this.trialExits = exits;
+    for (const exit of exits) this.roomFloor.push(exit.body, exit.label);
+  }
+
+  private openTrialExits(): void {
+    this.exitOpen = true;
+    const missing = missingKeys(this.run.progress.ownedKeys);
+    for (const exit of this.trialExits) {
+      if (exit.side === 'right') {
+        tintView(exit.body, missing.length === 0 ? COLORS.accent : 0x3a2a2f);
+        exit.label.setText(missing.length === 0 ? '봉인 해제 →' : '봉인된 문');
+        exit.label.setColor(missing.length === 0 ? COLORS.accentText : '#ffb4a2');
+      } else {
+        tintView(exit.body, exit.side === 'top' ? 0x3f8f64 : 0x9a7a3f);
+      }
+    }
+    if (missing.length > 0) {
+      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 30, '위·아래 길에서 열쇠 2개를 찾아야 한다', COLORS.accentText);
+    }
+  }
+
+  private branchReturnTarget(): number | null {
+    return this.run.roomIndex === UPPER_BRANCH_ROOM_INDEX || this.run.roomIndex === LOWER_BRANCH_ROOM_INDEX
+      ? TRIAL_ROOM_INDEX
+      : null;
   }
 
   /** 열린 출구에 닿으면 다음 방으로 넘어간다. */
   private checkExitReached(): void {
     if (this.run.phase !== 'combat') return;
     if (!this.exitOpen) return;
+    if (this.checkTrialExitReached()) return;
     if (Math.abs(this.player.x - this.exit.x) > WALL + PLAYER_RADIUS) return;
     if (Math.abs(this.player.y - this.exit.y) > EXIT_SIZE / 2 + PLAYER_RADIUS) return;
 
     this.exitOpen = false;
-    this.run = clearRoom(this.run);
+    const returnTarget = this.branchReturnTarget();
+    this.run = returnTarget === null ? clearRoom(this.run) : clearRoomTo(this.run, returnTarget);
     this.saveCurrentProgress();
 
     if (this.run.phase === 'town') this.enterTownRoom();
     else this.enterRoom();
 
     if (DEBUG_ENABLED) this.publishDebug();
+  }
+
+  private checkTrialExitReached(): boolean {
+    if (this.run.roomIndex !== TRIAL_ROOM_INDEX) return false;
+
+    for (const exit of this.trialExits) {
+      const near =
+        exit.side === 'top' || exit.side === 'bottom'
+          ? Math.abs(this.player.x - exit.body.x) <= EXIT_SIZE / 2 + PLAYER_RADIUS &&
+            Math.abs(this.player.y - exit.body.y) <= WALL + PLAYER_RADIUS
+          : Math.abs(this.player.x - exit.body.x) <= WALL + PLAYER_RADIUS &&
+            Math.abs(this.player.y - exit.body.y) <= EXIT_SIZE / 2 + PLAYER_RADIUS;
+      if (!near) continue;
+
+      if (exit.side === 'right' && missingKeys(this.run.progress.ownedKeys).length > 0) {
+        const now = this.time.now;
+        if (now >= this.sealedDoorHintReadyAt) {
+          this.sealedDoorHintReadyAt = now + 1400;
+          floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 30, '위·아래 길에서 열쇠 2개를 찾아야 한다', '#ffb4a2');
+        }
+        return true;
+      }
+
+      this.exitOpen = false;
+      this.run = moveToRoom(this.run, exit.target);
+      this.saveCurrentProgress();
+      this.enterRoom();
+      if (DEBUG_ENABLED) this.publishDebug();
+      return true;
+    }
+
+    return false;
   }
 
   /** 마을 오른쪽 출구에 닿으면 다음 전투 방으로 넘어간다. */
@@ -2233,7 +2376,17 @@ export class PlayScene extends Phaser.Scene {
       if (!dashing && !isStunned(enemy) && distance <= stats.radius + PLAYER_RADIUS) {
         if (enemy.sinceContact >= stats.contactCooldown) {
           enemy.sinceContact = 0;
-          this.hitPlayer(isBossKind(enemy.kind) ? bossContactDamage(enemy) : stats.contactDamage);
+          const chargingBoss = isBossKind(enemy.kind) && enemy.boss?.phase === 'charging';
+          this.hitPlayer(
+            isBossKind(enemy.kind) ? bossContactDamage(enemy) : stats.contactDamage,
+            chargingBoss
+              ? {
+                  x: enemy.boss?.chargeDirection.x ?? this.player.x - enemy.x,
+                  y: enemy.boss?.chargeDirection.y ?? this.player.y - enemy.y,
+                  distance: BOSS_CHARGE_PLAYER_KNOCKBACK,
+                }
+              : undefined,
+          );
           if (this.run.phase === 'lost') {
             this.retryAfterDeath();
             return;
@@ -2319,7 +2472,11 @@ export class PlayScene extends Phaser.Scene {
     floatingText(this, enemy.x, enemy.y - ENEMY_STATS[enemy.kind].radius - 18, '충격파', '#d7c6ff');
 
     if (Math.hypot(this.player.x - enemy.x, this.player.y - enemy.y) <= radius + PLAYER_RADIUS) {
-      this.hitPlayer(damage);
+      this.hitPlayer(damage, {
+        x: this.player.x - enemy.x,
+        y: this.player.y - enemy.y,
+        distance: BOSS_SHOCK_PLAYER_KNOCKBACK,
+      });
       if (this.run.phase === 'lost') this.retryAfterDeath();
     }
   }
@@ -2395,7 +2552,7 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
-  private hitPlayer(amount: number): void {
+  private hitPlayer(amount: number, knockback?: { x: number; y: number; distance: number }): void {
     const shieldActive = this.shieldProtectionActive();
     const damage = this.guardedPlayerDamage(amount);
     const before = this.run;
@@ -2403,9 +2560,31 @@ export class PlayScene extends Phaser.Scene {
     if (this.run === before) return;
 
     if (damage < amount) this.showShieldGuardFeedback(amount - damage);
+    if (knockback) this.knockPlayer(knockback);
     playSfx('playerHit');
     this.flashPlayer();
     this.refreshHud();
+  }
+
+  private knockPlayer(knockback: { x: number; y: number; distance: number }): void {
+    const length = Math.hypot(knockback.x, knockback.y);
+    if (length <= 0) return;
+
+    const nx = knockback.x / length;
+    const ny = knockback.y / length;
+    const x = Phaser.Math.Clamp(
+      this.player.x + nx * knockback.distance,
+      this.bounds.minX + PLAYER_RADIUS,
+      this.bounds.maxX - PLAYER_RADIUS,
+    );
+    const y = Phaser.Math.Clamp(
+      this.player.y + ny * knockback.distance,
+      this.bounds.minY + PLAYER_RADIUS,
+      this.bounds.maxY - PLAYER_RADIUS,
+    );
+
+    this.player.setPosition(x, y);
+    ring(this, x, y, 0xffb4a2, { from: PLAYER_RADIUS + 4, to: PLAYER_RADIUS + 34, duration: 240, width: 3 });
   }
 
   private retryAfterDeath(): void {
@@ -2424,7 +2603,7 @@ export class PlayScene extends Phaser.Scene {
     ring(this, this.player.x, this.player.y, 0xff6b6b, { from: PLAYER_RADIUS, to: PLAYER_RADIUS + 62, duration: 360, width: 4 });
     flash(this, this.player.x, this.player.y, PLAYER_RADIUS * 3.2, 0xff6b6b);
     this.cameras.main.shake(180, 0.004);
-    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, '의식이 끊어진다', '#ffb4a2', { duration: 900 });
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, '의식이 끊어진다', '#ffb4a2', { duration: 1800 });
 
     const veil = this.add
       .rectangle(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT / 2), VIEW_WIDTH, VIEW_HEIGHT, 0x05060a, 0)
@@ -2444,7 +2623,7 @@ export class PlayScene extends Phaser.Scene {
   private showRespawnFeedback(): void {
     ring(this, this.player.x, this.player.y, COLORS.accent, { from: 10, to: 84, duration: 520, width: 4 });
     flash(this, this.player.x, this.player.y, PLAYER_RADIUS * 2.8, COLORS.accent);
-    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, '구역 시작점에서 재도전', COLORS.accentText, { duration: 1300 });
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, '구역 시작점에서 재도전', COLORS.accentText, { duration: 2200 });
   }
 
   private tryUsePotion(): void {
@@ -2454,7 +2633,7 @@ export class PlayScene extends Phaser.Scene {
       const message = before.hp >= before.maxHp
         ? '이미 체력이 가득 차 있다'
         : `물약 충전 부족 ${Math.floor(before.potionCharge)} / ${POTION_USE_COST}`;
-      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, message, COLORS.textDim, { duration: 900 });
+      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 28, message, COLORS.textDim, { duration: 1800 });
       return;
     }
 
@@ -2462,7 +2641,7 @@ export class PlayScene extends Phaser.Scene {
     playSfx('reward');
     ring(this, this.player.x, this.player.y, 0xff5f6d, { from: PLAYER_RADIUS, to: PLAYER_RADIUS + 44, duration: 360, width: 4 });
     flash(this, this.player.x, this.player.y, PLAYER_RADIUS * 2.4, 0xff5f6d);
-    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, '물약 사용', '#ffb4a2', { duration: 900 });
+    floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 26, '물약 사용', '#ffb4a2', { duration: 1800 });
     this.refreshHud();
     if (DEBUG_ENABLED) this.publishDebug();
   }
@@ -2726,25 +2905,41 @@ export class PlayScene extends Phaser.Scene {
       // 오브젝트를 무기에서 만들어 냈는데, 주워도 보유 상태가 안 늘어 화면이 거짓말을
       // 하고 있었다. 이제 방 보상에 실제로 적힌 것을 그대로 떨어뜨린다.
       ...(reward.basicSkills ?? []).flatMap((id) => {
-        const weapon = WEAPON_IDS.map(weaponOf).find((w) => w.basicSkill.id === id);
-        return weapon
+        const owner = WEAPON_IDS.map(weaponOf)
+          .map((weapon) => ({ weapon, skill: basicSkillsOf(weapon).find((candidate) => candidate.id === id) }))
+          .find((entry): entry is { weapon: Weapon; skill: Skill } => entry.skill !== undefined);
+        return owner
           ? [{
               reward: { basicSkills: [id] },
-              label: weapon.basicSkill.name,
+              label: owner.skill.name,
               kind: 'comboSkill' as const,
-              color: weapon.color,
-              iconKey: WEAPON_SPRITE[weapon.id],
+              color: owner.weapon.color,
+              iconKey: WEAPON_SPRITE[owner.weapon.id],
             }]
           : [];
       }),
       ...(reward.supports ?? []).flatMap((id) => {
         const support = findSupport(id);
+        const kind = support ? supportSlotType(support) : 'primary';
         return support
           ? [{
               reward: { supports: [id] },
-              label: support.name,
-              kind: supportSlotType(support) === 'synergy' ? 'synergy' as const : 'support' as const,
+              label: `${kind === 'synergy' ? '연계' : '보조'}: ${support.name}`,
+              kind: kind === 'synergy' ? 'synergy' as const : 'support' as const,
               color: COLORS.accent,
+            }]
+          : [];
+      }),
+      // 열쇠는 봉인된 문을 여는 열쇠라는 것이 바닥에서부터 읽혀야 한다.
+      ...(reward.keys ?? []).flatMap((id) => {
+        const key = findKey(id);
+        return key
+          ? [{
+              reward: { keys: [id] },
+              label: key.name,
+              kind: 'key' as const,
+              color: key.color,
+              iconKey: KEY_SPRITE[id],
             }]
           : [];
       }),
@@ -2778,7 +2973,7 @@ export class PlayScene extends Phaser.Scene {
     if (!rule) return [];
 
     const weapon = rule.forWeapon ? weaponOf(rule.forWeapon) : null;
-    const target = weapon ? weapon[rule.forSkillOf ?? 'basic'] : null;
+    const target = rule.forSkillId ? this.skillById(rule.forSkillId) : weapon?.basic ?? null;
 
     const selected: string[] = [];
     const take = (slot: 'primary' | 'synergy', count = 0): void => {
@@ -2797,6 +2992,14 @@ export class PlayScene extends Phaser.Scene {
     take('primary', rule.primary);
     take('synergy', rule.synergy);
     return selected;
+  }
+
+  private skillById(id: string): Skill | null {
+    for (const weapon of WEAPON_LIST) {
+      const skill = [weapon.basic, ...basicSkillsOf(weapon)].find((candidate) => candidate.id === id);
+      if (skill) return skill;
+    }
+    return null;
   }
 
   private updateRewardDropPrompt(): void {
@@ -3239,8 +3442,8 @@ export class PlayScene extends Phaser.Scene {
     }
     return [
       '그 장갑은 네가 지나온 싸움을 기억한다.',
-      '왼쪽 두 번째 탭에서 무기마다 칸이 셋 보일 것이다.',
-      '첫 칸에 기본스킬을 끼우면 평소 치는 공격의 형태가 바뀐다. 오른쪽 격자에서 골라 넣어라.',
+      '먼저 무기 설정에서 전투 중 R링에 띄울 왼손과 오른손 후보를 정해 두어라.',
+      '그다음 기술 설정에서 무기마다 기본스킬을 끼워라. 끼운 순간 평소 치는 공격의 형태가 바뀐다.',
     ].join('\n');
   }
 
@@ -3543,10 +3746,9 @@ export class PlayScene extends Phaser.Scene {
 
   /** 마을 설정 패널을 처음 연다. 탭과 필터를 기본값으로 되돌린다. */
   private showTown(readOnly = false): void {
-    // 첫 마을에서는 **할 일이 있는 탭**을 먼저 연다. 소켓이 전부 비어 있는데
-    // 장비 착용 탭이 먼저 뜨면 무엇을 하러 왔는지 알기 어렵다.
-    const untouched = this.run.progress.configs[this.run.progress.active.left].basicSkillId === null;
-    this.townTab = !readOnly && untouched ? 2 : 1;
+    // 튜토리얼 순서와 맞춘다. 먼저 R링에 나올 무기 후보를 정하고,
+    // 그다음 기술 설정 탭에서 기본스킬/보조/연계를 끼운다.
+    this.townTab = 1;
     this.townFilter = 'all';
     this.townPendingSlot = null;
     this.townDragSource = null;
@@ -3771,12 +3973,8 @@ export class PlayScene extends Phaser.Scene {
    */
   private supportEffectFor(weaponId: WeaponId, support: Support): string {
     const weapon = weaponOf(weaponId);
-    // 붙을 수 있는 스킬을 찾는다. 기본 공격과 강화기술 중 태그가 맞는 쪽이다.
-    const skill = canAttach(weapon.basic, support, []).ok
-      ? weapon.basic
-      : canAttach(weapon.combo, support, []).ok
-        ? weapon.combo
-        : null;
+    // 붙을 수 있는 스킬을 찾는다. 기본 공격과 기본스킬 후보 중 태그가 맞는 쪽이다.
+    const skill = [weapon.basic, ...basicSkillsOf(weapon)].find((candidate) => canAttach(candidate, support, []).ok) ?? null;
     // 못 붙는 이유를 **무엇이 필요한지**로 말한다. `안 붙는다`만 쓰면 다른 무기를
     // 하나씩 눌러 보는 것 말고는 알 방법이 없다.
     if (!skill) return `${support.requires.join('·')} 스킬에만 붙는다`;
@@ -3832,15 +4030,23 @@ export class PlayScene extends Phaser.Scene {
    *
    * `scope`는 이미 장착된 칸에 올렸을 때 쓴다. 그 칸의 무기 기준으로만 보여준다.
    */
-  private showTownTip(item: InventoryItem, x: number, y: number, scope?: WeaponId): void {
+  private showTownTip(
+    item: InventoryItem,
+    x: number,
+    y: number,
+    scope?: WeaponId,
+    avoid?: { x: number; y: number; w: number; h: number },
+  ): void {
     this.hideTownTip();
     if (item.kind === 'weapon') {
-      this.drawTownTip(this.weaponTipText(item.id), x, y, true);
+      this.drawTownTip(this.weaponTipText(item.id), x, y, true, avoid);
       return;
     }
     // 기본스킬은 붙이는 게 아니라 형태를 바꾸는 것이라 설명이 짧다.
     if (item.kind === 'skill') {
       const weapon = weaponOf(item.weapon);
+      const skill = basicSkillsOf(weapon).find((candidate) => candidate.id === item.id);
+      if (!skill) return;
       this.drawTownTip(
         [
           item.name,
@@ -3849,13 +4055,14 @@ export class PlayScene extends Phaser.Scene {
           '',
           `[${weapon.name}]`,
           `${weapon.basic.name} 대신 나간다`,
-          `공격 간격 ${weapon.cooldown}ms → ${attackIntervalFor(weapon, weapon.basicSkill)}ms`,
+          `공격 간격 ${weapon.cooldown}ms → ${attackIntervalFor(weapon, skill)}ms`,
           '',
           this.statusTipText(weapon.status),
         ].join('\n'),
         x,
         y,
         true,
+        avoid,
       );
       return;
     }
@@ -3886,7 +4093,7 @@ export class PlayScene extends Phaser.Scene {
             : item.slot !== pending.slot
               ? `이것은 ${this.slotKindOf(item.slot).label} 스킬이라 ${this.slotKindOf(pending.slot).label} 칸에 안 들어간다`
               : `이것은 ${support.requires.join('·')} 스킬에만 붙어서 이 무기에는 안 들어간다`;
-      this.drawTownTip(`${head}\n\n${reason}`, x, y, false);
+      this.drawTownTip(`${head}\n\n${reason}`, x, y, false, avoid);
       return;
     }
 
@@ -3901,7 +4108,7 @@ export class PlayScene extends Phaser.Scene {
     const body = blocks.length ? blocks.join('\n\n') : '붙일 수 있는 무기가 없다';
     const statusBody = statusBehavior ? `\n\n[필요한 상태]\n${this.statusTipText(statusBehavior.status)}` : '';
 
-    this.drawTownTip(`${head}\n\n${body}${statusBody}`, x, y, true);
+    this.drawTownTip(`${head}\n\n${body}${statusBody}`, x, y, true, avoid);
   }
 
   private weaponTipText(weaponId: WeaponId): string {
@@ -3913,7 +4120,7 @@ export class PlayScene extends Phaser.Scene {
       weapon.concept,
       '',
       `기본 공격: ${weapon.basic.name}`,
-      `기본스킬: ${weapon.basicSkill.name}`,
+      `기본스킬: ${basicSkillsOf(weapon).map((skill) => skill.name).join(' / ')}`,
       configured ? `현재 공격: ${equippedSkill.name}` : `현재 공격: ${weapon.basic.name}`,
       '',
       this.statusTipText(weapon.status),
@@ -3961,17 +4168,27 @@ export class PlayScene extends Phaser.Scene {
     return `${weapon.name} 명중 시 ${chance} 부여`;
   }
 
-  private drawTownTip(text: string, x: number, y: number, ok: boolean): void {
+  private drawTownTip(
+    text: string,
+    x: number,
+    y: number,
+    ok: boolean,
+    avoid?: { x: number; y: number; w: number; h: number },
+  ): void {
     const label = this.add.text(0, 0, text, {
       fontSize: '13px',
       color: ok ? COLORS.text : '#ffb4a2',
       lineSpacing: 4,
       wordWrap: { width: 300 },
     });
-    // 화면 밖으로 나가지 않게 민다. 인벤토리 오른쪽 끝 칸에서 잘려 읽히지 않았다.
     const w = label.width + 20;
     const h = label.height + 16;
-    const px = Math.min(x, VIEW_WIDTH - w - 12);
+    // 기본은 대상 오른쪽에 띄우되, 오른쪽 끝 칸에서는 대상 왼쪽으로 뒤집는다.
+    // 예전처럼 화면 안으로 clamp만 하면 툴팁이 hover 중인 아이템을 그대로 덮었다.
+    const rightX = avoid ? avoid.x + avoid.w + 12 : x;
+    const leftX = avoid ? avoid.x - w - 12 : x - w - 24;
+    const preferredX = rightX + w <= VIEW_WIDTH - 12 ? rightX : leftX;
+    const px = Phaser.Math.Clamp(preferredX, 12, VIEW_WIDTH - w - 12);
     const py = Math.min(y, VIEW_HEIGHT - h - 12);
     label.setPosition(px + 10, py + 8);
 
@@ -4004,7 +4221,7 @@ export class PlayScene extends Phaser.Scene {
     const config = this.run.progress.configs[target.weapon];
     if (target.kind === 'basic') {
       if (config.basicSkillId === null) return null;
-      return basicSkillItem(target.weapon);
+      return basicSkillItem(config.basicSkillId);
     }
     const id = target.slot === 'primary' ? config.primarySupportId : config.synergySupportId;
     if (!id) return null;
@@ -4079,7 +4296,14 @@ export class PlayScene extends Phaser.Scene {
       rect.on('pointerdown', () => {
         // 무기 후보 칸에 이미 무기가 있으면 드래그 출발점이 된다. 여기서 다시 그리면
         // Phaser가 dragstart를 내기 전에 출발 객체가 사라져 슬롯 간 교체가 막힌다.
-        if (target.kind === 'wheel' && item !== null) return;
+        if (target.kind === 'wheel' && item !== null) {
+          this.time.delayedCall(120, () => {
+            if (this.overlayKind !== 'town-config' || this.townDragSource !== null) return;
+            this.townPendingSlot = pending ? null : target;
+            this.renderTown();
+          });
+          return;
+        }
         // 같은 칸을 다시 누르면 대기를 푼다. 잘못 눌렀을 때 빠져나갈 길이 있어야 한다.
         this.townPendingSlot = pending ? null : target;
         this.renderTown();
@@ -4095,7 +4319,7 @@ export class PlayScene extends Phaser.Scene {
     // 좌표는 오버레이 컨테이너의 지역 좌표다. 포인터의 월드 좌표를 그대로 넘기면
     // 컨테이너가 카메라에 핀으로 붙어 있어 엉뚱한 곳에 뜬다.
     if (item !== null && item.kind === 'support' && target.kind === 'support') {
-      rect.on('pointerover', () => this.showTownTip(item, x + w + 10, y, target.weapon));
+      rect.on('pointerover', () => this.showTownTip(item, x + w + 10, y, target.weapon, { x, y, w, h }));
       rect.on('pointerout', () => this.hideTownTip());
     }
 
@@ -4309,8 +4533,13 @@ export class PlayScene extends Phaser.Scene {
         );
         // 띠가 자리를 차지하므로 점은 조금 작게, 조금 아래로 내린다.
         add(this.add.circle(x + size / 2, y + size / 2 + 1, 9, kind.color, 0.85));
+      } else if (item.kind === 'key' && this.textures.exists(KEY_SPRITE[item.id])) {
+        // 열쇠는 어디에도 장착하지 않는다. 배지 없이 그림만 두어 소켓에 들어가는
+        // 것들과 한눈에 갈리게 한다.
+        const icon = add(this.add.image(x + size / 2, y + size / 2 - 6, KEY_SPRITE[item.id]).setOrigin(0.5));
+        icon.setScale(30 / Math.max(icon.width, icon.height));
       } else {
-        add(this.add.circle(x + size / 2, y + size / 2 - 6, 11, 0x6ea8ff, 0.85));
+        add(this.add.circle(x + size / 2, y + size / 2 - 6, 11, item.kind === 'key' ? item.color : 0x6ea8ff, 0.85));
       }
       add(
         this.add
@@ -4345,7 +4574,7 @@ export class PlayScene extends Phaser.Scene {
     // 올려두면 이 항목이 **그 무기에서** 무엇을 하는지 알려준다.
     // 설명문만으로는 무기마다 다른 결과를 알 수 없다.
     rect.on('pointerover', () => {
-      if (item) this.showTownTip(item, x + size + 10, y);
+      if (item) this.showTownTip(item, x + size + 10, y, undefined, { x, y, w: size, h: size });
     });
     rect.on('pointerout', () => this.hideTownTip());
     rect.setData('dragParts', parts);
@@ -4563,6 +4792,7 @@ export class PlayScene extends Phaser.Scene {
       progress: run.progress,
       roomStartProgress: run.roomStartProgress,
       roomStartKills: run.roomStartKills,
+      clearedRooms: run.clearedRooms,
       kills: run.kills,
       gained: run.gained,
       elapsed: run.elapsed,
@@ -4763,7 +4993,15 @@ export class PlayScene extends Phaser.Scene {
 
   private worldMapNodeKnown(node: WorldMapNode): boolean {
     if (node.kind === 'town') return this.run.progress.weaponSwitchUnlocked || this.run.phase === 'town';
-    return node.roomIndex <= this.run.roomIndex;
+    if (this.run.clearedRooms.includes(node.roomIndex) || node.roomIndex === this.run.roomIndex) return true;
+    if (node.roomIndex <= TRIAL_ROOM_INDEX) return node.roomIndex <= this.run.roomIndex || this.run.clearedRooms.includes(TRIAL_ROOM_INDEX);
+    if (node.roomIndex === UPPER_BRANCH_ROOM_INDEX || node.roomIndex === LOWER_BRANCH_ROOM_INDEX) {
+      return this.run.clearedRooms.includes(TRIAL_ROOM_INDEX) || this.run.roomIndex === TRIAL_ROOM_INDEX;
+    }
+    if (node.roomIndex === SEALED_ROOM_INDEX) {
+      return missingKeys(this.run.progress.ownedKeys).length === 0 || this.run.roomIndex >= SEALED_ROOM_INDEX;
+    }
+    return this.run.roomIndex >= node.roomIndex;
   }
 
   private worldMapNodeCurrent(node: WorldMapNode): boolean {
@@ -4773,7 +5011,7 @@ export class PlayScene extends Phaser.Scene {
 
   private worldMapNodeCleared(node: WorldMapNode): boolean {
     if (node.kind === 'town') return this.run.progress.weaponSwitchUnlocked;
-    return node.roomIndex < this.run.roomIndex || this.run.phase === 'won';
+    return this.run.clearedRooms.includes(node.roomIndex) || this.run.phase === 'won';
   }
 
   private closeMap(): void {
@@ -4887,8 +5125,8 @@ export class PlayScene extends Phaser.Scene {
     // 강화기술은 무기에 딸린 상태값이라 별도 보유 목록에는 없다. 그래도 무엇이 딸려
     // 왔는지는 알려야 한다. 얻은 무기에서 끌어내므로 보상 정의와 어긋날 수가 없다.
     const basicSkills = reward.basicSkills?.flatMap((id) => {
-      const weapon = WEAPON_IDS.map(weaponOf).find((w) => w.basicSkill.id === id);
-      return weapon ? [weapon.basicSkill.name] : [];
+      const skill = WEAPON_IDS.map(weaponOf).flatMap((weapon) => basicSkillsOf(weapon)).find((candidate) => candidate.id === id);
+      return skill ? [skill.name] : [];
     }) ?? [];
     if (basicSkills.length) lines.push(`기본스킬: ${basicSkills.join(' / ')}`);
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { INVENTORY_SIZE, ownedItems, reconcileLayout, createEmptyLayout } from '@/game/inventory';
 import { createInitialProgress, unlockWeapons, unlockBasicSkills, unlockSupports, unlockKeys } from '@/game/progression';
-import { WEAPON_IDS, weaponOf } from '@/data/weapons';
+import { WEAPON_IDS, basicSkillsOf } from '@/data/weapons';
 import { SUPPORTS } from '@/data/supports';
 import { KEYS } from '@/data/keys';
 
@@ -21,7 +21,7 @@ import { KEYS } from '@/data/keys';
 describe('인벤토리 수용량', () => {
   const everything = () => {
     let progress = unlockWeapons(createInitialProgress(), [...WEAPON_IDS]);
-    progress = unlockBasicSkills(progress, WEAPON_IDS.map((id) => weaponOf(id).basicSkill.id));
+    progress = unlockBasicSkills(progress, WEAPON_IDS.flatMap((id) => basicSkillsOf(id).map((skill) => skill.id)));
     progress = unlockSupports(progress, SUPPORTS.map((s) => s.id));
     return unlockKeys(progress, KEYS.map((k) => k.id));
   };

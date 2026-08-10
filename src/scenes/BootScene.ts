@@ -19,6 +19,8 @@ export const SPRITE_KEYS = [
   'enemy-boss-glutton',
   'npc-keeper',
   'drop-item',
+  'key-upper',
+  'key-lower',
   'bolt-sword',
   'bolt-bow',
   'bolt-arcane',

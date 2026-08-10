@@ -28,8 +28,8 @@ export interface RoomReward {
      * 태그로 거르므로 "검 전용"이라고 따로 표시할 필요가 없다.
      */
     forWeapon?: WeaponId;
-    /** 무기 본래의 공격이 아니라 이 스킬에 붙는 것으로 거른다. */
-    forSkillOf?: 'basic' | 'basicSkill' | 'combo';
+    /** 특정 스킬 id에 붙는 것으로 직접 거른다. 예: `annihilation`은 멸검 전용. */
+    forSkillId?: string;
   };
 }
 
@@ -105,19 +105,15 @@ export const ROOMS: readonly RoomDef[] = [
       { kind: 'chaser', count: 4 },
     ],
     entersTown: true,
-    // **첫 보스는 무기와 기본스킬만 준다.** 보조형스킬은 두 번째 보스 몫이다.
+    // **첫 보스는 무기와 기본스킬만 준다.** 보조/연계는 위·아래 보스 몫이다.
     //
-    // 기본스킬은 무기에 딸려 오므로 보유 목록에는 무기 2종만 늘지만, 드랍 연출에서는
-    // 활·방패·산탄·강타 4개가 각각 바닥에 떨어진다. 무엇이 열렸는지 보이게 하려는
-    // 것이라, 화면에 보이는 수와 보유 상태가 다른 것은 의도다.
-    //
-    // 첫 마을에 채울 것이 없어 보일까 걱정했는데, 소켓 구조가 생기면서 해결됐다.
-    // 보조형스킬이 하나도 없어도 **기본스킬을 끼울지 말지**를 고를 수 있다.
+    // 무기와 기본스킬이 각각 바닥에 떨어진다. 첫 마을에서는 기본스킬 소켓과 R링만
+    // 시험하고, 보조/연계 조합은 위·아래 보스 이후부터 열린다.
     reward: {
       weapons: ['bow', 'shield'],
       // 검의 것까지 함께 준다. 기본스킬은 무기에 딸려 오지 않으므로, 여기서 주지
       // 않으면 시작 무기인 검은 소켓을 영영 채울 수 없다.
-      basicSkills: ['thrust', 'scattershot', 'shield-slam'],
+      basicSkills: ['annihilation', 'volley', 'fracture-wave'],
     },
     width: 2000,
     height: 1250,
@@ -147,25 +143,7 @@ export const ROOMS: readonly RoomDef[] = [
     ],
   },
   {
-    // 정면 문이 봉인돼 있다. 여기서 갈림길을 안내하고 위·아래 두 보스로 보낸다.
-    label: '갈림길 어귀',
-    spawns: [
-      { kind: 'chaser', count: 12 },
-      { kind: 'archer', count: 3 },
-    ],
-    // 문 안내는 방에 들어오는 순간 띄운다. 열쇠를 다 모으기 전에는 이 방을 지나가되,
-    // 봉인된 문 자체는 아랫길을 끝낸 뒤에 열린다.
-    hint: '정면 문이 봉인돼 있다. 위·아래 두 곳에서 열쇠를 찾아야 한다',
-    width: ROOM_WIDTH,
-    height: ROOM_HEIGHT,
-    tone: { color: 0x4a3a6b, alpha: 0.12 },
-    props: [
-      { kind: 'pillar', count: 7 },
-      { kind: 'rubble', count: 5 },
-    ],
-  },
-  {
-    // 윗길. 기믹이 까다로운 보스다. 검을 키워 주는 보조를 준다.
+    // 윗길. 기믹이 까다로운 보스다. 검 무기 전용 보조를 준다.
     label: '윗길 제단',
     spawns: [
       { kind: 'warden', count: 1 },
@@ -173,7 +151,7 @@ export const ROOMS: readonly RoomDef[] = [
     ],
     reward: {
       keys: ['key-upper'],
-      randomSupports: { primary: 1, forWeapon: 'sword', forSkillOf: 'basic' },
+      randomSupports: { primary: 1, forWeapon: 'sword', forSkillId: 'sword-slash' },
     },
     width: 2100,
     height: 1300,
@@ -184,7 +162,8 @@ export const ROOMS: readonly RoomDef[] = [
     ],
   },
   {
-    // 아랫길. 기믹은 단순하고 체력이 아주 많다. 검의 기본스킬을 키워 주는 연계를 준다.
+    // 아랫길. 기믹은 단순하고 체력이 아주 많다. 검의 옛 콤보스킬이자 현재 첫 소켓
+    // 후보인 멸검에 붙는 연계를 준다.
     label: '아랫길 굴',
     spawns: [
       { kind: 'glutton', count: 1 },
@@ -192,7 +171,7 @@ export const ROOMS: readonly RoomDef[] = [
     ],
     reward: {
       keys: ['key-lower'],
-      randomSupports: { synergy: 1, forWeapon: 'sword', forSkillOf: 'basicSkill' },
+      randomSupports: { synergy: 1, forWeapon: 'sword', forSkillId: 'annihilation' },
     },
     width: 2100,
     height: 1300,
@@ -203,7 +182,7 @@ export const ROOMS: readonly RoomDef[] = [
     ],
   },
   {
-    // 봉인이 풀린 뒤. 열쇠 2개가 없으면 출구가 열리지 않는다.
+    // 봉인이 풀린 뒤. 열쇠 2개가 없으면 해금 시험장의 오른쪽 문에서 막힌다.
     label: '봉인된 문 안쪽',
     spawns: [
       { kind: 'chaser', count: 18 },
@@ -230,7 +209,7 @@ export const ROOMS: readonly RoomDef[] = [
     ],
     reward: {
       weapons: ['arcane'],
-      basicSkills: ['arcane-bloom'],
+      basicSkills: ['arcane-daggers'],
       randomSupports: { primary: 1, synergy: 1 },
     },
     width: ROOM_WIDTH,

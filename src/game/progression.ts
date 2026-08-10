@@ -1,4 +1,4 @@
-import { WEAPON_IDS, weaponOf, type WeaponId } from '@/data/weapons';
+import { WEAPON_IDS, basicSkillsOf, weaponOf, type WeaponId } from '@/data/weapons';
 import { findSupport } from '@/data/supports';
 import { supportSlotType, type Skill, type Support } from '@/engine/support';
 import { createEmptyLayout, reconcileLayout, autoSortLayout, swapCells } from '@/game/inventory';
@@ -315,11 +315,11 @@ export function configuredSupports(progress: PlayerProgress, weapon: WeaponId): 
 /**
  * 이 무기의 첫 소켓에 끼울 수 있는 기본스킬.
  *
- * **무기가 자기 것만 받는다.** 검의 소켓에는 찌르기, 활에는 산탄이다.
- * 무기를 얻으면 함께 오므로 따로 줍지 않는다 — 고르는 것은 **끼울지 말지**다.
+ * **무기가 자기 것만 받는다.** 검의 소켓에는 찌르기나 멸검, 활에는 산탄이나
+ * 일제 사격이 들어간다.
  */
 export function basicSkillOptions(weapon: WeaponId): readonly string[] {
-  return [weaponOf(weapon).basicSkill.id];
+  return basicSkillsOf(weapon).map((skill) => skill.id);
 }
 
 export function canEquipBasicSkill(weapon: WeaponId, skillId: string): boolean {
@@ -336,7 +336,7 @@ export function equippedBasicSkill(progress: PlayerProgress, weapon: WeaponId): 
   const id = progress.configs[weapon].basicSkillId;
   const source = weaponOf(weapon);
   const usable = id !== null && canEquipBasicSkill(weapon, id) && hasBasicSkill(progress, id);
-  return usable ? source.basicSkill : source.basic;
+  return usable ? basicSkillsOf(source).find((skill) => skill.id === id) ?? source.basic : source.basic;
 }
 
 function sanitizeManifestationPatch(

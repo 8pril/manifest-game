@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SUPPORTS } from '@/data/supports';
 import { SKILLS, findSkill } from '@/data/skills';
-import { WEAPON_LIST, attackIntervalFor, deliveryOf } from '@/data/weapons';
+import { WEAPON_LIST, attackIntervalFor, basicSkillsOf, deliveryOf } from '@/data/weapons';
 import { canAttach, resolveSkill, supportSlotType } from '@/engine/support';
 import { TAGS } from '@/engine/tags';
 
@@ -201,9 +201,9 @@ describe('무기 데이터 무결성', () => {
   it('무기마다 보조능력 후보가 하나 이상 있다', () => {
     for (const weapon of WEAPON_LIST) {
       const basic = SUPPORTS.filter((s) => canAttach(weapon.basic, s).ok);
-      const combo = SUPPORTS.filter((s) => canAttach(weapon.combo, s).ok);
+      const socket = basicSkillsOf(weapon).flatMap((skill) => SUPPORTS.filter((s) => canAttach(skill, s).ok));
       expect(basic.length, `${weapon.name} 기본 공격`).toBeGreaterThan(0);
-      expect(combo.length, `${weapon.name} 발동 스킬`).toBeGreaterThan(0);
+      expect(socket.length, `${weapon.name} 기본스킬 후보`).toBeGreaterThan(0);
     }
   });
 
@@ -213,25 +213,29 @@ describe('무기 데이터 무결성', () => {
     }
   });
 
-  it('각성 대체 발동에서 지대형은 별도 간격을 유지한다', () => {
+  it('지대형 기본스킬 후보는 별도 간격을 유지한다', () => {
     const sword = WEAPON_LIST.find((weapon) => weapon.id === 'sword')!;
     const shield = WEAPON_LIST.find((weapon) => weapon.id === 'shield')!;
+    const annihilation = basicSkillsOf(sword).find((skill) => skill.id === 'annihilation')!;
+    const fractureWave = basicSkillsOf(shield).find((skill) => skill.id === 'fracture-wave')!;
 
-    expect(deliveryOf(sword.combo)).toBe('area');
-    expect(deliveryOf(shield.combo)).toBe('area');
-    expect(attackIntervalFor(sword, sword.combo)).toBe(sword.comboInterval);
-    expect(attackIntervalFor(shield, shield.combo)).toBe(shield.comboInterval);
-    expect(attackIntervalFor(sword, sword.combo)).toBeGreaterThan(sword.cooldown);
-    expect(attackIntervalFor(shield, shield.combo)).toBeGreaterThan(shield.cooldown);
+    expect(deliveryOf(annihilation)).toBe('area');
+    expect(deliveryOf(fractureWave)).toBe('area');
+    expect(attackIntervalFor(sword, annihilation)).toBe(sword.basicSkillIntervals?.annihilation);
+    expect(attackIntervalFor(shield, fractureWave)).toBe(shield.basicSkillIntervals?.['fracture-wave']);
+    expect(attackIntervalFor(sword, annihilation)).toBeGreaterThan(sword.cooldown);
+    expect(attackIntervalFor(shield, fractureWave)).toBeGreaterThan(shield.cooldown);
   });
 
-  it('각성 대체 발동에서 투사체형은 기본 무기 쿨다운을 쓴다', () => {
+  it('별도 간격이 없는 투사체형 기본스킬 후보는 기본 무기 쿨다운을 쓴다', () => {
     const bow = WEAPON_LIST.find((weapon) => weapon.id === 'bow')!;
     const arcane = WEAPON_LIST.find((weapon) => weapon.id === 'arcane')!;
+    const volley = basicSkillsOf(bow).find((skill) => skill.id === 'volley')!;
+    const arcaneDaggers = basicSkillsOf(arcane).find((skill) => skill.id === 'arcane-daggers')!;
 
-    expect(deliveryOf(bow.combo)).toBe('projectile');
-    expect(deliveryOf(arcane.combo)).toBe('projectile');
-    expect(attackIntervalFor(bow, bow.combo)).toBe(bow.cooldown);
-    expect(attackIntervalFor(arcane, arcane.combo)).toBe(arcane.cooldown);
+    expect(deliveryOf(volley)).toBe('projectile');
+    expect(deliveryOf(arcaneDaggers)).toBe('projectile');
+    expect(attackIntervalFor(bow, volley)).toBe(bow.cooldown);
+    expect(attackIntervalFor(arcane, arcaneDaggers)).toBe(arcane.cooldown);
   });
 });

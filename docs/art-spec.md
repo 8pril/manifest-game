@@ -55,6 +55,8 @@
 | `enemy-boss-glutton.png` | 굴의 포식자 (아랫길 보스) | 172px | 320×320 | `#d9a441` 호박색 |
 | `npc-keeper.png` | 마을 관리인 NPC | 38×58px (세로형) | 128×192 | `#8ea4ff` 연보라 |
 | `drop-item.png` | 보스 바닥 드랍 | 32px | 96×96 | `#ffd166` 금색 |
+| `key-upper.png` | 윗길 열쇠 | 30px | 96×96 | `#9ae6a0` 연녹색 |
+| `key-lower.png` | 아랫길 열쇠 | 30px | 96×96 | `#ffc55c` 호박색 |
 
 ### 손에 든 무기
 
@@ -327,6 +329,38 @@ texture, bold silhouette readable at 32 pixels, transparent background,
 no shadow, centered
 ```
 
+**열쇠** — 봉인된 문을 여는 두 개
+
+윗길과 아랫길에서 하나씩 나온다. **한 벌로 읽혀야 한다.**
+
+처음에는 손잡이 모양까지 갈랐는데(윗길은 뾰족한 제단 아치, 아랫길은 거친 굴 입구),
+그러면 한 문을 여는 짝이 아니라 **서로 상관없는 두 아이템**으로 보였다. 인벤토리에서
+`2개 중 2개 모았다`가 한눈에 안 들어온다.
+
+열쇠로 플레이어가 하는 일은 **둘 다 모으기** 하나뿐이다. 어느 쪽을 쓸지 고르지 않으므로
+모양까지 가를 이유가 없다. 어디서 얻었는지는 칸에 붙는 이름이 말한다.
+
+그래서 **실루엣은 하나로 두고 발광 색만 가른다.**
+
+```
+a game sprite of a single ornate key, slender and angular, its bow shaped
+like a pointed altar arch, pale green light glowing along the shaft
+(#9ae6a0), the whole key fits inside the canvas with a margin, nothing
+cropped, no ground, no keyhole, no chain, just the key,
+three-quarter overhead view, thick dark hand-drawn outline, chalky grimy
+texture, bold silhouette readable at 32 pixels, transparent background,
+no shadow, centered
+```
+
+`key-lower.png`는 새로 생성하지 않고 이 원본에서 파생한다. 그래야 실루엣이 정확히
+같다. **채도가 있는 픽셀만** 목표 색조(`#ffc55c`)로 옮기고 무채색인 돌과 외곽선은
+건드리지 않는다. 채도 문턱은 0.12를 썼다.
+
+> **배경에 알파 1~47짜리 옅은 안개가 깔려 나왔다.** 눈으로는 거의 안 보이는데
+> 여백 잘라내기가 캔버스 전체를 내용으로 읽어 통째로 무력화된다. 알파 60 미만을
+> 0으로 깎고 잘라냈다. 실제 그림은 200 이상이 대부분이라 외곽선은 안 갉힌다.
+> **투명도는 눈이 아니라 알파 히스토그램으로 확인한다.**
+
 **손에 든 무기 4종**
 
 ```
@@ -556,6 +590,8 @@ model=gpt-image-1  size=1024x1024  background=transparent  output_format=png  n=
 | `enemy-boss-glutton.png` | gpt-image-1 | 2026-08-10 | 이 문서 `아랫길 보스 굴의 포식자` 항목 | 없음 |
 | `npc-keeper.png` | gpt-image-1 | 2026-08-03 | 이 문서 `마을 관리인 NPC` 항목 | 없음 |
 | `drop-item.png` | gpt-image-1 | 2026-08-03 | 이 문서 `바닥 드랍 아이템` 항목 | 없음 |
+| `key-upper.png` | gpt-image-1 | 2026-08-10 | 이 문서 `열쇠` 항목 | 없음 |
+| `key-lower.png` | **`key-upper.png`에서 파생** | 2026-08-10 | 이 문서 `열쇠` 항목 (색조만 이동) | 없음 |
 | `bolt-sword.png` | gpt-image-1 | 2026-08-03 | 이 문서 `투사체` 항목, 색 `#c9d1e8` | 없음 |
 | `bolt-bow.png` | gpt-image-1 | 2026-08-03 | 이 문서 `투사체` 항목, 색 `#9ae6a0` | 없음 |
 | `bolt-arcane.png` | gpt-image-1 | 2026-08-03 | 이 문서 `투사체` 항목, 색 `#b08bff` | 없음 |

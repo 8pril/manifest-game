@@ -73,7 +73,7 @@ export function floatingText(
   color: string,
   options: { duration?: number } = {},
 ): void {
-  const { duration = 700 } = options;
+  const { duration = 1600 } = options;
   const label = scene.add
     .text(x, y - 10, text, { fontSize: '20px', color, fontStyle: 'bold' })
     .setOrigin(0.5)
@@ -92,8 +92,14 @@ export function floatingText(
   scene.tweens.add({
     targets: label,
     y: y - 52,
-    alpha: 0,
     duration,
+    ease: 'Quad.easeOut',
+  });
+  scene.tweens.add({
+    targets: label,
+    alpha: 0,
+    delay: duration * 0.55,
+    duration: duration * 0.45,
     ease: 'Quad.easeOut',
     onComplete: () => label.destroy(),
   });

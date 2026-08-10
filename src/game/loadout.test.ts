@@ -13,6 +13,7 @@ import {
   rightWeapon,
 } from '@/game/loadout';
 import { SUPPORTS } from '@/data/supports';
+import { basicSkillsOf } from '@/data/weapons';
 import { configureManifestation, createInitialProgress, unlockBasicSkills, unlockSupports, unlockWeapons } from '@/game/progression';
 import { createRun, clearRoom } from '@/game/run';
 
@@ -33,8 +34,10 @@ describe('createLoadout', () => {
     expect(rightWeapon(loadout)?.name).toBe('활');
     expect(allSkills(loadout).map((s) => s.id)).toEqual([
       'sword-slash',
+      'thrust',
       'annihilation',
       'arrow-shot',
+      'scattershot',
       'volley',
     ]);
   });
@@ -43,7 +46,7 @@ describe('createLoadout', () => {
     const loadout = createLoadout('sword', null);
 
     expect(rightWeapon(loadout)).toBeNull();
-    expect(allSkills(loadout).map((s) => s.id)).toEqual(['sword-slash', 'annihilation']);
+    expect(allSkills(loadout).map((s) => s.id)).toEqual(['sword-slash', 'thrust', 'annihilation']);
     expect(describeByHand(loadout)[1]).toEqual({ hand: '오른손', weapon: '없음', lines: [] });
   });
 
@@ -59,11 +62,12 @@ describe('resolveFor', () => {
     const bow = rightWeapon(loadout);
     if (!bow) throw new Error('오른손 무기가 필요합니다.');
     const withSupport = resolveFor(loadout, bow.basic);
-    const without = resolveFor(loadout, bow.combo);
+    const volley = basicSkillsOf(bow).find((skill) => skill.id === 'volley')!;
+    const without = resolveFor(loadout, volley);
 
     // 부귀는 피해 25% 증가
     expect(withSupport.stats.damage).toBeCloseTo((bow.basic.base.damage ?? 0) * 1.25, 10);
-    expect(without.stats.damage).toBe(bow.combo.base.damage);
+    expect(without.stats.damage).toBe(volley.base.damage);
   });
 });
 
@@ -82,7 +86,8 @@ describe('loadoutFromProgress', () => {
     const loadout = loadoutFromProgress(progress);
     expect(supportsFor(loadout, 'scattershot').map((s) => s.id)).toEqual(['multiple-projectiles']);
     expect(supportsFor(loadout, 'arrow-shot')).toEqual([]);
-    expect(resolveFor(loadout, rightWeapon(loadout)!.basicSkill).stats.projectileCount).toBe(5);
+    const scattershot = basicSkillsOf(rightWeapon(loadout)!).find((skill) => skill.id === 'scattershot')!;
+    expect(resolveFor(loadout, scattershot).stats.projectileCount).toBe(5);
   });
 
   it('첫 소켓이 비면 보조가 무기 본래의 기본 공격으로 간다', () => {

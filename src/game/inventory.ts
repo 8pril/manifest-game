@@ -1,4 +1,4 @@
-import { WEAPON_IDS, weaponOf, type WeaponId } from '@/data/weapons';
+import { WEAPON_IDS, basicSkillOwner, basicSkillsOf, weaponOf, type WeaponId } from '@/data/weapons';
 import { SUPPORTS, findSupport } from '@/data/supports';
 import { KEYS, findKey } from '@/data/keys';
 import { supportSlotType } from '@/engine/support';
@@ -63,15 +63,17 @@ function weaponItem(id: WeaponId): InventoryItem {
   return { kind: 'weapon', id, name: weapon.name, color: weapon.color };
 }
 
-export function basicSkillItem(id: WeaponId): InventoryItem {
-  const weapon = weaponOf(id);
+export function basicSkillItem(id: string): InventoryItem {
+  const owned = basicSkillOwner(id);
+  if (!owned) throw new Error(`Unknown basic skill: ${id}`);
+  const { weapon, skill } = owned;
   return {
     kind: 'skill',
-    id: weapon.basicSkill.id,
-    weapon: id,
-    name: weapon.basicSkill.name,
+    id: skill.id,
+    weapon: weapon.id,
+    name: skill.name,
     color: weapon.color,
-    description: `${weapon.basic.name} 대신 ${weapon.basicSkill.name}을 쓴다`,
+    description: `${weapon.basic.name} 대신 ${skill.name}을 쓴다`,
   };
 }
 
@@ -99,9 +101,11 @@ export function ownedItems(progress: PlayerProgress): InventoryItem[] {
   // **기본스킬은 무기와 별개로 보유한다.** 무기를 들고 있어도 그 스킬을 아직
   // 안 주웠으면 인벤토리에 없다. 소켓에 끼우는 아이템이므로 줍는 행위가
   // 상태로 남아야 한다.
-  const skills = WEAPON_IDS
-    .filter((id) => progress.ownedBasicSkills.includes(weaponOf(id).basicSkill.id))
-    .map(basicSkillItem);
+  const skills = WEAPON_IDS.flatMap((id) =>
+    basicSkillsOf(id)
+      .filter((skill) => progress.ownedBasicSkills.includes(skill.id))
+      .map((skill) => basicSkillItem(skill.id)),
+  );
   const supports = SUPPORTS.filter((s) => progress.ownedSupports.includes(s.id))
     .map((s) => supportItem(s.id))
     .filter((item): item is InventoryItem => item !== null);

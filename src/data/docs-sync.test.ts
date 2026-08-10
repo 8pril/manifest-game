@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { SUPPORTS } from '@/data/supports';
-import { WEAPON_IDS, weaponOf } from '@/data/weapons';
+import { WEAPON_IDS, basicSkillsOf, weaponOf } from '@/data/weapons';
 
 /**
  * 문서가 데이터를 빠짐없이 싣고 있는지 고정한다.
@@ -27,7 +27,7 @@ describe('docs/game-scope.md', () => {
   it('무기와 강화기술 이름이 전부 실려 있다', () => {
     const missing = WEAPON_IDS.flatMap((id) => {
       const weapon = weaponOf(id);
-      return [weapon.name, weapon.basic.name, weapon.basicSkill.name, weapon.combo.name]
+      return [weapon.name, weapon.basic.name, ...basicSkillsOf(weapon).map((skill) => skill.name)]
         .filter((name) => !scope.includes(name));
     });
 
@@ -54,7 +54,8 @@ describe('docs/support-skill-reference.md', () => {
   it('무기와 강화기술 이름이 전부 실려 있다', () => {
     const missing = WEAPON_IDS.flatMap((id) => {
       const weapon = weaponOf(id);
-      return [weapon.name, weapon.combo.name].filter((name) => !supportReference.includes(name));
+      return [weapon.name, ...basicSkillsOf(weapon).map((skill) => skill.name)]
+        .filter((name) => !supportReference.includes(name));
     });
 
     expect(missing).toEqual([]);

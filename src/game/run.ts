@@ -71,6 +71,8 @@ export interface RunState {
   roomStartProgress: PlayerProgress;
   /** 현재 방에 들어온 순간의 처치 수. 사망한 방의 처치는 되돌린다. */
   roomStartKills: number;
+  /** 이미 정리한 전투 구역. 갈림길 허브로 돌아왔을 때 적을 다시 살리지 않기 위해 쓴다. */
+  clearedRooms: readonly number[];
   /**
    * 방금 정리한 방에서 **실제로 새로 얻은 것**. 이미 갖고 있던 것은 빠진다.
    * 연출이 방의 `reward`를 그대로 읽으면 두 번째 판에서 거짓말을 하게 된다.
@@ -113,6 +115,7 @@ export function createRun(left: WeaponId, right: WeaponId | null, savedProgress?
     progress,
     roomStartProgress: progress,
     roomStartKills: 0,
+    clearedRooms: [],
     invulnerable: 0,
     kills: 0,
     elapsed: 0,
@@ -135,6 +138,7 @@ export function clearRoom(run: RunState): RunState {
     return {
       ...run,
       phase: 'won',
+      clearedRooms: withClearedRoom(run, run.roomIndex),
       shieldEnergy: SHIELD_ENERGY_MAX,
       potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
       progress: rewarded,
@@ -146,10 +150,10 @@ export function clearRoom(run: RunState): RunState {
   if (room?.entersTown) {
     let progress = unlockWeaponSwitch(rewarded);
     progress = setWheelSlot(progress, 'left', 0, progress.active.left);
-    progress = setWheelSlot(progress, 'left', 1, progress.unlockedWeapons.includes('shield') ? 'shield' : null);
     return {
       ...run,
       phase: 'town',
+      clearedRooms: withClearedRoom(run, run.roomIndex),
       shieldEnergy: SHIELD_ENERGY_MAX,
       potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
       progress,
@@ -161,6 +165,7 @@ export function clearRoom(run: RunState): RunState {
   return {
     ...run,
     roomIndex: run.roomIndex + 1,
+    clearedRooms: withClearedRoom(run, run.roomIndex),
     shieldEnergy: SHIELD_ENERGY_MAX,
     potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
     progress: rewarded,
@@ -169,6 +174,48 @@ export function clearRoom(run: RunState): RunState {
     loadout: loadoutFromProgress(rewarded, run.loadout),
     gained,
   };
+}
+
+export function clearRoomTo(run: RunState, nextRoomIndex: number): RunState {
+  if (run.phase !== 'combat') return run;
+  const room = roomAt(run.roomIndex);
+  const gained = newPartsOfReward(run.progress, room?.reward) ?? (room?.reward ? run.gained : undefined);
+  const rewarded = applyRoomReward(run.progress, room?.reward);
+
+  return {
+    ...run,
+    roomIndex: nextRoomIndex,
+    shieldEnergy: SHIELD_ENERGY_MAX,
+    potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
+    progress: rewarded,
+    roomStartProgress: rewarded,
+    roomStartKills: run.kills,
+    clearedRooms: withClearedRoom(run, run.roomIndex),
+    loadout: loadoutFromProgress(rewarded, run.loadout),
+    gained,
+  };
+}
+
+export function moveToRoom(run: RunState, nextRoomIndex: number): RunState {
+  if (run.phase !== 'combat') return run;
+  return {
+    ...run,
+    roomIndex: nextRoomIndex,
+    shieldEnergy: SHIELD_ENERGY_MAX,
+    potionCharge: Math.min(POTION_MAX_CHARGE, run.potionCharge),
+    roomStartProgress: run.progress,
+    roomStartKills: run.kills,
+    loadout: loadoutFromProgress(run.progress, run.loadout),
+  };
+}
+
+export function markCurrentRoomCleared(run: RunState): RunState {
+  if (run.phase !== 'combat') return run;
+  return { ...run, clearedRooms: withClearedRoom(run, run.roomIndex) };
+}
+
+function withClearedRoom(run: RunState, roomIndex: number): readonly number[] {
+  return run.clearedRooms.includes(roomIndex) ? run.clearedRooms : [...run.clearedRooms, roomIndex];
 }
 
 /** 전투 방 안에서 바닥 드랍을 주웠을 때 보상만 먼저 적용한다. */

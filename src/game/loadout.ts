@@ -1,6 +1,6 @@
 import type { Skill, Support } from '@/engine/support';
 import { resolveSkill, canAttach, type ResolvedSkill } from '@/engine/support';
-import { weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
+import { basicSkillsOf, weaponOf, type Weapon, type WeaponId } from '@/data/weapons';
 import { configuredSupports, equippedBasicSkill, type PlayerProgress } from '@/game/progression';
 
 /**
@@ -72,11 +72,13 @@ export function rightWeapon(loadout: Loadout): Weapon | null {
   return loadout.right ? weaponOf(loadout.right) : null;
 }
 
-/** 로드아웃에 포함된 모든 스킬. 기본 공격 2개 + 발동 스킬 2개. */
+/** 로드아웃에 포함된 모든 스킬. 기본 공격 + 기본스킬 후보. */
 export function allSkills(loadout: Loadout): Skill[] {
   const left = leftWeapon(loadout);
   const right = rightWeapon(loadout);
-  return right ? [left.basic, left.combo, right.basic, right.combo] : [left.basic, left.combo];
+  return right
+    ? [left.basic, ...basicSkillsOf(left), right.basic, ...basicSkillsOf(right)]
+    : [left.basic, ...basicSkillsOf(left)];
 }
 
 export function supportsFor(loadout: Loadout, skillId: string): readonly Support[] {
@@ -107,7 +109,7 @@ export function describeByHand(loadout: Loadout): { hand: string; weapon: string
   return sides.map(({ hand, weapon }) => ({
     hand,
     weapon: weapon?.name ?? '없음',
-    lines: weapon ? [weapon.basic, weapon.combo].flatMap((skill) => {
+    lines: weapon ? [weapon.basic, ...basicSkillsOf(weapon)].flatMap((skill) => {
       const supports = supportsFor(loadout, skill.id);
       return supports.length ? [`${skill.name}: ${supports.map((s) => s.name).join(', ')}`] : [];
     }) : [],
@@ -117,9 +119,9 @@ export function describeByHand(loadout: Loadout): { hand: string; weapon: string
 /** 어떤 스킬이 어느 손에 속하는지. HUD나 장비 설정 UI에서 쓴다. */
 export function handOf(loadout: Loadout, skillId: string): '왼손' | '오른손' | null {
   const left = leftWeapon(loadout);
-  if (left.basic.id === skillId || left.combo.id === skillId) return '왼손';
+  if (left.basic.id === skillId || basicSkillsOf(left).some((skill) => skill.id === skillId)) return '왼손';
   const right = rightWeapon(loadout);
   if (!right) return null;
-  if (right.basic.id === skillId || right.combo.id === skillId) return '오른손';
+  if (right.basic.id === skillId || basicSkillsOf(right).some((skill) => skill.id === skillId)) return '오른손';
   return null;
 }

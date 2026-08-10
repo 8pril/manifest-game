@@ -20,6 +20,7 @@ export interface RunCheckpoint {
   progress: PlayerProgress;
   roomStartProgress: PlayerProgress;
   roomStartKills: number;
+  clearedRooms: readonly number[];
   kills: number;
   gained?: {
     weapons?: readonly WeaponId[];
@@ -155,6 +156,7 @@ function sanitizeRunCheckpoint(raw: Record<string, unknown>): RunCheckpoint {
     progress,
     roomStartProgress,
     roomStartKills: nonNegativeInteger(raw.roomStartKills, 0),
+    clearedRooms: integerList(raw.clearedRooms),
     kills: nonNegativeInteger(raw.kills, 0),
     gained: roomReward(raw.gained),
     elapsed: Math.max(0, numberOr(raw.elapsed, 0)),
@@ -177,6 +179,11 @@ function roomReward(value: unknown): RunCheckpoint['gained'] {
 
 function nonNegativeInteger(value: unknown, fallback: number): number {
   return Math.max(0, Math.floor(numberOr(value, fallback)));
+}
+
+function integerList(value: unknown): readonly number[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((entry) => nonNegativeInteger(entry, 0)))];
 }
 
 function positiveNumber(value: unknown, fallback: number): number {

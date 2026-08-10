@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   createRun,
   clearRoom,
+  clearRoomTo,
   collectRoomReward,
   leaveTown,
+  markCurrentRoomCleared,
+  moveToRoom,
   damagePlayer,
   retryCurrentRoom,
   addKill,
@@ -96,7 +99,7 @@ describe('clearRoom', () => {
     // 확정 보조형스킬은 없다. 무작위 드랍은 주워야 들어온다.
     expect(town.progress.ownedSupports).toEqual([]);
     expect(town.progress.weaponSwitchUnlocked).toBe(true);
-    expect(town.progress.wheel.left).toEqual(['sword', 'shield']);
+    expect(town.progress.wheel.left).toEqual(['sword', null]);
     expect(town.progress.wheel.right).toEqual([null, null]);
     expect(town.progress.active).toEqual({ left: 'sword', right: null });
     expect(supportsFor(town.loadout, 'volley')).toEqual([]);
@@ -121,6 +124,34 @@ describe('clearRoom', () => {
   it('전투 중이 아니면 아무 일도 하지 않는다', () => {
     const town = clearRoom(clearRoom(newRun()));
     expect(clearRoom(town)).toBe(town);
+  });
+
+  it('허브 방은 정리 표시만 남기고 같은 방에 머무를 수 있다', () => {
+    const run = { ...createRun('sword', null), roomIndex: 2 };
+    const cleared = markCurrentRoomCleared(run);
+
+    expect(cleared.roomIndex).toBe(2);
+    expect(cleared.clearedRooms).toEqual([2]);
+    expect(markCurrentRoomCleared(cleared).clearedRooms).toEqual([2]);
+  });
+
+  it('분기 방을 정리하면 보상을 받고 지정한 방으로 돌아간다', () => {
+    const run = { ...createRun('sword', null), roomIndex: 3, kills: 7 };
+    const returned = clearRoomTo(run, 2);
+
+    expect(returned.roomIndex).toBe(2);
+    expect(returned.clearedRooms).toEqual([3]);
+    expect(returned.roomStartKills).toBe(7);
+    expect(returned.progress.ownedKeys).toContain('key-upper');
+  });
+
+  it('허브에서 분기 방으로 이동할 때는 보상을 적용하지 않는다', () => {
+    const run = { ...createRun('sword', null), roomIndex: 2 };
+    const moved = moveToRoom(run, 4);
+
+    expect(moved.roomIndex).toBe(4);
+    expect(moved.clearedRooms).toEqual([]);
+    expect(moved.progress.ownedKeys).toEqual([]);
   });
 });
 
@@ -252,7 +283,7 @@ describe('damagePlayer', () => {
 
 describe('retryCurrentRoom', () => {
   it('사망하면 같은 방 시작 상태로 되돌린다', () => {
-    let run = { ...createRun('sword', null), roomIndex: 4 };
+    let run = { ...createRun('sword', null), roomIndex: 3 };
     run = collectRoomReward(run, { keys: ['key-upper'] });
     run = addKill(run);
     run = { ...run, potionCharge: 0 };
@@ -261,7 +292,7 @@ describe('retryCurrentRoom', () => {
     const retried = retryCurrentRoom(run);
 
     expect(retried.phase).toBe('combat');
-    expect(retried.roomIndex).toBe(4);
+    expect(retried.roomIndex).toBe(3);
     expect(retried.hp).toBe(PLAYER_MAX_HP);
     expect(retried.shieldEnergy).toBe(SHIELD_ENERGY_MAX);
     expect(retried.potionCharge).toBe(POTION_MAX_CHARGE);
@@ -271,16 +302,17 @@ describe('retryCurrentRoom', () => {
   });
 
   it('이미 클리어한 분기 보스 보상은 다음 방에서 죽어도 유지한다', () => {
-    let run = { ...createRun('sword', null), roomIndex: 4 };
-    run = clearRoom(collectRoomReward(run, { keys: ['key-upper'] }));
-    expect(run.roomIndex).toBe(5);
+    let run = { ...createRun('sword', null), roomIndex: 3 };
+    run = clearRoomTo(collectRoomReward(run, { keys: ['key-upper'] }), 2);
+    expect(run.roomIndex).toBe(2);
     expect(run.progress.ownedKeys).toContain('key-upper');
 
+    run = moveToRoom(run, 4);
     run = collectRoomReward(run, { keys: ['key-lower'] });
     run = damagePlayer(run, PLAYER_MAX_HP);
     const retried = retryCurrentRoom(run);
 
-    expect(retried.roomIndex).toBe(5);
+    expect(retried.roomIndex).toBe(4);
     expect(retried.progress.ownedKeys).toEqual(['key-upper']);
     expect(retried.progress.ownedKeys).not.toContain('key-lower');
   });
@@ -447,9 +479,9 @@ describe('이미 가진 보상은 다시 획득으로 세지 않는다', () => {
   it('이미 다 가지고 있으면 새로 얻은 것이 없다', () => {
     // 저장이 있는 두 번째 판. 같은 보상을 또 받지만 실제로 늘어나는 것은 없다.
     const owned = unlockBasicSkills(unlockWeapons(createInitialProgress(), ['bow', 'shield']), [
-      'thrust',
-      'scattershot',
-      'shield-slam',
+      'annihilation',
+      'volley',
+      'fracture-wave',
     ]);
 
     const run = clearRoom(atFirstBoss(owned));

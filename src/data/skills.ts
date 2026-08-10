@@ -11,7 +11,7 @@ import { WEAPON_LIST } from '@/data/weapons';
 
 export const SKILLS: readonly Skill[] = WEAPON_LIST.flatMap((weapon) => [
   weapon.basic,
-  weapon.combo,
+  ...weapon.basicSkills,
 ]);
 
 export function findSkill(id: string): Skill | undefined {
