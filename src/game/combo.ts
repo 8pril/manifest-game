@@ -49,12 +49,10 @@ export interface ComboState {
   right: number;
   /** 남은 유지 시간(초). 손과 무관하게 하나다. 마지막 명중에서 다시 찬다. */
   remaining: number;
-  /** 직전에 명중시킨 손. 교차 판정에 쓴다. 아직 아무것도 안 맞혔으면 null. */
-  lastHand: Hand | null;
 }
 
 export function createCombo(): ComboState {
-  return { left: 0, right: 0, remaining: 0, lastHand: null };
+  return { left: 0, right: 0, remaining: 0 };
 }
 
 export function comboOf(combo: ComboState, hand: Hand): number {
@@ -77,28 +75,15 @@ export function gainCombo(combo: ComboState, hand: Hand, stats: StatBlock): Comb
     ...combo,
     [hand]: Math.min(COMBO_MAX, comboOf(combo, hand) + gain),
     remaining: duration,
-    lastHand: hand,
   };
 }
 
 /**
- * 강화기술이 명중했을 때. 수치는 그대로 두고 지속시간과 직전 손만 갱신한다.
+ * 지속시간만 다시 채운다. 수치도 손도 건드리지 않는다.
  *
- * 강화기술로 때린 것도 "그 손으로 때렸다"이므로 교차 판정에 반영해야 한다.
- * 반영하지 않으면 강화기술이 나가는 동안 교차가 끊긴 것으로 잘못 읽힌다.
- */
-export function sustainCombo(combo: ComboState, hand: Hand, stats: StatBlock): ComboState {
-  if (comboTotal(combo) === 0) return { ...combo, lastHand: hand };
-  return { ...combo, remaining: stats.comboDuration ?? COMBO_BASE_DURATION, lastHand: hand };
-}
-
-/**
- * 지속시간만 다시 채운다. 손도 쌓아 둔 교차도 건드리지 않는다.
- *
- * 지대 지속피해가 이걸 쓴다. 예전에는 지대 틱도 `sustainCombo`를 불러 `직전 손`을
- * 계속 자기 손으로 덮어썼다. 지대가 도는 동안 반대손이 영구히 준비 상태가 되고,
- * 교차 연속은 같은 손 명중이 반복되는 것으로 읽혀 오르지 못했다.
- * 지대 틱은 플레이어가 손으로 친 것이 아니므로 리듬 판정에 끼어들면 안 된다.
+ * **지대의 지속피해 틱이 이걸 쓴다.** 틱은 플레이어가 손으로 친 것이 아니라 깔아 둔
+ * 지대가 알아서 도는 것이므로, 콤보를 올려 주면 지대를 한 번 깔고 가만히 있어도
+ * 수치가 계속 오른다. 지대를 까는 순간의 명중은 `gainCombo`가 따로 센다.
  */
 export function refreshCombo(combo: ComboState, stats: StatBlock): ComboState {
   if (comboTotal(combo) === 0) return combo;
@@ -119,7 +104,7 @@ export function tickCombo(combo: ComboState, deltaSeconds: number): ComboState {
  * 것과 달리 **플레이어가 의도해서 털어내는** 동작이라 따로 둔다.
  */
 export function consumeCombo(combo: ComboState, scope: 'total' | Hand): ComboState {
-  if (scope === 'total') return { ...createCombo(), lastHand: combo.lastHand };
+  if (scope === 'total') return createCombo();
   return { ...combo, [scope]: 0 };
 }
 

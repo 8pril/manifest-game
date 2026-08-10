@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   createCombo,
   gainCombo,
-  sustainCombo,
   tickCombo,
   consumeCombo,
   comboTriggerMet,
@@ -25,7 +24,6 @@ describe('콤보 적립', () => {
 
     expect(combo.left).toBe(1);
     expect(combo.right).toBe(0);
-    expect(combo.lastHand).toBe('left');
   });
 
   it('양손을 번갈아 쳐도 합계로 쌓인다', () => {
@@ -54,15 +52,6 @@ describe('콤보 적립', () => {
     expect(combo.left).toBe(2);
   });
 
-  it('강화기술 명중은 수치를 올리지 않고 직전 손만 갱신한다', () => {
-    // 직전 손을 갱신해야 강화기술이 나가는 동안에도 교차 판정이 이어진다.
-    let combo = gainCombo(createCombo(), 'left', stats);
-    combo = sustainCombo(combo, 'right', stats);
-
-    expect(combo.left).toBe(1);
-    expect(combo.right).toBe(0);
-    expect(combo.lastHand).toBe('right');
-  });
 });
 
 describe('콤보 만료', () => {
@@ -71,7 +60,6 @@ describe('콤보 만료', () => {
     combo = tickCombo(combo, 5.1);
 
     expect(comboTotal(combo)).toBe(0);
-    expect(combo.lastHand).toBeNull();
   });
 
   it('명중이 이어지면 시간이 다시 찬다', () => {
@@ -92,7 +80,6 @@ describe('콤보 소모', () => {
     combo = consumeCombo(combo, 'total');
 
     expect(comboTotal(combo)).toBe(0);
-    expect(combo.lastHand).toBe('right');
   });
 
   it('한 손만 소모하면 반대손은 남는다', () => {
@@ -135,16 +122,16 @@ describe('콤보 조건 판정', () => {
 });
 
 describe('지대 지속피해', () => {
-  it('지속시간만 늘리고 손과 교차는 건드리지 않는다', () => {
-    // 지대 틱은 플레이어가 손으로 친 것이 아니다. 예전에는 틱마다 `sustainCombo`를
-    // 불러 `직전 손`을 자기 손으로 덮어썼고, 그동안 반대손이 영구히 준비 상태였다.
+  it('지속시간만 늘리고 수치는 건드리지 않는다', () => {
+    // 지대 틱은 플레이어가 손으로 친 것이 아니라 깔아 둔 지대가 도는 것이다.
+    // 여기서 수치를 올리면 한 번 깔고 가만히 있어도 콤보가 계속 오른다.
     let combo = createCombo();
     for (const hand of ['left', 'right'] as const) combo = gainCombo(combo, hand, stats);
-    const before = { lastHand: combo.lastHand };
 
     const after = refreshCombo(tickCombo(combo, 2), stats);
 
-    expect(after.lastHand).toBe(before.lastHand);
+    expect(after.left).toBe(combo.left);
+    expect(after.right).toBe(combo.right);
     expect(after.remaining).toBe(COMBO_BASE_DURATION);
   });
 });

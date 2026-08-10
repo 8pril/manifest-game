@@ -98,7 +98,6 @@ import { leftWeapon, rightWeapon, resolveFor, supportsFor, describeByHand, loado
 import {
   createCombo,
   gainCombo,
-  sustainCombo,
   refreshCombo,
   tickCombo,
   consumeCombo,
@@ -395,8 +394,6 @@ interface ProjectileEntity {
   view: Phaser.GameObjects.Arc | Phaser.GameObjects.Sprite;
   /** 이 투사체를 쏜 무기. 명중 시 콤보와 상태이상을 누구에게 귀속할지 결정한다. */
   weapon: Weapon;
-  /** 기본 공격인지. 기본 공격만 콤보 게이지를 올린다. */
-  basic: boolean;
   behaviors: readonly Behavior[];
 }
 
@@ -1067,8 +1064,6 @@ export class PlayScene extends Phaser.Scene {
     // 형태가 바뀌면 간격도 그 스킬의 것을 쓴다. 지대형은 겹치면 피해가 곱으로
     // 불어나므로 기본스킬 후보용 별도 간격으로 늦춘다. 그 이유는 `attackIntervalFor` 참고.
     runtime.readyAt = this.time.now + attackIntervalFor(runtime.weapon, skill);
-    // 첫 소켓에 끼운 기본스킬도 이제는 "기본 공격"이다. 옛 콤보 전환 시절처럼
-    // `basic: false`로 넘기면 콤보형 연계를 붙여도 콤보가 오르지 않는다.
     this.useSkill(runtime, skill, angle);
     this.refreshHud();
   }
@@ -1164,8 +1159,7 @@ export class PlayScene extends Phaser.Scene {
    * 무기를 한 번 쓴다.
    *
    * **`basic` 구분은 없어졌다.** 첫 소켓에 무엇을 끼웠든 그것이 그 무기의 기본 공격이다.
-   * 옛 콤보 전환 시절에는 강화기술을 `basic: false`로 넘겨 콤보를 올리지 않았는데,
-   * 그 값이 남아 있어 기본스킬을 끼우면 콤보형 연계가 먹통이 됐다.
+   * 옛 콤보 전환 시절의 `basic` 값은 명중 처리에서 완전히 걷어냈다.
    *
    * **지대에는 `owner`를 반드시 넘긴다.** 지대는 직접 명중이 없어서, owner가 없으면
    * 상태이상도 안 걸리고 콤보 지속시간도 안 늘어난다. 비전 개화(지대형 기본스킬)를
@@ -1178,10 +1172,10 @@ export class PlayScene extends Phaser.Scene {
 
     switch (deliveryOf(skill)) {
       case 'projectile':
-        this.fireProjectiles(runtime.weapon, skill, resolved.stats, resolved.behaviors, angle, true);
+        this.fireProjectiles(runtime.weapon, skill, resolved.stats, resolved.behaviors, angle);
         break;
       case 'melee':
-        this.swingMelee(runtime, skill, resolved.stats, resolved.behaviors, angle, true);
+        this.swingMelee(runtime, skill, resolved.stats, resolved.behaviors, angle);
         break;
       case 'area':
         this.dropArea(resolved.stats, resolved.behaviors, angle, runtime);
@@ -1214,7 +1208,6 @@ export class PlayScene extends Phaser.Scene {
     stats: ReturnType<typeof resolveFor>['stats'],
     behaviors: ReturnType<typeof resolveFor>['behaviors'],
     angle: number,
-    basic: boolean,
   ): void {
     const size = 22;
     for (const state of spawnProjectiles(stats, behaviors, { x: this.player.x, y: this.player.y }, angle)) {
@@ -1222,7 +1215,6 @@ export class PlayScene extends Phaser.Scene {
         state,
         view: this.createBoltView(BOLT_SPRITE[weapon.id], state.x, state.y, size, state.angle, weapon.color),
         weapon,
-        basic,
         behaviors,
       });
     }
@@ -1234,7 +1226,6 @@ export class PlayScene extends Phaser.Scene {
     stats: ReturnType<typeof resolveFor>['stats'],
     behaviors: ReturnType<typeof resolveFor>['behaviors'],
     angle: number,
-    basic: boolean,
   ): void {
     const range = stats.meleeRange ?? 90;
     const arc = stats.meleeArc ?? 1.7;
@@ -1277,7 +1268,7 @@ export class PlayScene extends Phaser.Scene {
       const entity = this.enemies.find((e) => e.state.id === target.id);
       if (!entity) continue;
 
-      this.resolveHit(entity, stats.damage ?? 0, runtime.weapon, basic, runtime, behaviors);
+      this.resolveHit(entity, stats.damage ?? 0, runtime.weapon, runtime, behaviors);
       this.pushEnemy(entity, stats.knockback ?? 0, undefined, behaviors);
     }
   }
@@ -1349,7 +1340,7 @@ export class PlayScene extends Phaser.Scene {
       for (const entity of this.enemies) {
         if (!isAlive(entity.state) || !containsPoint(area, entity.state)) continue;
         // 상태이상을 먼저 굴린다. 밀어내다 벽에 닿으면 그때 확정 기절이 덮어쓴다.
-        this.resolveHit(entity, 0, owner.weapon, false, owner, behaviors);
+        this.resolveHit(entity, 0, owner.weapon, owner, behaviors);
         // 지대 중심에서 밀어낸다. 넉백이 있는 지대만 해당된다(균열 파동).
         this.pushEnemy(entity, stats.knockback ?? 0, at, behaviors);
       }
@@ -1361,7 +1352,6 @@ export class PlayScene extends Phaser.Scene {
     entity: EnemyEntity,
     rawDamage: number,
     weapon: Weapon,
-    basic: boolean,
     runtime?: WeaponRuntime,
     behaviors: readonly Behavior[] = [],
   ): void {
@@ -1436,13 +1426,13 @@ export class PlayScene extends Phaser.Scene {
       // 콤보를 읽는 연계를 붙인 무기만 콤보를 쌓는다. 안 붙였으면 아무 일도 없다.
       // 콤보는 판 전체에 하나뿐이라, 어느 손으로 쌓았는지를 따로 들고 있는다.
       if (this.usesCombo(runtime)) {
+        // **플레이어가 친 명중은 전부 콤보를 올린다.** 근접·투사체·지대를 가리지 않는다.
+        // 예전에는 `basic` 값으로 갈렸는데, 첫 소켓에 끼운 것이 곧 기본 공격이 되면서
+        // 그 구분이 없어졌다. 값만 남아 지대에서 `false`로 넘어가는 바람에 멸검·비전
+        // 개화·균열 파동을 끼우면 콤보가 아예 오르지 않았다. 값을 지워 되풀이를 막는다.
+        // 지대의 지속피해 틱은 여전히 올리지 않는다(`refreshCombo`). 그건 손으로 친 것이 아니다.
         const stats = resolveFor(this.run.loadout, weapon.basic).stats;
-        this.combo = basic
-          ? gainCombo(this.combo, runtime.hand, stats)
-          : // 강화기술 명중은 수치를 올리지 않고 지속시간과 직전 손만 갱신한다.
-            // 직전 손을 갱신해야 강화기술이 나가는 동안에도 교차 판정이 이어진다.
-            // 다만 쌓아 둔 교차 연속은 여기서 턴다. 쓰면 없어져야 쌓는 의미가 생긴다.
-            sustainCombo(this.combo, runtime.hand, stats);
+        this.combo = gainCombo(this.combo, runtime.hand, stats);
         this.applyComboEffects(runtime);
       }
       // 강화된 손으로 때렸으면 횟수를 하나 쓴다.
@@ -3080,14 +3070,13 @@ export class PlayScene extends Phaser.Scene {
         if (hit) {
           const outcome = onHitTarget(projectile, hit.state, alive);
           const runtime = entity.weapon.id === this.left.weapon.id ? this.left : this.right ?? undefined;
-          this.resolveHit(hit, outcome.damage, entity.weapon, entity.basic, runtime, entity.behaviors);
+          this.resolveHit(hit, outcome.damage, entity.weapon, runtime, entity.behaviors);
 
           for (const spawned of outcome.spawned) {
             this.projectiles.push({
               state: spawned,
               view: this.createBoltView(BOLT_SPRITE[entity.weapon.id], spawned.x, spawned.y, 22, spawned.angle, entity.weapon.color),
               weapon: entity.weapon,
-              basic: entity.basic,
               behaviors: entity.behaviors,
             });
           }
