@@ -90,7 +90,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
     basic: {
       id: 'sword-slash',
       name: '베기',
-      tags: ['공격', '근접', '물리', '중첩'],
+      tags: ['공격', '근접', '물리', '상처'],
       base: { damage: 46, meleeRange: 120, meleeArc: 1.7, knockback: 18, comboGain: 1, ...COMBO_STATS },
       supportSlots: 2,
     },
@@ -101,7 +101,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       {
         id: 'thrust',
         name: '찌르기',
-        tags: ['공격', '근접', '물리'],
+        tags: ['공격', '근접', '물리', '상처'],
         base: { damage: 54, meleeRange: 190, meleeArc: 0.7, knockback: 24, comboGain: 1, ...COMBO_STATS },
         supportSlots: 2,
       },
@@ -109,7 +109,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       {
         id: 'annihilation',
         name: '멸검',
-        tags: ['공격', '지대', '물리', '지속시간'],
+        tags: ['공격', '지대', '물리', '지속시간', '상처'],
         base: { damage: 14, areaRadius: 82, duration: 1.2, tickInterval: 0.4 },
         supportSlots: 2,
       },

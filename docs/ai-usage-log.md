@@ -6993,3 +6993,17 @@ warden: 'enemy-boss1'   // 이런 파일이 없다 (enemy-boss / enemy-boss2 뿐
 - 관련 파일: `src/scenes/PlayScene.ts`, `docs/action-tracker.md`, `docs/ai-usage-log.md`
 - 검증: `npm run typecheck`, 368개 테스트, `npm run build`, `git diff --check` 통과.
 - 남은 이슈: 없음.
+
+### 2026-08-10 20:46 - 추가 중첩을 검 상처 빌드에 실제 연결
+
+- 단계: 보조스킬 조합 규칙 및 상태이상 전투 로직 보완
+- 사용 AI 도구: Codex
+- 목적: `추가 중첩`이 베기에만 연결되고 최대 중첩 수정자는 전투에서 읽히지 않아 피해 감소만 적용되던 죽은 효과를 실제 상처 빌드 선택지로 만든다.
+- 입력 프롬프트 / 지시: 사용자는 추가 중첩을 멸검에도 연결하는 방향에 동의하고, 베기·찌르기·멸검이 벌어진 상처를 추가로 쌓는 형태로 구현해 달라고 요청했다.
+- AI 출력 요약: 검의 세 공격 형태에 `상처` 태그를 부여하고 추가 중첩이 이를 요구하도록 변경했다. 장착한 공격은 명중 한 번에 벌어진 상처를 기본 1스택과 추가 1스택, 총 2스택 부여한다.
+- 사람이 검토한 기준: 베기·찌르기·멸검에는 장착 가능하고 다른 무기에는 장착되지 않아야 한다. 4스택에서 2스택을 부여하면 폭발한 뒤 초과한 1스택이 사라지지 않고 새 상처로 남아야 한다. 피해 10% 감소도 함께 적용돼야 한다.
+- 수정한 내용: `additionalStatusStacks` 거동을 추가하고 상태 엔진이 명중당 여러 스택을 한 번의 확률 판정으로 처리하도록 확장했다. 폭발선을 넘은 나머지 스택은 새 상태로 이어진다. 기존의 사용되지 않던 `maxStacks +1` 수정자는 제거했다. 툴팁에서는 상태 효과로 분류하고 관련 기획·보조스킬 문서를 갱신했다.
+- 게임/문서 반영 여부: 코드, 테스트, 기획 문서, 보조스킬 참고 문서, 액션 트래커에 반영.
+- 관련 파일: `src/engine/support.ts`, `src/engine/status.ts`, `src/scenes/PlayScene.ts`, `src/data/supports.ts`, `src/data/weapons.ts`, `src/engine/status.test.ts`, `src/data/data.test.ts`, `docs/game-scope.md`, `docs/support-skill-reference.md`, `docs/action-tracker.md`, `docs/ai-usage-log.md`
+- 검증: `npm run typecheck`, 370개 테스트, `npm run build`, `git diff --check` 통과.
+- 남은 이슈: 실제 플레이에서 베기 300ms 주기로 2스택씩 쌓이는 속도와 피해 10% 감소의 교환이 과도하게 강한지 확인해야 한다.

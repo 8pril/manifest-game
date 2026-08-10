@@ -42,6 +42,17 @@ describe('벌어진 상처 - 기획: 1스택씩, 5스택에서 추가피해 후 
     expect(hasStatus(host, 'wound')).toBe(false);
   });
 
+  it('추가 중첩은 한 번의 명중으로 2스택을 쌓고 폭발 뒤 남은 스택을 보존한다', () => {
+    const host = createStatusHost();
+    expect(applyStatus(host, 'wound', always, false, 2).burst).toBe(false);
+    expect(findStatus(host, 'wound')?.stacks).toBe(2);
+    expect(applyStatus(host, 'wound', always, false, 2).burst).toBe(false);
+    expect(findStatus(host, 'wound')?.stacks).toBe(4);
+
+    expect(applyStatus(host, 'wound', always, false, 2).burst).toBe(true);
+    expect(findStatus(host, 'wound')?.stacks).toBe(1);
+  });
+
   it('확률이 1이라 항상 부여된다', () => {
     const host = createStatusHost();
     expect(applyStatus(host, 'wound', never).applied).toBe(true);

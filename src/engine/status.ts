@@ -114,34 +114,41 @@ export function applyStatus(
   random: () => number = Math.random,
   /** 확률 판정을 건너뛴다. 벽 충돌처럼 확정적으로 걸려야 하는 경우에 쓴다. */
   force = false,
+  /** 한 번의 명중으로 부여할 스택 수. 확률 판정은 명중당 한 번만 한다. */
+  stackCount = 1,
 ): ApplyResult {
   const rule = STATUS_RULES[kind];
 
   if ((host.immunity[kind] ?? 0) > 0) return { applied: false, burst: false };
   if (!force && rule.chance < 1 && random() >= rule.chance) return { applied: false, burst: false };
 
-  const existing = findStatus(host, kind);
-  if (!existing) {
-    host.statuses.push({ kind, stacks: 1, remaining: rule.duration });
-    if (kind === 'fracture') {
-      host.stun = STUN_DURATION;
-      host.immunity.fracture = FRACTURE_IMMUNITY;
+  let burst = false;
+  const count = Math.max(1, Math.floor(stackCount));
+  for (let i = 0; i < count; i++) {
+    const existing = findStatus(host, kind);
+    if (!existing) {
+      host.statuses.push({ kind, stacks: 1, remaining: rule.duration });
+      if (kind === 'fracture') {
+        host.stun = STUN_DURATION;
+        host.immunity.fracture = FRACTURE_IMMUNITY;
+      }
+      continue;
     }
-    return { applied: true, burst: false };
+
+    existing.remaining = rule.duration;
+    if (existing.stacks < rule.maxStacks) {
+      existing.stacks += 1;
+    }
+
+    // 벌어진 상처는 최대 중첩에 도달하면 터진다. 한 번에 여러 스택을 부여해
+    // 폭발선을 넘으면 남은 스택은 새 상처로 이어진다.
+    if (kind === 'wound' && existing.stacks >= rule.maxStacks) {
+      removeStatus(host, kind);
+      burst = true;
+    }
   }
 
-  existing.remaining = rule.duration;
-  if (existing.stacks < rule.maxStacks) {
-    existing.stacks += 1;
-  }
-
-  // 벌어진 상처는 최대 중첩에 도달하면 터지고 초기화된다.
-  if (kind === 'wound' && existing.stacks >= rule.maxStacks) {
-    removeStatus(host, kind);
-    return { applied: true, burst: true };
-  }
-
-  return { applied: true, burst: false };
+  return { applied: true, burst };
 }
 
 export function removeStatus(host: StatusHost, kind: StatusKind): void {

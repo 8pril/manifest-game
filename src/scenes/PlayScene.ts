@@ -1332,7 +1332,11 @@ export class PlayScene extends Phaser.Scene {
     }
 
     const canApplyStatus = weapon.status !== 'fracture' || canApplyCrowdControl(enemy, behaviors);
-    const result = canApplyStatus ? applyStatus(enemy, weapon.status) : { applied: false, burst: false };
+    const additionalStacks = findBehavior(behaviors, 'additionalStatusStacks');
+    const stackCount = additionalStacks?.status === weapon.status ? 1 + additionalStacks.count : 1;
+    const result = canApplyStatus
+      ? applyStatus(enemy, weapon.status, Math.random, false, stackCount)
+      : { applied: false, burst: false };
     if (weapon.status === 'fracture' && result.applied) {
       this.showStunFeedback(entity);
     }
@@ -4394,7 +4398,7 @@ export class PlayScene extends Phaser.Scene {
   private supportCategory(support: Support): string | null {
     for (const behavior of support.behaviors ?? []) {
       if (behavior.kind === 'combo') return '콤보 효과';
-      if (behavior.kind === 'statusDamage') return '상태 효과';
+      if (behavior.kind === 'statusDamage' || behavior.kind === 'additionalStatusStacks') return '상태 효과';
     }
     return null;
   }

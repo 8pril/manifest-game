@@ -28,6 +28,8 @@ export type Behavior =
   | { kind: 'hinder' }
   /** 특정 상태이상이 걸린 대상에게 추가 피해를 준다. */
   | { kind: 'statusDamage'; status: StatusKind; more: number }
+  /** 한 번의 명중으로 지정한 상태이상을 추가 중첩한다. */
+  | { kind: 'additionalStatusStacks'; status: StatusKind; count: number }
   /** 보스에게도 넉백, 기절, 이동 방해 같은 CC를 적용할 수 있게 한다. */
   | { kind: 'bossCc' }
   /**

@@ -188,13 +188,11 @@ const MODIFIER_SUPPORTS: Support[] = [
     id: 'added-stacks',
     name: '추가 중첩',
     slotType: 'primary',
-    tags: ['중첩'],
-    requires: ['중첩'],
-    modifiers: [
-      { stat: 'maxStacks', mode: 'flat', value: 1 },
-      { stat: 'damage', mode: 'reduce', value: 0.1 },
-    ],
-    description: '중첩 가능 횟수 +1, 보조 대상 스킬의 피해 10% 감소',
+    tags: ['상처'],
+    requires: ['상처'],
+    modifiers: [{ stat: 'damage', mode: 'reduce', value: 0.1 }],
+    behaviors: [{ kind: 'additionalStatusStacks', status: 'wound', count: 1 }],
+    description: '벌어진 상처를 1스택 추가 부여, 보조 대상 스킬의 피해 10% 감소',
   },
   {
     id: 'lasting-composure',

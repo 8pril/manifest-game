@@ -101,6 +101,8 @@ describe('보조능력 데이터 무결성', () => {
 });
 
 const ARROW_SHOT_ = findSkill('arrow-shot')!;
+const SWORD_SLASH_ = findSkill('sword-slash')!;
+const THRUST_ = findSkill('thrust')!;
 const ANNIHILATION_ = findSkill('annihilation')!;
 
 describe('스킬별 장착 가능 보조능력', () => {
@@ -123,6 +125,14 @@ describe('스킬별 장착 가능 보조능력', () => {
   it('멸검에는 투사체 보조능력이 붙지 않는다', () => {
     const pierce = SUPPORTS.find((s) => s.id === 'pierce')!;
     expect(canAttach(ANNIHILATION_, pierce).ok).toBe(false);
+  });
+
+  it('추가 중첩은 검의 베기·찌르기·멸검에 모두 붙는다', () => {
+    const addedStacks = SUPPORTS.find((s) => s.id === 'added-stacks')!;
+    expect(canAttach(SWORD_SLASH_, addedStacks).ok).toBe(true);
+    expect(canAttach(THRUST_, addedStacks).ok).toBe(true);
+    expect(canAttach(ANNIHILATION_, addedStacks).ok).toBe(true);
+    expect(canAttach(ARROW_SHOT_, addedStacks).ok).toBe(false);
   });
 });
 
