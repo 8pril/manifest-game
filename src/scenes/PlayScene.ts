@@ -16,7 +16,16 @@ import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { attackIntervalFor, basicSkillsOf, deliveryOf, weaponOf, WEAPON_IDS, WEAPON_LIST, type Weapon, type WeaponId } from '@/data/weapons';
 import { SUPPORTS, findSupport } from '@/data/supports';
 import { findKey, missingKeys } from '@/data/keys';
-import { canAttach, findBehavior, resolveSkill, supportSlotType, type Behavior, type Skill, type Support } from '@/engine/support';
+import {
+  attachableSkills,
+  canAttach,
+  findBehavior,
+  resolveSkill,
+  supportSlotType,
+  type Behavior,
+  type Skill,
+  type Support,
+} from '@/engine/support';
 import type { Stat } from '@/engine/modifiers';
 import {
   spawnProjectiles,
@@ -97,6 +106,7 @@ import {
   comboTriggerMet,
   comboReadout,
   otherHand,
+  COMBO_MAX,
   COMBO_REQUIRED,
   type ComboState,
 } from '@/game/combo';
@@ -271,6 +281,33 @@ const WEAPON_SPRITE: Record<WeaponId, string> = {
 const WEAPON_VIEW_SIZE = 34;
 
 /**
+ * 손에 든 무기의 깊이. **손이 아니라 그림 속 자리로 정한다.**
+ *
+ * 양손 다 캐릭터(10)보다 위다. 한 번 아래 자리 무기를 몸 뒤(9.6)로 내렸다가 무기가
+ * 아예 보이지 않아 되돌렸다. 그 자리는 손 위치가 몸 한가운데(-19, +18)라 27px짜리
+ * 무기가 실루엣을 벗어나지 못한다 — 실측하면 검 칼끝이 (+2, +1)로 몸통 정중앙이고
+ * 방패는 (-7, -6)이다. 몸 뒤로 내리면 둘 다 통째로 가려진다.
+ *
+ * 두 자리가 겹칠 때는 **화면 아래쪽 자리가 위로** 온다. 내려다보는 시점이라 아래에
+ * 있는 것이 카메라에 더 가깝다.
+ */
+const WEAPON_SLOT_DEPTH = { left: 10.8, right: 11 } as const;
+
+/**
+ * 실체화 코어 — 장갑에서 무기가 솟는 지점.
+ *
+ * 무기가 불투명한 오브젝트로만 얹혀 있으면 **주운 물건을 쥔 것**으로 읽힌다. 이 게임의
+ * 장갑은 무기를 쥐는 것이 아니라 형태를 실체화한다(`docs/concept-brief.md`). 손에
+ * 무기색 빛을 두고 그 위로 무기가 이어지게 하면 그 관계가 그림으로 드러난다.
+ *
+ * 자기 무기보다 한 겹 뒤에 둬서 무기가 빛에서 뻗어 나온 것처럼 보이게 한다.
+ * 다만 캐릭터(10)보다는 위여야 한다. 아래로 내리면 손이 몸 안쪽이라 빛이 묻힌다.
+ */
+const WEAPON_SLOT_CORE_DEPTH = { left: 10.7, right: 10.9 } as const;
+const WEAPON_CORE_RADIUS = 7;
+const WEAPON_CORE_ALPHA = 0.5;
+
+/**
  * 그림 속 실제 손 위치. `player.png`에서 청록 에너지(#6ea8ff) 픽셀을 찾아 잰 값이고,
  * 스프라이트 크기 대비 비율이라 배율을 바꿔도 따라온다.
  *
@@ -396,7 +433,9 @@ type TownDragSource =
 interface ComboBadge {
   back: Phaser.GameObjects.Rectangle;
   title: Phaser.GameObjects.Text;
+  condition: Phaser.GameObjects.Text;
   value: Phaser.GameObjects.Text;
+  effect: Phaser.GameObjects.Text;
   timer: Phaser.GameObjects.Rectangle;
   pips: Phaser.GameObjects.Rectangle[];
 }
@@ -576,6 +615,13 @@ export class PlayScene extends Phaser.Scene {
     left: null,
     right: null,
   };
+  /** 손의 실체화 빛. 무기 그림이 있을 때만 만든다. */
+  private weaponCores: { left: Phaser.GameObjects.Arc | null; right: Phaser.GameObjects.Arc | null } = {
+    left: null,
+    right: null,
+  };
+  /** 직전에 그린 무기. 바뀐 순간에만 실체화 연출을 튼다. */
+  private shownWeapon: { left: WeaponId | null; right: WeaponId | null } = { left: null, right: null };
   /** 비전 흐름이 걸린 동안 플레이어를 감싸는 오라. 버프가 살아 있다는 유일한 표시다. */
   private arcaneAura!: Phaser.GameObjects.Arc;
   private overlay: Phaser.GameObjects.Container | null = null;
@@ -792,6 +838,7 @@ export class PlayScene extends Phaser.Scene {
     // 손에 든 무기를 캐릭터 옆에 그린다. 무기 이미지가 없으면 만들지 않고,
     // 그때는 예전처럼 HUD 글자와 공격 이펙트 색으로만 구분된다.
     this.weaponViews = { left: this.createWeaponView(), right: this.createWeaponView() };
+    this.weaponCores = { left: this.createWeaponCore(), right: this.createWeaponCore() };
     this.refreshWeaponViews();
 
     this.buildHud();
@@ -1691,21 +1738,52 @@ export class PlayScene extends Phaser.Scene {
   private createWeaponView(): Phaser.GameObjects.Sprite | null {
     if (!this.textures.exists('weapon-sword')) return null;
     // 손잡이 쪽을 회전 중심으로 둔다. 가운데를 중심으로 돌리면 무기가 손에서 떨어져 나간다.
-    return this.add.sprite(0, 0, 'weapon-sword').setOrigin(0.2, 0.5).setDepth(11).setVisible(false);
+    // 깊이는 `updateWeaponViews`가 정한다. 어느 자리에 서는지가 방향에 따라 바뀐다.
+    return this.add.sprite(0, 0, 'weapon-sword').setOrigin(0.2, 0.5).setVisible(false);
+  }
+
+  private createWeaponCore(): Phaser.GameObjects.Arc | null {
+    if (!this.textures.exists('weapon-sword')) return null;
+    return this.add.circle(0, 0, WEAPON_CORE_RADIUS, 0xffffff, WEAPON_CORE_ALPHA).setVisible(false);
+  }
+
+  /**
+   * 무기가 손에서 솟아오르는 연출.
+   *
+   * 무기를 바꾼 순간에만 튼다. 평소에도 계속 움직이면 34px짜리 그림이 화면에서
+   * 흔들려 오히려 읽기 어려워진다.
+   */
+  private playMaterialize(view: Phaser.GameObjects.Sprite, core: Phaser.GameObjects.Arc | null): void {
+    const scale = view.scaleX;
+    this.tweens.killTweensOf(view);
+    view.setScale(scale * 0.4).setAlpha(0);
+    this.tweens.add({ targets: view, scaleX: scale, scaleY: scale, alpha: 1, duration: 180, ease: 'Back.easeOut' });
+
+    if (!core) return;
+    this.tweens.killTweensOf(core);
+    core.setScale(2.4).setAlpha(0.95);
+    this.tweens.add({ targets: core, scaleX: 1, scaleY: 1, alpha: WEAPON_CORE_ALPHA, duration: 260, ease: 'Cubic.easeOut' });
   }
 
   /** 손에 든 무기가 바뀌면 그림도 바꾼다. R링 교체와 마을 설정 뒤에 불린다. */
   private refreshWeaponViews(): void {
     for (const [hand, runtime] of [['left', this.left], ['right', this.right]] as const) {
       const view = this.weaponViews[hand];
+      const core = this.weaponCores[hand];
       if (!view) continue;
       if (!runtime) {
         view.setVisible(false);
+        core?.setVisible(false);
+        this.shownWeapon[hand] = null;
         continue;
       }
+      const changed = this.shownWeapon[hand] !== runtime.weapon.id;
       view.setTexture(WEAPON_SPRITE[runtime.weapon.id]);
       view.setScale(WEAPON_VIEW_SIZE / Math.max(view.width, view.height));
       view.setVisible(true);
+      core?.setFillStyle(runtime.weapon.color, WEAPON_CORE_ALPHA).setVisible(true);
+      if (changed) this.playMaterialize(view, core);
+      this.shownWeapon[hand] = runtime.weapon.id;
     }
   }
 
@@ -1724,12 +1802,16 @@ export class PlayScene extends Phaser.Scene {
       const view = this.weaponViews[hand];
       if (!view?.visible) continue;
 
-      // 캐릭터가 좌우로 뒤집히면 손 위치도 같이 뒤집힌다.
-      const offset = WEAPON_HAND_OFFSET[hand];
-      view.setPosition(
-        this.player.x + offset.x * width * (flipped ? -1 : 1),
-        this.player.y + offset.y * height,
-      );
+      // **뒤집으면 그림 속 두 손이 화면에서 자리를 맞바꾼다.** 오프셋만 x로 뒤집으면
+      // 왼손 무기가 화면 오른쪽에 있다가 왼쪽으로 건너가, 손이 뒤바뀐 것처럼 보인다.
+      // 자리도 함께 맞바꾸면 각 손의 무기가 늘 같은 쪽에 남으면서, 그림 속 장갑
+      // 위에 그대로 얹힌다. 두 장갑은 생김새가 같아 어느 쪽을 쓰든 티가 나지 않는다.
+      const slot = flipped ? otherHand(hand) : hand;
+      const offset = WEAPON_HAND_OFFSET[slot];
+      const handX = this.player.x + offset.x * width * (flipped ? -1 : 1);
+      const handY = this.player.y + offset.y * height;
+      view.setPosition(handX, handY).setDepth(WEAPON_SLOT_DEPTH[slot]);
+      this.weaponCores[hand]?.setPosition(handX, handY).setDepth(WEAPON_SLOT_CORE_DEPTH[slot]);
 
       // 좌우 반전은 각도를 거울에 비추는 것과 같다. 위아래도 같이 뒤집어야 자세가 선다.
       const runtime = hand === 'left' ? this.left : this.right;
@@ -3404,7 +3486,7 @@ export class PlayScene extends Phaser.Scene {
     this.handsText = this.hudText(screenX(HUD_X), screenY(HUD_HANDS_Y), '12px', COLORS.textDim);
     // **출구 안내는 왼쪽 구석에서 꺼낸다.** 방을 정리한 순간에만 뜨는 알림이라
     // 상태 표시 틈에 끼워 두면 놓친다. 콤보 배지 위, 화면 한가운데에 띄운다.
-    this.hudNotice = this.hudText(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 106), '15px', COLORS.accentText)
+    this.hudNotice = this.hudText(screenX(VIEW_WIDTH / 2), screenY(VIEW_HEIGHT - 146), '15px', COLORS.accentText)
       .setOrigin(0.5, 0.5);
     this.statusLegend = this.createStatusLegend(screenX(VIEW_WIDTH - 560), screenY(82));
     // **액체가 병보다 뒤에 있어야 한다.** 병 그림은 안쪽이 뚫린 테두리라, 뒤에 깔면
@@ -3422,8 +3504,8 @@ export class PlayScene extends Phaser.Scene {
           .setDepth(21);
     this.potionText = this.hudText(screenX(POTION_ICON_X + 16), screenY(HUD_POTION_Y), '11px', COLORS.textDim);
     this.comboBadges = {
-      left: this.createComboBadge(screenX(VIEW_WIDTH / 2 - 142), screenY(VIEW_HEIGHT - 54), '왼손'),
-      right: this.createComboBadge(screenX(VIEW_WIDTH / 2 + 142), screenY(VIEW_HEIGHT - 54), '오른손'),
+      left: this.createComboBadge(screenX(VIEW_WIDTH / 2 - 163), screenY(VIEW_HEIGHT - 66), '왼손'),
+      right: this.createComboBadge(screenX(VIEW_WIDTH / 2 + 163), screenY(VIEW_HEIGHT - 66), '오른손'),
     };
 
     const hint = this.add
@@ -3472,23 +3554,32 @@ export class PlayScene extends Phaser.Scene {
 
   private createComboBadge(x: number, y: number, hand: string): ComboBadge {
     const back = this.add
-      .rectangle(x, y, 260, 66, 0x0a0b0f, 0.74)
+      .rectangle(x, y, 310, 108, 0x0a0b0f, 0.78)
       .setStrokeStyle(1, 0x2a2f42)
       .setDepth(20);
     const title = this.add
-      .text(x - 112, y - 24, hand, { fontSize: '13px', color: COLORS.textDim, fontStyle: 'bold' })
+      .text(x - 140, y - 42, hand, { fontSize: '13px', color: COLORS.text, fontStyle: 'bold' })
+      .setOrigin(0, 0.5)
+      .setDepth(21);
+    const condition = this.add
+      .text(x - 140, y - 21, '', { fontSize: '11px', color: COLORS.textDim, fontStyle: 'bold' })
       .setOrigin(0, 0.5)
       .setDepth(21);
     const value = this.add
-      .text(x + 112, y - 8, '', { fontSize: '32px', color: COLORS.text, fontStyle: 'bold' })
+      .text(x + 140, y - 3, '', { fontSize: '20px', color: COLORS.text, fontStyle: 'bold' })
       .setOrigin(1, 0.5)
       .setDepth(21);
-    const timer = this.add.rectangle(x - 112, y + 23, 224, 4, COLORS.accent, 0.7).setOrigin(0, 0.5).setDepth(21);
-    const pips = Array.from({ length: COMBO_REQUIRED }, (_, index) =>
-      this.add.rectangle(x - 112 + index * 24, y + 3, 18, 16, 0x2a2f42, 0.9).setOrigin(0, 0.5).setDepth(21),
+    const effect = this.add
+      .text(x - 140, y + 15, '', { fontSize: '10px', color: COLORS.textDim, lineSpacing: 2 })
+      .setOrigin(0, 0)
+      .setDepth(21);
+    const timer = this.add.rectangle(x - 140, y + 50, 280, 3, COLORS.accent, 0.7).setOrigin(0, 0.5).setDepth(21);
+    // 연계마다 요구치가 다르므로 최대치만큼 준비하고 필요한 눈금만 보여준다.
+    const pips = Array.from({ length: COMBO_MAX }, (_, index) =>
+      this.add.rectangle(x - 140 + index * 18, y - 3, 14, 14, 0x2a2f42, 0.9).setOrigin(0, 0.5).setDepth(21),
     );
 
-    return { back, title, value, timer, pips };
+    return { back, title, condition, value, effect, timer, pips };
   }
 
   private createStatusLegend(x: number, y: number): Phaser.GameObjects.Container {
@@ -3525,7 +3616,7 @@ export class PlayScene extends Phaser.Scene {
   private comboBadgeObjects(
     badge: ComboBadge,
   ): (Phaser.GameObjects.Components.ScrollFactor & Phaser.GameObjects.Components.Visible)[] {
-    return [badge.back, badge.title, badge.value, badge.timer, ...badge.pips];
+    return [badge.back, badge.title, badge.condition, badge.value, badge.effect, badge.timer, ...badge.pips];
   }
 
   /**
@@ -3746,27 +3837,57 @@ export class PlayScene extends Phaser.Scene {
     if (!runtime || !visible) return;
 
     const hand = runtime.hand;
-    const more = empowerMore(this.empower, hand);
     // 연계는 무기당 한 칸이므로 규칙도 하나다. 여러 개면 첫 번째를 보여준다.
-    const readout = comboReadout(this.combo, hand, rules[0].trigger);
+    const rule = rules[0];
+    const readout = comboReadout(this.combo, hand, rule.trigger);
+    const targetHand = rule.effect.hand === 'self' ? hand : otherHand(hand);
+    const targetRuntime = targetHand === 'left' ? this.left : this.right;
+    const targetName = `${targetHand === 'left' ? '왼손' : '오른손'}${targetRuntime ? ` ${targetRuntime.weapon.name}` : ''}`;
+    const more = empowerMore(this.empower, targetHand);
+    const activeEmpower = this.empower[targetHand];
 
     // 지금 무슨 일이 일어나고 있는지를 한 단어로 알린다.
     // 강화가 수치보다 앞이다. 배율이 붙은 순간이 더 짧고 놓치기 쉽다.
     const [label, color] = more > 0
-      ? [`강화 +${Math.round(more * 100)}%`, COLORS.accent]
+      ? ['강화 중', COLORS.accent]
       : [`${readout.value} / ${readout.required}`, runtime.weapon.color];
     const lit = more > 0;
 
     badge.back.setStrokeStyle(lit ? 2 : 1, color, lit ? 0.95 : 0.55);
-    // **무엇을 붙여서 이 배지가 떠 있는지를 적는다.**
-    // 전에는 `교차`라고만 썼는데, 그건 아래 글자가 이미 말하는 것이라 같은 말을 두 번
-    // 하고 있었다. 연계 이름은 화면 어디에도 없어서 무엇 때문에 뜬 배지인지 알 수 없었다.
-    // 세는 조건은 무엇을 세는지(`이 손`/`합계`/`반대손`)가 숫자만으로 안 드러나 함께 적는다.
-    const comboName = rules[0].support.name;
-    const suffix = `  ·  ${readout.label}`;
-    badge.title.setText(
-      `${hand === 'left' ? '왼손' : '오른손'} ${runtime.weapon.name}   ${comboName ?? ''}${suffix}`,
-    );
+    badge.title.setText(`${hand === 'left' ? '왼손' : '오른손'} ${runtime.weapon.name}  ·  ${rule.support.name}`);
+
+    const otherRuntime = hand === 'left' ? this.right : this.left;
+    const progressName =
+      rule.trigger.reads === 'self'
+        ? `${runtime.weapon.name} 콤보`
+        : rule.trigger.reads === 'total'
+          ? '양손 콤보 합계'
+          : `${otherRuntime?.weapon.name ?? '반대손'} 콤보`;
+    badge.condition.setText(progressName);
+
+    const consumeName =
+      rule.effect.consumes === 'total'
+        ? '양손 콤보 소모'
+        : rule.effect.consumes === 'self'
+          ? `${runtime.weapon.name} 콤보 소모`
+          : rule.effect.consumes === 'other'
+            ? `${otherRuntime?.weapon.name ?? '반대손'} 콤보 소모`
+            : null;
+    const limit = [rule.effect.hits ? `${rule.effect.hits}회` : '', rule.effect.seconds ? `${rule.effect.seconds}초` : '']
+      .filter(Boolean)
+      .join('/');
+    const remaining = activeEmpower
+      ? [
+          activeEmpower.hitsLeft !== undefined ? `${activeEmpower.hitsLeft}회` : '',
+          activeEmpower.secondsLeft !== undefined ? `${activeEmpower.secondsLeft.toFixed(1)}초` : '',
+        ].filter(Boolean).join(' / ')
+      : '';
+    const effectText = lit && activeEmpower
+      ? `${targetName} 피해 +${Math.round(more * 100)}%\n${remaining ? `${remaining} 남음` : '조건 유지 중'}`
+      : consumeName
+        ? `${readout.required} 도달 · ${consumeName}\n${targetName} 피해 +${Math.round(rule.effect.more * 100)}%${limit ? ` · ${limit}` : ''}`
+        : `${progressName} ${readout.required} 이상 유지\n${targetName} 피해 +${Math.round(rule.effect.more * 100)}%`;
+    badge.effect.setText(effectText).setColor(lit ? COLORS.accentText : COLORS.textDim);
     // **세지 않는 조건에서는 눈금을 아예 지운다.**
     // 전에는 성립 여부에 따라 5칸을 한꺼번에 켜고 껐는데, 꺼진 다섯 칸이 그대로
     // `0 / 5 채워야 함`으로 읽혔다. 카운터를 뗀 이유가 그것이었는데 눈금이 같은
@@ -3784,22 +3905,22 @@ export class PlayScene extends Phaser.Scene {
       }
     }
 
-    // 눈금이 사라진 만큼 글자가 쓸 수 있는 폭이 넓어진다. 반대로 눈금이 있으면
-    // 그 오른쪽만 쓸 수 있다. `반대손으로`나 `강화 +30%`처럼 긴 문구가 눈금을
-    // 밟지 않도록, 넘치면 넘친 만큼 줄인다.
-    const maxWidth = counting ? 108 : 220;
-    badge.value.setFontSize(32);
+    const maxWidth = 104;
+    badge.value.setFontSize(20);
     badge.value.setText(label);
     if (badge.value.width > maxWidth) {
-      badge.value.setFontSize(Math.max(14, Math.floor((32 * maxWidth) / badge.value.width)));
+      badge.value.setFontSize(Math.max(13, Math.floor((20 * maxWidth) / badge.value.width)));
     }
-    badge.value.setY(badge.back.y + (counting ? -8 : 0));
     badge.value.setColor(lit ? COLORS.accentText : '#ffffff');
 
     const duration = resolveFor(this.run.loadout, runtime.weapon.basic).stats.comboDuration ?? 5;
     const running = readout.value > 0;
-    const ratio = running ? Phaser.Math.Clamp(this.combo.remaining / duration, 0, 1) : 0;
-    badge.timer.width = 224 * ratio;
+    const ratio = lit && activeEmpower?.secondsLeft !== undefined && rule.effect.seconds
+      ? Phaser.Math.Clamp(activeEmpower.secondsLeft / rule.effect.seconds, 0, 1)
+      : running
+        ? Phaser.Math.Clamp(this.combo.remaining / duration, 0, 1)
+        : 0;
+    badge.timer.width = 280 * ratio;
     badge.timer.setFillStyle(color, lit ? 0.9 : 0.65);
   }
 
@@ -4352,16 +4473,21 @@ export class PlayScene extends Phaser.Scene {
    */
   private supportEffectFor(weaponId: WeaponId, support: Support): string {
     const weapon = weaponOf(weaponId);
-    // 붙을 수 있는 스킬을 찾는다. 기본 공격과 기본스킬 후보 중 태그가 맞는 쪽이다.
-    const skill = [weapon.basic, ...basicSkillsOf(weapon)].find((candidate) => canAttach(candidate, support, []).ok) ?? null;
+    const skills = attachableSkills([weapon.basic, ...basicSkillsOf(weapon)], support);
     // 못 붙는 이유를 **무엇이 필요한지**로 말한다. `안 붙는다`만 쓰면 다른 무기를
     // 하나씩 눌러 보는 것 말고는 알 방법이 없다.
-    if (!skill) return `${support.requires.join('·')} 스킬에만 붙는다`;
+    if (!skills.length) return `${support.requires.join('·')} 스킬과만 연결 가능`;
 
-    const last = skill.name.charCodeAt(skill.name.length - 1) - 0xac00;
+    const lastSkill = skills[skills.length - 1];
+    const last = lastSkill.name.charCodeAt(lastSkill.name.length - 1) - 0xac00;
     const conjunction = last >= 0 && last <= 0x2ba3 && last % 28 !== 0 ? '과' : '와';
-    const lines: string[] = [`${skill.name}${conjunction} 연결 가능`];
+    const lines: string[] = [`${skills.map((skill) => skill.name).join(' / ')}${conjunction} 연결 가능`];
 
+    // 여러 스킬에 연결될 때는 호환 목록이 우선이다. 각 스킬의 원래 수치가 달라
+    // 하나의 전후 값으로 합치면 거짓말이 되므로, 공통 변화는 위 설명문에 맡긴다.
+    if (skills.length > 1) return lines.join('\n');
+
+    const skill = skills[0];
     const before = resolveSkill(skill, []).stats;
     const after = resolveSkill(skill, [support]).stats;
     const pairs: [Stat, string][] = [
@@ -4449,7 +4575,7 @@ export class PlayScene extends Phaser.Scene {
     const support = findSupport(item.id);
     if (!support) return;
 
-    const notAttachable = `${support.requires.join('·')} 스킬에만 붙는다`;
+    const notAttachable = `${support.requires.join('·')} 스킬과만 연결 가능`;
     const category = this.supportCategory(support);
     const statusBehavior = findBehavior(support.behaviors ?? [], 'statusDamage');
     const head = [
@@ -4475,7 +4601,7 @@ export class PlayScene extends Phaser.Scene {
             ? '이 칸에는 그 무기의 기본스킬만 들어간다'
             : item.slot !== pending.slot
               ? `이것은 ${this.slotKindOf(item.slot).label} 스킬이라 ${this.slotKindOf(pending.slot).label} 칸에 안 들어간다`
-              : `이것은 ${support.requires.join('·')} 스킬에만 붙어서 이 무기에는 안 들어간다`;
+              : `이것은 ${support.requires.join('·')} 스킬과만 연결 가능해서 이 무기에는 안 들어간다`;
       this.drawTownTip(`${head}\n\n${body}\n\n[현재 선택]\n${reason}`, x, y, false, avoid);
       return;
     }

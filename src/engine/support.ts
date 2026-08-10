@@ -131,6 +131,11 @@ export function canAttach(
   return { ok: true };
 }
 
+/** 한 보조능력과 연결 가능한 스킬을 첫 항목에서 끊지 않고 모두 돌려준다. */
+export function attachableSkills(skills: readonly Skill[], support: Support): Skill[] {
+  return skills.filter((skill) => canAttach(skill, support, []).ok);
+}
+
 export function supportSlotType(support: Support): 'primary' | 'synergy' {
   return support.slotType ?? 'primary';
 }

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { canAttach, resolveSkill, sortBehaviors, supportSlotType, type Skill, type Support } from '@/engine/support';
+import {
+  attachableSkills,
+  canAttach,
+  resolveSkill,
+  sortBehaviors,
+  supportSlotType,
+  type Skill,
+  type Support,
+} from '@/engine/support';
 
 const arrowShot: Skill = {
   id: 'arrow-shot',
@@ -73,6 +81,14 @@ describe('canAttach - 태그 기반 장착 제약', () => {
     const result = canAttach(arrowShot, opulence, [multipleProjectiles, pierce]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain('슬롯');
+  });
+
+  it('호환 목록은 첫 스킬에서 멈추지 않고 전부 돌려준다', () => {
+    const secondArrow = { ...arrowShot, id: 'second-arrow', name: '두 번째 사격' };
+    expect(attachableSkills([swordSlash, arrowShot, secondArrow], multipleProjectiles).map((skill) => skill.id)).toEqual([
+      'arrow-shot',
+      'second-arrow',
+    ]);
   });
 });
 

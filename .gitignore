@@ -41,3 +41,6 @@ submission/
 # 기획 원본 파일. 내용은 `docs/design/`의 PNG로 들어가 있다.
 # 저장소가 Public이라 남의 작업 파일을 그대로 올리지 않는다.
 docs/design/*.pptx
+
+# 검증용 스크린샷과 임시 산출물. 남길 이유가 있는 것은 `docs/`에 넣는다.
+tmp/
