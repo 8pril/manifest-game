@@ -137,6 +137,14 @@ describe('스킬별 장착 가능 보조능력', () => {
 });
 
 describe('실제 조합 결과', () => {
+  it("'과감한 결단'을 붙인 멸검은 명중당 콤보를 1.5 획득한다", () => {
+    const boldResolve = SUPPORTS.filter((s) => s.id === 'bold-resolve');
+    const resolved = resolveSkill(ANNIHILATION_, boldResolve);
+
+    expect(resolved.stats.comboGain).toBe(1.5);
+    expect(resolved.rejected).toHaveLength(0);
+  });
+
   it("'다중투사체' + '관통'을 붙인 화살 사격", () => {
     const combo = SUPPORTS.filter((s) => ['multiple-projectiles', 'pierce'].includes(s.id));
     const resolved = resolveSkill(ARROW_SHOT_, combo);
@@ -204,7 +212,10 @@ describe('무기 데이터 무결성', () => {
 
   it('기본 공격은 모두 콤보를 쌓을 수 있다', () => {
     for (const weapon of WEAPON_LIST) {
-      expect(weapon.basic.base.comboGain, weapon.name).toBeGreaterThan(0);
+      for (const skill of [weapon.basic, ...basicSkillsOf(weapon)]) {
+        expect(skill.base.comboGain, `${weapon.name} / ${skill.name}`).toBeGreaterThan(0);
+        expect(skill.base.comboDuration, `${weapon.name} / ${skill.name}`).toBeGreaterThan(0);
+      }
     }
   });
 

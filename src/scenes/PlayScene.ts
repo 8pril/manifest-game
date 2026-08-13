@@ -30,6 +30,7 @@ import type { Stat } from '@/engine/modifiers';
 import {
   spawnProjectiles,
   advance,
+  firstNewContact,
   onHitTarget,
   resetProjectileIds,
   isOutOfBounds,
@@ -103,13 +104,14 @@ import {
   consumeCombo,
   comboRulesOf,
   comboTriggerMet,
+  comboTriggerTracksHand,
   comboReadout,
   otherHand,
   COMBO_MAX,
   COMBO_REQUIRED,
   type ComboState,
 } from '@/game/combo';
-import { grantEmpower, empowerMore, spendEmpower, tickEmpower, type EmpowerByHand } from '@/game/empower';
+import { grantEmpower, empowerMore, spendEmpower, tickEmpower, type EmpowerByHand, type EmpowerState } from '@/game/empower';
 import {
   createRun,
   clearRoom,
@@ -1091,9 +1093,15 @@ export class PlayScene extends Phaser.Scene {
     return equippedBasicSkill(this.run.progress, runtime.weapon.id).id !== runtime.weapon.basic.id;
   }
 
-  /** 이 무기가 콤보를 쓰는가. 콤보를 읽는 연계가 하나라도 붙어 있으면 그렇다. */
-  private usesCombo(runtime: WeaponRuntime): boolean {
-    return this.comboRulesFor(runtime).length > 0;
+  /** 장착된 연계 중 하나라도 이 손의 명중을 집계하는가. */
+  private tracksComboFor(hand: Hand): boolean {
+    for (const owner of [this.left, this.right]) {
+      if (!owner) continue;
+      if (this.comboRulesFor(owner).some(({ trigger }) => comboTriggerTracksHand(owner.hand, hand, trigger))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -1104,25 +1112,29 @@ export class PlayScene extends Phaser.Scene {
    * 부른다. 소모하지 않는 규칙은 조건이 유지되는 동안 계속 켜져 있어야 해서
    * 매 프레임 다시 본다(`refreshSustainedEmpower`).
    */
-  private applyComboEffects(runtime: WeaponRuntime): void {
-    for (const { trigger, effect, support } of this.comboRulesFor(runtime)) {
-      if (effect.kind !== 'empower' || !effect.consumes) continue;
-      if (!comboTriggerMet(this.combo, runtime.hand, trigger)) continue;
+  private applyComboEffects(): void {
+    for (const runtime of [this.left, this.right]) {
+      if (!runtime) continue;
+      for (const { trigger, effect, support } of this.comboRulesFor(runtime)) {
+        if (effect.kind !== 'empower' || !effect.consumes) continue;
+        if (!comboTriggerMet(this.combo, runtime.hand, trigger)) continue;
 
-      const target = effect.hand === 'self' ? runtime.hand : otherHand(runtime.hand);
-      this.empower = grantEmpower(this.empower, target, {
-        more: effect.more,
-        hits: effect.hits,
-        seconds: effect.seconds,
-      });
-      const scope =
-        effect.consumes === 'self'
-          ? runtime.hand
-          : effect.consumes === 'other'
-            ? otherHand(runtime.hand)
-            : 'total';
-      this.combo = consumeCombo(this.combo, scope);
-      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, support.name, COLORS.accentText);
+        const target = effect.hand === 'self' ? runtime.hand : otherHand(runtime.hand);
+        this.empower = grantEmpower(this.empower, target, {
+          more: effect.more,
+          hits: effect.hits,
+          seconds: effect.seconds,
+          source: support.name,
+        });
+        const scope =
+          effect.consumes === 'self'
+            ? runtime.hand
+            : effect.consumes === 'other'
+              ? otherHand(runtime.hand)
+              : 'total';
+        this.combo = consumeCombo(this.combo, scope);
+        floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, support.name, COLORS.accentText);
+      }
     }
   }
 
@@ -1142,7 +1154,7 @@ export class PlayScene extends Phaser.Scene {
         const met = comboTriggerMet(this.combo, runtime.hand, trigger);
         const on = empowerMore(this.empower, target) > 0;
         if (met && !on) {
-          this.empower = grantEmpower(this.empower, target, { more: effect.more });
+          this.empower = grantEmpower(this.empower, target, { more: effect.more, source: support.name });
           floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, support.name, COLORS.accentText);
         } else if (!met && on && this.empower[target]?.hitsLeft === undefined && this.empower[target]?.secondsLeft === undefined) {
           // 횟수·시간 제한이 없는 것만 끈다. 소모형으로 받은 강화는 조건과 무관하게 남는다.
@@ -1358,7 +1370,8 @@ export class PlayScene extends Phaser.Scene {
     const enemy = entity.state;
     // 콤보로 얻은 손 강화를 여기서 곱한다. 스킬 수치가 아니라 손에 걸린 상태라
     // 수정자 파이프라인이 아니라 명중 시점에 적용한다.
-    const empowered = runtime ? 1 + empowerMore(this.empower, runtime.hand) : 1;
+    const activeEmpower = runtime ? this.empower[runtime.hand] : undefined;
+    const empowered = 1 + (activeEmpower?.more ?? 0);
     let damage =
       this.applyStatusDamageBonus(rawDamage, enemy, behaviors) * incomingDamageMultiplier(enemy) * empowered;
 
@@ -1423,20 +1436,22 @@ export class PlayScene extends Phaser.Scene {
     }
 
     if (runtime) {
-      // 콤보를 읽는 연계를 붙인 무기만 콤보를 쌓는다. 안 붙였으면 아무 일도 없다.
-      // 콤보는 판 전체에 하나뿐이라, 어느 손으로 쌓았는지를 따로 들고 있는다.
-      if (this.usesCombo(runtime)) {
+      // 장착된 연계가 읽는 손만 콤보를 쌓는다. 합계 조건은 양손을 모두 읽고,
+      // 자기 손·반대손 조건은 필요한 쪽만 읽는다.
+      if (this.tracksComboFor(runtime.hand)) {
         // **플레이어가 친 명중은 전부 콤보를 올린다.** 근접·투사체·지대를 가리지 않는다.
         // 예전에는 `basic` 값으로 갈렸는데, 첫 소켓에 끼운 것이 곧 기본 공격이 되면서
         // 그 구분이 없어졌다. 값만 남아 지대에서 `false`로 넘어가는 바람에 멸검·비전
         // 개화·균열 파동을 끼우면 콤보가 아예 오르지 않았다. 값을 지워 되풀이를 막는다.
         // 지대의 지속피해 틱은 여전히 올리지 않는다(`refreshCombo`). 그건 손으로 친 것이 아니다.
-        const stats = resolveFor(this.run.loadout, weapon.basic).stats;
+        const skill = equippedBasicSkill(this.run.progress, runtime.weapon.id);
+        const stats = resolveFor(this.run.loadout, skill).stats;
         this.combo = gainCombo(this.combo, runtime.hand, stats);
-        this.applyComboEffects(runtime);
+        this.applyComboEffects();
       }
       // 강화된 손으로 때렸으면 횟수를 하나 쓴다.
-      if (empowerMore(this.empower, runtime.hand) > 0) {
+      if (rawDamage > 0 && activeEmpower) {
+        this.showEmpoweredHitFeedback(entity, runtime.hand, activeEmpower);
         this.empower = spendEmpower(this.empower, runtime.hand);
       }
     }
@@ -1459,6 +1474,32 @@ export class PlayScene extends Phaser.Scene {
     ring(this, enemy.x, enemy.y, STUN_COLOR, { from: radius * 0.5, to: radius * 2.1, duration: 300, width: 4 });
     flash(this, enemy.x, enemy.y, radius * 2.3, STUN_COLOR);
     floatingText(this, enemy.x, enemy.y - radius - 12, '기절', '#d8f3ff');
+  }
+
+  /** 강화 피해가 실제로 적중한 순간을 일반 타격과 구분한다. */
+  private showEmpoweredHitFeedback(entity: EnemyEntity, hand: Hand, empower: EmpowerState): void {
+    const key = `empower-hit:${hand}`;
+    if (this.time.now < (this.supportFeedbackReadyAt[key] ?? 0)) return;
+    // 일제 사격처럼 여러 발이 같은 프레임에 맞아도 문구 하나만 보인다.
+    this.supportFeedbackReadyAt[key] = this.time.now + 650;
+
+    const enemy = entity.state;
+    const radius = ENEMY_STATS[enemy.kind].radius;
+    ring(this, enemy.x, enemy.y, COLORS.accent, {
+      from: radius * 0.45,
+      to: radius * 1.9,
+      duration: 240,
+      width: 3,
+    });
+    flash(this, enemy.x, enemy.y, radius * 1.35, COLORS.accent);
+    floatingText(
+      this,
+      enemy.x,
+      enemy.y - radius - 12,
+      `${empower.source ?? '강화'} +${Math.round(empower.more * 100)}%`,
+      COLORS.accentText,
+      { duration: 900 },
+    );
   }
 
   // ───────────────────────── 방
@@ -3025,21 +3066,30 @@ export class PlayScene extends Phaser.Scene {
       const { state, view, owner, behaviors } = this.areas[i];
       const result = tickArea(state, dt);
       let damagedSomething = false;
+      const activeEmpower = owner ? this.empower[owner.hand] : undefined;
+      const empowered = 1 + (activeEmpower?.more ?? 0);
 
       for (const entity of this.enemies) {
         if (!isAlive(entity.state) || !containsPoint(state, entity.state)) continue;
         if (state.hinders && canApplyCrowdControl(entity.state, behaviors)) entity.state.hindered = true;
         if (result.ticked) {
           const damage = this.applyStatusDamageBonus(state.damagePerTick, entity.state, behaviors);
-          this.damageEnemy(entity, damage * incomingDamageMultiplier(entity.state));
+          this.damageEnemy(entity, damage * incomingDamageMultiplier(entity.state) * empowered);
+          if (owner && activeEmpower) this.showEmpoweredHitFeedback(entity, owner.hand, activeEmpower);
           damagedSomething = true;
         }
       }
 
+      // 지대 한 번의 피해 틱을 강화 1회로 센다. 범위 안 적 수만큼 차감하지 않는다.
+      if (damagedSomething && owner && activeEmpower) {
+        this.empower = spendEmpower(this.empower, owner.hand);
+      }
+
       // 지대형 발동 스킬도 지속피해가 들어가는 동안은 콤보를 유지시킨다.
-      if (damagedSomething && owner && this.usesCombo(owner)) {
+      if (damagedSomething && owner && this.tracksComboFor(owner.hand)) {
         // 지속시간만 늘린다. `직전 손`과 교차 연속은 플레이어가 친 것만 움직인다.
-        this.combo = refreshCombo(this.combo, resolveFor(this.run.loadout, owner.weapon.basic).stats);
+        const skill = equippedBasicSkill(this.run.progress, owner.weapon.id);
+        this.combo = refreshCombo(this.combo, resolveFor(this.run.loadout, skill).stats);
       }
 
       view.setAlpha(0.15 + 0.35 * remainingRatio(state));
@@ -3061,11 +3111,13 @@ export class PlayScene extends Phaser.Scene {
       let consumed = isOutOfBounds(projectile, this.bounds);
 
       if (!consumed) {
-        const hit = this.enemies.find(
+        const overlapping = this.enemies.filter(
           (e) =>
             isAlive(e.state) &&
             Math.hypot(e.state.x - projectile.x, e.state.y - projectile.y) <= ENEMY_STATS[e.state.kind].radius,
         );
+        const hitState = firstNewContact(projectile, overlapping.map((e) => e.state));
+        const hit = hitState ? overlapping.find((e) => e.state.id === hitState.id) : undefined;
 
         if (hit) {
           const outcome = onHitTarget(projectile, hit.state, alive);
@@ -3930,7 +3982,7 @@ export class PlayScene extends Phaser.Scene {
       const used = counting && index < readout.required;
       pip.setVisible(used);
       if (used) {
-        const filled = index < readout.value;
+        const filled = index < Math.floor(readout.value);
         pip.setFillStyle(filled ? color : 0x2a2f42, filled ? 0.95 : 0.9);
       }
     }
@@ -3943,7 +3995,8 @@ export class PlayScene extends Phaser.Scene {
     }
     badge.value.setColor(lit ? COLORS.accentText : '#ffffff');
 
-    const duration = resolveFor(this.run.loadout, runtime.weapon.basic).stats.comboDuration ?? 5;
+    const skill = equippedBasicSkill(this.run.progress, runtime.weapon.id);
+    const duration = resolveFor(this.run.loadout, skill).stats.comboDuration ?? 5;
     const running = readout.value > 0;
     const ratio = lit && activeEmpower?.secondsLeft !== undefined && rule.effect.seconds
       ? Phaser.Math.Clamp(activeEmpower.secondsLeft / rule.effect.seconds, 0, 1)

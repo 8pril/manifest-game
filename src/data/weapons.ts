@@ -74,7 +74,7 @@ export function basicSkillOwner(skillId: string): { weapon: Weapon; skill: Skill
   return null;
 }
 
-const COMBO_STATS = { comboDuration: COMBO_BASE_DURATION };
+const COMBO_STATS = { comboGain: 1, comboDuration: COMBO_BASE_DURATION };
 
 export const WEAPONS: Record<WeaponId, Weapon> = {
   sword: {
@@ -91,7 +91,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       id: 'sword-slash',
       name: '베기',
       tags: ['공격', '근접', '물리', '상처'],
-      base: { damage: 46, meleeRange: 120, meleeArc: 1.7, knockback: 18, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 46, meleeRange: 120, meleeArc: 1.7, knockback: 18, ...COMBO_STATS },
       supportSlots: 2,
     },
     // 넓게 스치던 것을 좁고 멀리. 부채가 1.7 → 0.7로 좁아지는 대신 사거리가
@@ -102,7 +102,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
         id: 'thrust',
         name: '찌르기',
         tags: ['공격', '근접', '물리', '상처'],
-        base: { damage: 54, meleeRange: 190, meleeArc: 0.7, knockback: 24, comboGain: 1, ...COMBO_STATS },
+        base: { damage: 54, meleeRange: 190, meleeArc: 0.7, knockback: 24, ...COMBO_STATS },
         supportSlots: 2,
       },
       // 원안의 '멸검'. 이제 첫 소켓 후보라 기본 공격 수준으로 낮춘 지대형 선택지다.
@@ -110,7 +110,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
         id: 'annihilation',
         name: '멸검',
         tags: ['공격', '지대', '물리', '지속시간', '상처'],
-        base: { damage: 14, areaRadius: 82, duration: 1.2, tickInterval: 0.4 },
+        base: { damage: 14, areaRadius: 82, duration: 1.2, tickInterval: 0.4, ...COMBO_STATS },
         supportSlots: 2,
       },
     ],
@@ -128,7 +128,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       id: 'arrow-shot',
       name: '화살 사격',
       tags: ['공격', '투사체', '물리'],
-      base: { damage: 74, projectileCount: 1, projectileSpeed: 460, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 74, projectileCount: 1, projectileSpeed: 460, ...COMBO_STATS },
       supportSlots: 2,
     },
     // 한 발을 세 발로 흩는다. 총합은 조금 줄지만 가까이서 셋 다 맞으면 이득이라,
@@ -138,14 +138,14 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
         id: 'scattershot',
         name: '산탄',
         tags: ['공격', '투사체', '물리'],
-        base: { damage: 39, projectileCount: 3, projectileSpeed: 400, comboGain: 1, ...COMBO_STATS },
+        base: { damage: 39, projectileCount: 3, projectileSpeed: 400, ...COMBO_STATS },
         supportSlots: 2,
       },
       {
         id: 'volley',
         name: '일제 사격',
         tags: ['공격', '투사체', '물리'],
-        base: { damage: 28, projectileCount: 5, projectileSpeed: 520 },
+        base: { damage: 28, projectileCount: 5, projectileSpeed: 520, ...COMBO_STATS },
         supportSlots: 2,
       },
     ],
@@ -164,7 +164,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       id: 'arcane-bolt',
       name: '비전 탄',
       tags: ['공격', '투사체', '주문', '원소'],
-      base: { damage: 88, projectileCount: 1, projectileSpeed: 380, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 88, projectileCount: 1, projectileSpeed: 380, ...COMBO_STATS },
       supportSlots: 2,
     },
     // **투사체를 지대로 바꾼다.** 태그가 달라지므로 붙일 수 있는 보조형스킬도
@@ -175,7 +175,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
         id: 'arcane-bloom',
         name: '비전 개화',
         tags: ['공격', '지대', '주문', '원소', '지속시간'],
-        base: { damage: 50, areaRadius: 96, duration: 1.4, tickInterval: 0.35 },
+        base: { damage: 50, areaRadius: 96, duration: 1.4, tickInterval: 0.35, ...COMBO_STATS },
         supportSlots: 2,
       },
       // 원안의 '비전단검'. 다중 투사체라 발당 피해를 낮춰 기본 공격 수준에 맞춘다.
@@ -183,7 +183,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
         id: 'arcane-daggers',
         name: '비전단검',
         tags: ['공격', '투사체', '주문'],
-        base: { damage: 30, projectileCount: 6, projectileSpeed: 560 },
+        base: { damage: 30, projectileCount: 6, projectileSpeed: 560, ...COMBO_STATS },
         supportSlots: 2,
       },
     ],
@@ -203,7 +203,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
       id: 'shield-bash',
       name: '밀치기',
       tags: ['공격', '근접', '물리'],
-      base: { damage: 24, meleeRange: 104, meleeArc: 2.4, knockback: 115, comboGain: 1, ...COMBO_STATS },
+      base: { damage: 24, meleeRange: 104, meleeArc: 2.4, knockback: 115, ...COMBO_STATS },
       supportSlots: 2,
     },
     // 넓게 밀어내던 것을 좁고 세게. 제어를 포기하고 피해를 가져온다.
@@ -212,7 +212,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
         id: 'shield-slam',
         name: '강타',
         tags: ['공격', '근접', '물리'],
-        base: { damage: 29, meleeRange: 96, meleeArc: 1.1, knockback: 48, comboGain: 1, ...COMBO_STATS },
+        base: { damage: 29, meleeRange: 96, meleeArc: 1.1, knockback: 48, ...COMBO_STATS },
         supportSlots: 2,
       },
       {
@@ -232,7 +232,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
         // 벽 충돌은 각성 중에 거의 나지 않는다. 넉백을 400으로 올려 확인해 보니
         // 벽 충돌이 나므로 경로는 정상이고, 값이 낮아 벽까지 닿지 않을 뿐이다.
         // 벽 충돌을 흔하게 만들려면 값을 올려야 하지만 그만큼 지대 피해를 잃는다.
-        base: { damage: 12, areaRadius: 150, duration: 2.4, tickInterval: 0.4, knockback: 62 },
+        base: { damage: 12, areaRadius: 150, duration: 2.4, tickInterval: 0.4, knockback: 62, ...COMBO_STATS },
         supportSlots: 2,
       },
     ],

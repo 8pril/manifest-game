@@ -5,6 +5,7 @@ import {
   tickCombo,
   consumeCombo,
   comboTriggerMet,
+  comboTriggerTracksHand,
   comboRulesOf,
   comboTotal,
   comboOf,
@@ -52,6 +53,13 @@ describe('콤보 적립', () => {
     expect(combo.left).toBe(2);
   });
 
+  it('소수 콤보 획득량을 타격마다 반올림하지 않고 누적한다', () => {
+    let combo = gainCombo(createCombo(), 'left', { comboGain: 1.5 });
+    combo = gainCombo(combo, 'left', { comboGain: 1.5 });
+
+    expect(combo.left).toBe(3);
+  });
+
 });
 
 describe('콤보 만료', () => {
@@ -92,6 +100,20 @@ describe('콤보 소모', () => {
 });
 
 describe('콤보 조건 판정', () => {
+
+  it('합계 조건은 연계를 어느 손에 장착해도 양손 명중을 센다', () => {
+    const trigger = { reads: 'total', required: 6 } as const;
+
+    expect(comboTriggerTracksHand('left', 'left', trigger)).toBe(true);
+    expect(comboTriggerTracksHand('left', 'right', trigger)).toBe(true);
+  });
+
+  it('자기 손과 반대손 조건은 필요한 손의 명중만 센다', () => {
+    expect(comboTriggerTracksHand('left', 'left', { reads: 'self', required: 5 })).toBe(true);
+    expect(comboTriggerTracksHand('left', 'right', { reads: 'self', required: 5 })).toBe(false);
+    expect(comboTriggerTracksHand('left', 'left', { reads: 'other', required: 5 })).toBe(false);
+    expect(comboTriggerTracksHand('left', 'right', { reads: 'other', required: 5 })).toBe(true);
+  });
 
   it('자기 손 수치를 본다', () => {
     let combo = createCombo();

@@ -3,10 +3,11 @@ import { grantEmpower, empowerMore, spendEmpower, tickEmpower } from './empower'
 
 describe('손 강화', () => {
   it('건 손에만 걸린다', () => {
-    const state = grantEmpower({}, 'right', { more: 0.8, hits: 3 });
+    const state = grantEmpower({}, 'right', { more: 0.8, hits: 3, source: '연계 방출' });
 
     expect(empowerMore(state, 'right')).toBe(0.8);
     expect(empowerMore(state, 'left')).toBe(0);
+    expect(state.right?.source).toBe('연계 방출');
   });
 
   it('횟수를 다 쓰면 사라진다', () => {

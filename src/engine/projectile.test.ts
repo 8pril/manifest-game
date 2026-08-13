@@ -5,6 +5,7 @@ import {
   onHitTarget,
   onHitTerrain,
   advance,
+  firstNewContact,
   resetProjectileIds,
   isOutOfBounds,
   DESPAWN_MARGIN,
@@ -81,6 +82,34 @@ describe('advance', () => {
     advance(p, 0.5);
     expect(p.x).toBeCloseTo(200, 10);
     expect(p.y).toBeCloseTo(0, 10);
+  });
+});
+
+describe('firstNewContact - 동일 대상 재명중 방지', () => {
+  it('관통 투사체가 대상 안에 머무는 동안 같은 대상을 다시 고르지 않는다', () => {
+    const [p] = spawnProjectiles(stats, [{ kind: 'pierce', count: 'all' }], origin, 0);
+    const boss = target(1, 0, 0);
+
+    expect(firstNewContact(p, [boss])).toBe(boss);
+    onHitTarget(p, boss);
+    expect(firstNewContact(p, [boss])).toBeUndefined();
+  });
+
+  it('대상에게서 완전히 빠져나간 뒤 다시 접촉하면 명중할 수 있다', () => {
+    const [p] = spawnProjectiles(stats, [{ kind: 'pierce', count: 'all' }], origin, 0);
+    const boss = target(1, 0, 0);
+
+    onHitTarget(p, boss);
+    expect(firstNewContact(p, [])).toBeUndefined();
+    expect(firstNewContact(p, [boss])).toBe(boss);
+  });
+
+  it('갈래 자식은 생성 지점의 원래 대상을 즉시 다시 맞히지 않는다', () => {
+    const [p] = spawnProjectiles(stats, [{ kind: 'fork', count: 2 }], origin, 0);
+    const boss = target(1, 0, 0);
+    const [child] = onHitTarget(p, boss, [boss]).spawned;
+
+    expect(firstNewContact(child, [boss])).toBeUndefined();
   });
 });
 

@@ -41,6 +41,8 @@ export interface Projectile {
   chainDamageFalloff: number;
   /** 대상별 명중 횟수. 연쇄가 같은 적을 무한히 왕복하는 것을 막는다. */
   hitCounts: Map<number, number>;
+  /** 직전 프레임부터 계속 겹쳐 있는 대상. 몸 안에 머무는 동안 재명중하지 않는다. */
+  contactTargetIds: Set<number>;
 }
 
 let nextId = 1;
@@ -85,6 +87,7 @@ export function spawnProjectiles(
       sameTargetLimit: chain?.sameTargetLimit ?? 1,
       chainDamageFalloff: chain?.damageFalloff ?? 0,
       hitCounts: new Map(),
+      contactTargetIds: new Set(),
     });
   }
   return projectiles;
@@ -105,6 +108,21 @@ export function projectileDamageMultiplier(count: number): number {
 export function advance(projectile: Projectile, deltaSeconds: number): void {
   projectile.x += Math.cos(projectile.angle) * projectile.speed * deltaSeconds;
   projectile.y += Math.sin(projectile.angle) * projectile.speed * deltaSeconds;
+}
+
+/**
+ * 현재 겹친 대상 중 새로 접촉한 첫 대상을 고른다.
+ * 계속 겹친 대상은 건너뛰되, 완전히 빠져나온 뒤 다시 접촉하면 새 명중으로 센다.
+ */
+export function firstNewContact<T extends Target>(
+  projectile: Projectile,
+  overlapping: readonly T[],
+): T | undefined {
+  const overlappingIds = new Set(overlapping.map((target) => target.id));
+  for (const id of projectile.contactTargetIds) {
+    if (!overlappingIds.has(id)) projectile.contactTargetIds.delete(id);
+  }
+  return overlapping.find((target) => !projectile.contactTargetIds.has(target.id));
 }
 
 /** 투사체가 사라지는 여유 거리. 벽에 닿자마자 끊기면 눈에 거슬린다. */
@@ -156,6 +174,7 @@ export function onHitTarget(
   candidates: readonly Target[] = [],
 ): HitOutcome {
   const damage = projectile.damage;
+  projectile.contactTargetIds.add(target.id);
   const hits = (projectile.hitCounts.get(target.id) ?? 0) + 1;
   projectile.hitCounts.set(target.id, hits);
 
@@ -244,5 +263,6 @@ function forkFrom(projectile: Projectile, at: Vec2): Projectile[] {
     // 갈래는 한 번만 갈라진다. 무한 증식을 막는다.
     forkRemaining: 0,
     hitCounts: new Map(projectile.hitCounts),
+    contactTargetIds: new Set(projectile.contactTargetIds),
   }));
 }

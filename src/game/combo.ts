@@ -39,6 +39,23 @@ export function otherHand(hand: Hand): Hand {
 }
 
 /**
+ * 콤보 조건 하나가 어느 손의 명중을 집계하는지 판정한다.
+ *
+ * 조건은 연계를 장착한 손(`ownerHand`)을 기준으로 해석한다. 합계 조건은 양손을
+ * 모두 세고, 자기 손과 반대손 조건은 이름 그대로 한쪽만 센다.
+ */
+export function comboTriggerTracksHand(ownerHand: Hand, hitHand: Hand, trigger: ComboTrigger): boolean {
+  switch (trigger.reads) {
+    case 'total':
+      return true;
+    case 'self':
+      return hitHand === ownerHand;
+    case 'other':
+      return hitHand === otherHand(ownerHand);
+  }
+}
+
+/**
  * 한 판의 콤보 상태.
  *
  * 손별 수치를 따로 들고 있는 이유는 연계가 서로 다른 것을 읽기 때문이다.
@@ -68,7 +85,7 @@ export function comboTotal(combo: ComboState): number {
  * 보조능력의 comboGain / comboDuration 수정자가 반영된다.
  */
 export function gainCombo(combo: ComboState, hand: Hand, stats: StatBlock): ComboState {
-  const gain = Math.max(1, Math.round(stats.comboGain ?? 1));
+  const gain = Math.max(1, stats.comboGain ?? 1);
   const duration = stats.comboDuration ?? COMBO_BASE_DURATION;
 
   return {

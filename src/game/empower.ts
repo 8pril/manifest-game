@@ -13,6 +13,8 @@ import type { Hand } from '@/game/combo';
 export interface EmpowerState {
   /** 피해 증폭 배율. 0.5면 50% 증폭. */
   more: number;
+  /** 화면에 표시할 강화의 출처. 예: 연결 가속. */
+  source?: string;
   /** 남은 사용 횟수. 없으면 횟수 제한이 없다. */
   hitsLeft?: number;
   /** 남은 시간(초). 없으면 시간 제한이 없다. */
@@ -24,7 +26,7 @@ export type EmpowerByHand = Partial<Record<Hand, EmpowerState>>;
 export function grantEmpower(
   current: EmpowerByHand,
   hand: Hand,
-  grant: { more: number; hits?: number; seconds?: number },
+  grant: { more: number; hits?: number; seconds?: number; source?: string },
 ): EmpowerByHand {
   // 이미 걸려 있으면 덮어쓴다. 겹쳐 쌓으면 콤보를 모아뒀다가 한 번에 터뜨리는 것이
   // 항상 이득이 되어, 조건을 채우는 재미가 아니라 참는 재미가 된다.
@@ -32,6 +34,7 @@ export function grantEmpower(
     ...current,
     [hand]: {
       more: grant.more,
+      source: grant.source,
       hitsLeft: grant.hits,
       secondsLeft: grant.seconds,
     },
