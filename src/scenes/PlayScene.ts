@@ -31,6 +31,7 @@ import {
   spawnProjectiles,
   advance,
   firstNewContact,
+  bounceAtBounds,
   onHitTarget,
   resetProjectileIds,
   isOutOfBounds,
@@ -3108,7 +3109,8 @@ export class PlayScene extends Phaser.Scene {
       const projectile = entity.state;
       advance(projectile, dt);
 
-      let consumed = isOutOfBounds(projectile, this.bounds);
+      const bounced = bounceAtBounds(projectile, this.bounds);
+      let consumed = !bounced && isOutOfBounds(projectile, this.bounds);
 
       if (!consumed) {
         const overlapping = this.enemies.filter(
@@ -3141,6 +3143,7 @@ export class PlayScene extends Phaser.Scene {
         this.projectiles.splice(i, 1);
       } else {
         entity.view.setPosition(projectile.x, projectile.y);
+        entity.view.setRotation(projectile.angle);
       }
     }
   }

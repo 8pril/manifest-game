@@ -152,6 +152,25 @@ export function isOutOfBounds(point: Vec2, bounds: Bounds): boolean {
   );
 }
 
+/**
+ * 남은 튕김 횟수가 있는 투사체를 방 경계에서 반사한다.
+ * 위치를 즉시 경계 안으로 되돌려 다음 프레임에 같은 벽을 다시 판정하지 않는다.
+ * 모서리는 두 축을 한 번에 반사하지만 튕김 횟수는 한 번만 소비한다.
+ */
+export function bounceAtBounds(projectile: Projectile, bounds: Bounds): boolean {
+  const hitVertical = projectile.x < bounds.minX || projectile.x > bounds.maxX;
+  const hitHorizontal = projectile.y < bounds.minY || projectile.y > bounds.maxY;
+  if (!hitVertical && !hitHorizontal) return false;
+
+  const surface = hitVertical && hitHorizontal ? 'corner' : hitVertical ? 'vertical' : 'horizontal';
+  const outcome = onHitTerrain(projectile, surface);
+  if (outcome.consumed) return false;
+
+  projectile.x = Math.min(bounds.maxX, Math.max(bounds.minX, projectile.x));
+  projectile.y = Math.min(bounds.maxY, Math.max(bounds.minY, projectile.y));
+  return true;
+}
+
 export interface HitOutcome {
   /** 이 명중으로 대상이 받는 피해. */
   damage: number;
@@ -212,14 +231,18 @@ export function onHitTarget(
 /** 지형에 부딪혔을 때. 튕겨쏘기가 남아 있으면 반사한다. */
 export function onHitTerrain(
   projectile: Projectile,
-  surfaceNormal: 'horizontal' | 'vertical',
+  surfaceNormal: 'horizontal' | 'vertical' | 'corner',
 ): { consumed: boolean } {
   if (projectile.ricochetRemaining <= 0) {
     return { consumed: true };
   }
   projectile.ricochetRemaining -= 1;
-  projectile.angle =
-    surfaceNormal === 'vertical' ? Math.PI - projectile.angle : -projectile.angle;
+  if (surfaceNormal === 'vertical' || surfaceNormal === 'corner') {
+    projectile.angle = Math.PI - projectile.angle;
+  }
+  if (surfaceNormal === 'horizontal' || surfaceNormal === 'corner') {
+    projectile.angle = -projectile.angle;
+  }
   return { consumed: false };
 }
 

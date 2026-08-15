@@ -6,6 +6,7 @@ import {
   onHitTerrain,
   advance,
   firstNewContact,
+  bounceAtBounds,
   resetProjectileIds,
   isOutOfBounds,
   DESPAWN_MARGIN,
@@ -253,6 +254,64 @@ describe('onHitTerrain - 튕겨쏘기', () => {
     p.angle = 0.5;
     onHitTerrain(p, 'horizontal');
     expect(p.angle).toBeCloseTo(-0.5, 10);
+  });
+
+  it('모서리에서는 양축을 반사하고 횟수는 한 번만 소비한다', () => {
+    const [p] = spawnProjectiles(stats, [{ kind: 'ricochet', count: 1 }], origin, 0);
+    p.angle = 0.5;
+
+    expect(onHitTerrain(p, 'corner').consumed).toBe(false);
+    expect(Math.cos(p.angle)).toBeCloseTo(-Math.cos(0.5), 10);
+    expect(Math.sin(p.angle)).toBeCloseTo(-Math.sin(0.5), 10);
+    expect(p.ricochetRemaining).toBe(0);
+  });
+});
+
+describe('bounceAtBounds - 실전 방 경계 연결', () => {
+  const room = { minX: 24, minY: 24, maxX: 1876, maxY: 1126 };
+
+  it('벽을 넘은 투사체를 경계 안으로 되돌리고 진행 방향을 반사한다', () => {
+    const [p] = spawnProjectiles(stats, [{ kind: 'ricochet', count: 1 }], origin, 0);
+    p.x = room.maxX + 8;
+    p.y = 500;
+    p.angle = 0;
+
+    expect(bounceAtBounds(p, room)).toBe(true);
+    expect(p.x).toBe(room.maxX);
+    expect(p.y).toBe(500);
+    expect(Math.cos(p.angle)).toBeCloseTo(-1, 10);
+    expect(p.ricochetRemaining).toBe(0);
+  });
+
+  it('방 안에서는 반사 횟수와 방향을 바꾸지 않는다', () => {
+    const [p] = spawnProjectiles(stats, [{ kind: 'ricochet', count: 1 }], origin, 0.25);
+    p.x = 500;
+    p.y = 500;
+
+    expect(bounceAtBounds(p, room)).toBe(false);
+    expect(p.angle).toBe(0.25);
+    expect(p.ricochetRemaining).toBe(1);
+  });
+
+  it('한 번 튄 뒤에는 다음 벽에서 다시 반사하지 않는다', () => {
+    const [p] = spawnProjectiles(stats, [{ kind: 'ricochet', count: 1 }], origin, 0);
+    p.x = room.maxX + 8;
+    p.y = 500;
+    expect(bounceAtBounds(p, room)).toBe(true);
+
+    p.x = room.minX - DESPAWN_MARGIN - 1;
+    expect(bounceAtBounds(p, room)).toBe(false);
+    expect(isOutOfBounds(p, room)).toBe(true);
+  });
+
+  it('튕김이 없는 투사체의 기존 소멸 여유 좌표를 건드리지 않는다', () => {
+    const [p] = spawnProjectiles(stats, [], origin, 0);
+    p.x = room.maxX + 8;
+    p.y = 500;
+
+    expect(bounceAtBounds(p, room)).toBe(false);
+    expect(p.x).toBe(room.maxX + 8);
+    expect(isOutOfBounds(p, room)).toBe(false);
   });
 });
 
