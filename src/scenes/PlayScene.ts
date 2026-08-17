@@ -43,6 +43,7 @@ import {
   createArea,
   tickArea,
   containsPoint,
+  splitAreaDamage,
   remainingRatio,
   resetAreaIds,
   AREA_COLORS,
@@ -3070,12 +3071,29 @@ export class PlayScene extends Phaser.Scene {
       const activeEmpower = owner ? this.empower[owner.hand] : undefined;
       const empowered = 1 + (activeEmpower?.more ?? 0);
 
+      if (result.detonated) {
+        ring(this, state.x, state.y, AREA_COLORS.ignite, {
+          from: state.radius * 0.35,
+          to: state.radius * 1.2,
+          duration: 300,
+          width: 5,
+        });
+        flash(this, state.x, state.y, state.radius * 1.5, AREA_COLORS.ignite);
+        floatingText(this, state.x, state.y - state.radius * 0.45, '화염 폭발', '#ff9a72', { duration: 900 });
+      }
+
       for (const entity of this.enemies) {
         if (!isAlive(entity.state) || !containsPoint(state, entity.state)) continue;
         if (state.hinders && canApplyCrowdControl(entity.state, behaviors)) entity.state.hindered = true;
+
+        if (result.detonated && state.detonationDamage !== undefined) {
+          this.damageEnemyFromArea(state, entity, behaviors, state.detonationDamage, empowered);
+          if (owner && activeEmpower) this.showEmpoweredHitFeedback(entity, owner.hand, activeEmpower);
+          damagedSomething = true;
+        }
+
         if (result.ticked) {
-          const damage = this.applyStatusDamageBonus(state.damagePerTick, entity.state, behaviors);
-          this.damageEnemy(entity, damage * incomingDamageMultiplier(entity.state) * empowered);
+          this.damageEnemyFromArea(state, entity, behaviors, state.damagePerTick, empowered);
           if (owner && activeEmpower) this.showEmpoweredHitFeedback(entity, owner.hand, activeEmpower);
           damagedSomething = true;
         }
@@ -3099,6 +3117,24 @@ export class PlayScene extends Phaser.Scene {
         this.areas.splice(i, 1);
       }
     }
+  }
+
+  /** 전환 비율을 적용한 지대 피해를 합산하고 속성 몫이 있으면 해당 색으로 명중을 표시한다. */
+  private damageEnemyFromArea(
+    area: Area,
+    entity: EnemyEntity,
+    behaviors: readonly Behavior[],
+    rawDamage: number,
+    empowered: number,
+  ): void {
+    const parts = splitAreaDamage(area, rawDamage);
+    const convertedTotal = parts.physical + parts.elemental;
+    const damage = this.applyStatusDamageBonus(convertedTotal, entity.state, behaviors);
+
+    if (parts.elemental > 0) {
+      hitSpark(this, entity.state.x, entity.state.y, AREA_COLORS[area.kind]);
+    }
+    this.damageEnemy(entity, damage * incomingDamageMultiplier(entity.state) * empowered);
   }
 
   private updateProjectiles(dt: number): void {

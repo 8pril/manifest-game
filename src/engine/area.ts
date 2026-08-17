@@ -2,6 +2,7 @@ import type { AreaKind, Behavior } from '@/engine/support';
 import { findBehavior } from '@/engine/support';
 import type { StatBlock } from '@/engine/modifiers';
 import type { Vec2 } from '@/engine/projectile';
+import type { Tag } from '@/engine/tags';
 
 /**
  * 지대 엔진.
@@ -26,8 +27,12 @@ export interface Area extends Vec2 {
   damagePerTick: number;
   /** 지속피해를 줄 때마다 적의 이동을 방해하는지. */
   hinders: boolean;
+  /** 기본 피해 중 다른 속성으로 전환되는 몫. */
+  conversion?: { to: Tag; ratio: number };
   /** 생성 후 일정 시간 뒤 폭발하는 지대라면 남은 시간, 아니면 undefined. */
   detonateIn?: number;
+  /** 폭발 시 한 번 주는 피해. */
+  detonationDamage?: number;
 }
 
 let nextId = 1;
@@ -42,7 +47,10 @@ export function createArea(
 ): Area {
   const kindBehavior = findBehavior(behaviors, 'areaKind');
   const hinder = findBehavior(behaviors, 'hinder');
-  const duration = stats.duration ?? 2;
+  const conversion = findBehavior(behaviors, 'convert');
+  const detonation = findBehavior(behaviors, 'detonate');
+  const duration = detonation ? detonation.after + detonation.linger : (stats.duration ?? 2);
+  const damage = stats.damage ?? 0;
 
   return {
     id: nextId++,
@@ -54,14 +62,21 @@ export function createArea(
     remaining: duration,
     tickInterval: stats.tickInterval ?? 0.5,
     elapsedSinceTick: 0,
-    damagePerTick: stats.damage ?? 0,
+    damagePerTick: damage,
     hinders: hinder !== undefined,
+    conversion: conversion
+      ? { to: conversion.to, ratio: Math.max(0, Math.min(1, conversion.ratio)) }
+      : undefined,
+    detonateIn: detonation?.after,
+    detonationDamage: detonation ? damage : undefined,
   };
 }
 
 export interface AreaTickResult {
   /** 이번 프레임에 지속피해가 발생했는지. */
   ticked: boolean;
+  /** 이번 프레임에 준비 시간이 끝나 폭발해야 하는지. */
+  detonated: boolean;
   /** 지속시간이 끝나 제거해야 하는지. */
   expired: boolean;
 }
@@ -74,7 +89,21 @@ export interface AreaTickResult {
  */
 export function tickArea(area: Area, deltaSeconds: number): AreaTickResult {
   area.remaining -= deltaSeconds;
-  area.elapsedSinceTick += deltaSeconds;
+
+  let activeDelta = deltaSeconds;
+  let detonated = false;
+  if (area.detonateIn !== undefined && area.detonateIn > 0) {
+    const reachesDetonation = activeDelta + 1e-9 >= area.detonateIn;
+    if (reachesDetonation) {
+      activeDelta = Math.max(0, activeDelta - area.detonateIn);
+      area.detonateIn = 0;
+      detonated = true;
+    } else {
+      area.detonateIn -= activeDelta;
+      activeDelta = 0;
+    }
+  }
+  area.elapsedSinceTick += activeDelta;
 
   let ticked = false;
   if (area.elapsedSinceTick >= area.tickInterval) {
@@ -82,7 +111,23 @@ export function tickArea(area: Area, deltaSeconds: number): AreaTickResult {
     ticked = true;
   }
 
-  return { ticked, expired: area.remaining <= 0 };
+  return { ticked, detonated, expired: area.remaining <= 0 };
+}
+
+export interface AreaDamageParts {
+  physical: number;
+  elemental: number;
+  element?: Tag;
+}
+
+/** 지대 피해를 전환 전 물리 몫과 속성 몫으로 나눈다. 총 피해량은 보존한다. */
+export function splitAreaDamage(area: Area, damage = area.damagePerTick): AreaDamageParts {
+  const ratio = area.conversion?.ratio ?? 0;
+  return {
+    physical: damage * (1 - ratio),
+    elemental: damage * ratio,
+    element: area.conversion?.to,
+  };
 }
 
 export function containsPoint(area: Area, point: Vec2): boolean {

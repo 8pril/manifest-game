@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createArea, tickArea, containsPoint, remainingRatio, resetAreaIds } from '@/engine/area';
+import { createArea, tickArea, containsPoint, remainingRatio, resetAreaIds, splitAreaDamage } from '@/engine/area';
 import type { Behavior } from '@/engine/support';
 
 beforeEach(() => resetAreaIds());
@@ -24,6 +24,22 @@ describe('createArea', () => {
     const behaviors: Behavior[] = [{ kind: 'hinder' }];
     expect(createArea(stats, behaviors, { x: 0, y: 0 }).hinders).toBe(true);
     expect(createArea(stats, [], { x: 0, y: 0 }).hinders).toBe(false);
+  });
+
+  it('convert 거동을 피해 구성으로 보존한다', () => {
+    const behaviors: Behavior[] = [{ kind: 'convert', to: '번개', ratio: 0.5 }];
+    const area = createArea(stats, behaviors, { x: 0, y: 0 });
+
+    expect(area.conversion).toEqual({ to: '번개', ratio: 0.5 });
+    expect(splitAreaDamage(area)).toEqual({ physical: 10, elemental: 10, element: '번개' });
+  });
+
+  it('전환 비율이 범위를 벗어나도 총 피해를 보존한다', () => {
+    const area = createArea(stats, [{ kind: 'convert', to: '냉기', ratio: 2 }], { x: 0, y: 0 });
+    const parts = splitAreaDamage(area);
+
+    expect(parts).toEqual({ physical: 0, elemental: 20, element: '냉기' });
+    expect(parts.physical + parts.elemental).toBe(20);
   });
 });
 
@@ -52,6 +68,20 @@ describe('tickArea', () => {
     // 원안: 지속피해 간격 50% 가속 -> 0.5 / 1.5 = 0.333
     const fast = createArea({ ...stats, tickInterval: 0.5 / 1.5 }, [], { x: 0, y: 0 });
     expect(tickArea(fast, 0.34).ticked).toBe(true);
+  });
+
+  it('폭발형은 2초 준비 중 피해를 주지 않고 폭발 뒤 지대 틱을 시작한다', () => {
+    const area = createArea(
+      stats,
+      [{ kind: 'detonate', after: 2, linger: 2 }],
+      { x: 0, y: 0 },
+    );
+
+    expect(area.duration).toBe(4);
+    expect(tickArea(area, 1.9)).toMatchObject({ ticked: false, detonated: false, expired: false });
+    expect(tickArea(area, 0.1)).toMatchObject({ ticked: false, detonated: true, expired: false });
+    expect(tickArea(area, 0.5)).toMatchObject({ ticked: true, detonated: false, expired: false });
+    expect(tickArea(area, 1.5).expired).toBe(true);
   });
 });
 

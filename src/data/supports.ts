@@ -109,8 +109,9 @@ const AREA_SUPPORTS: Support[] = [
     behaviors: [
       { kind: 'areaKind', value: 'ignite' },
       { kind: 'convert', to: '화염', ratio: 0.4 },
+      { kind: 'detonate', after: 2, linger: 2 },
     ],
-    description: '지대가 생성되고 2초 후 폭발, 물리 피해의 40%를 화염으로 전환',
+    description: '2초 후 폭발해 점화 지대를 2초 생성, 물리 피해의 40%를 화염으로 전환',
   },
   {
     id: 'crackling-ground',

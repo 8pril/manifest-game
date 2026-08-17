@@ -22,6 +22,8 @@ export type Behavior =
   | { kind: 'ricochet'; count: number }
   /** 피해 타입 전환. 물리 피해의 일부를 다른 속성으로 바꾼다. */
   | { kind: 'convert'; to: Tag; ratio: number }
+  /** 일정 시간 준비한 뒤 한 번 폭발하고 지정한 시간 동안 지대를 남긴다. */
+  | { kind: 'detonate'; after: number; linger: number }
   /** 지대 성질 전환. */
   | { kind: 'areaKind'; value: AreaKind }
   /** 지대가 지속피해를 줄 때마다 적의 이동을 방해한다. */

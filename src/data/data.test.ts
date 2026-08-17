@@ -3,6 +3,7 @@ import { SUPPORTS } from '@/data/supports';
 import { SKILLS, findSkill } from '@/data/skills';
 import { WEAPON_LIST, attackIntervalFor, basicSkillsOf, deliveryOf } from '@/data/weapons';
 import { canAttach, resolveSkill, supportSlotType } from '@/engine/support';
+import { createArea } from '@/engine/area';
 import { TAGS } from '@/engine/tags';
 
 /**
@@ -164,6 +165,37 @@ describe('실제 조합 결과', () => {
     expect(resolved.stats.tickInterval).toBeCloseTo((ANNIHILATION_.base.tickInterval ?? 0) / 1.5, 10);
     expect(resolved.stats.areaRadius).toBe((ANNIHILATION_.base.areaRadius ?? 0) * 2);
     expect(resolved.stats.damage).toBeCloseTo((ANNIHILATION_.base.damage ?? 0) / 1.2, 10);
+  });
+
+  it("'폭발하는 지대'를 붙인 멸검은 2초 뒤 폭발하고 점화 지대를 2초 남긴다", () => {
+    const support = SUPPORTS.filter((s) => s.id === 'explosive-ground');
+    const resolved = resolveSkill(ANNIHILATION_, support);
+    const area = createArea(resolved.stats, resolved.behaviors, { x: 0, y: 0 });
+
+    expect(area.kind).toBe('ignite');
+    expect(area.detonateIn).toBe(2);
+    expect(area.duration).toBe(4);
+    expect(area.conversion).toEqual({ to: '화염', ratio: 0.4 });
+  });
+
+  it("'찌릿거리는 지대'를 붙인 멸검은 지속시간과 번개 전환을 적용한다", () => {
+    const support = SUPPORTS.filter((s) => s.id === 'crackling-ground');
+    const resolved = resolveSkill(ANNIHILATION_, support);
+    const area = createArea(resolved.stats, resolved.behaviors, { x: 0, y: 0 });
+
+    expect(area.kind).toBe('shock');
+    expect(area.duration).toBe((ANNIHILATION_.base.duration ?? 0) + 1);
+    expect(area.conversion).toEqual({ to: '번개', ratio: 0.5 });
+  });
+
+  it("'끌어내리는 지대'를 붙인 멸검은 지속시간과 냉기 전환을 적용한다", () => {
+    const support = SUPPORTS.filter((s) => s.id === 'dragging-ground');
+    const resolved = resolveSkill(ANNIHILATION_, support);
+    const area = createArea(resolved.stats, resolved.behaviors, { x: 0, y: 0 });
+
+    expect(area.kind).toBe('chill');
+    expect(area.duration).toBe((ANNIHILATION_.base.duration ?? 0) + 2);
+    expect(area.conversion).toEqual({ to: '냉기', ratio: 0.5 });
   });
 
   it('슬롯 수를 넘는 조합은 초과분이 거부된다', () => {
