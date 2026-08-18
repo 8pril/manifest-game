@@ -14,6 +14,7 @@ import { ring, flash, floatingText, impact, hitSpark, deathBurst } from '@/effec
 import { publishDebugState, DEBUG_ENABLED } from '@/debug';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS, STATUS_COLORS } from '@/config';
 import { attackIntervalFor, basicSkillsOf, deliveryOf, weaponOf, WEAPON_IDS, WEAPON_LIST, type Weapon, type WeaponId } from '@/data/weapons';
+import { resolveStatusHit } from '@/game/status-hit';
 import { SUPPORTS, findSupport } from '@/data/supports';
 import { findKey, missingKeys } from '@/data/keys';
 import {
@@ -55,11 +56,9 @@ import {
   isStunned,
   consumeBrand,
   incomingDamageMultiplier,
-  hasStatus,
   findStatus,
   STATUS_RULES,
   WOUND_BURST_DAMAGE,
-  consumeWound,
   WOUND_CONSUME_PER_STACK,
   ARCANE_FLOW_MORE,
   ARCANE_FLOW_DURATION,
@@ -1374,8 +1373,8 @@ export class PlayScene extends Phaser.Scene {
     // 수정자 파이프라인이 아니라 명중 시점에 적용한다.
     const activeEmpower = runtime ? this.empower[runtime.hand] : undefined;
     const empowered = 1 + (activeEmpower?.more ?? 0);
-    let damage =
-      this.applyStatusDamageBonus(rawDamage, enemy, behaviors) * incomingDamageMultiplier(enemy) * empowered;
+    const statusHit = resolveStatusHit(rawDamage, enemy, weapon.status, behaviors);
+    let damage = statusHit.damage * incomingDamageMultiplier(enemy) * empowered;
 
     // 평범한 명중에도 반응이 있어야 한다. 지금까지는 체력바만 줄었다.
     hitSpark(this, enemy.x, enemy.y, weapon.color);
@@ -1393,19 +1392,8 @@ export class PlayScene extends Phaser.Scene {
     // 상처 폭발은 5스택이 필요한데 사냥개(2타)와 몰이꾼(2타)은 그 전에 죽어
     // 규칙이 구조적으로 발동하지 않았다. 이 반응이 그 구멍을 메우고,
     // 동시에 무기를 두 개 고르는 선택에 의미를 만든다.
-    if (weapon.status !== 'wound') {
-      const stacks = consumeWound(enemy);
-      if (stacks > 0) {
-        const bonus = stacks * WOUND_CONSUME_PER_STACK;
-        damage += bonus;
-        this.ruleEvents.woundConsume++;
-        playSfx('statusBurst');
-
-        const radius = ENEMY_STATS[enemy.kind].radius;
-        ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 2.4, duration: 280 });
-        floatingText(this, enemy.x, enemy.y - radius - 12, `상처 소모 ${bonus}`, '#ffb4a2');
-      }
-    }
+    damage += statusHit.woundBonus;
+    this.showWoundConsumeFeedback(entity, statusHit.woundStacksConsumed, statusHit.woundBonus);
 
     // 각성 중에도 무기의 상태 정체성은 유지한다.
     // 기본 공격만 콤보 게이지를 올리고, 강화기술 명중은 지속시간만 갱신한다.
@@ -1461,10 +1449,15 @@ export class PlayScene extends Phaser.Scene {
     this.damageEnemy(entity, damage);
   }
 
-  private applyStatusDamageBonus(damage: number, enemy: Enemy, behaviors: readonly Behavior[]): number {
-    const bonus = findBehavior(behaviors, 'statusDamage');
-    if (!bonus || !hasStatus(enemy, bonus.status)) return damage;
-    return damage * (1 + bonus.more);
+  private showWoundConsumeFeedback(entity: EnemyEntity, stacks: number, bonus: number): void {
+    if (stacks <= 0) return;
+    this.ruleEvents.woundConsume++;
+    playSfx('statusBurst');
+
+    const enemy = entity.state;
+    const radius = ENEMY_STATS[enemy.kind].radius;
+    ring(this, enemy.x, enemy.y, BURST_COLOR, { to: radius * 2.4, duration: 280 });
+    floatingText(this, enemy.x, enemy.y - radius - 12, `상처 소모 ${bonus}`, '#ffb4a2');
   }
 
   private showStunFeedback(entity: EnemyEntity): void {
@@ -3087,13 +3080,13 @@ export class PlayScene extends Phaser.Scene {
         if (state.hinders && canApplyCrowdControl(entity.state, behaviors)) entity.state.hindered = true;
 
         if (result.detonated && state.detonationDamage !== undefined) {
-          this.damageEnemyFromArea(state, entity, behaviors, state.detonationDamage, empowered);
+          this.damageEnemyFromArea(state, entity, owner, behaviors, state.detonationDamage, empowered);
           if (owner && activeEmpower) this.showEmpoweredHitFeedback(entity, owner.hand, activeEmpower);
           damagedSomething = true;
         }
 
         if (result.ticked) {
-          this.damageEnemyFromArea(state, entity, behaviors, state.damagePerTick, empowered);
+          this.damageEnemyFromArea(state, entity, owner, behaviors, state.damagePerTick, empowered);
           if (owner && activeEmpower) this.showEmpoweredHitFeedback(entity, owner.hand, activeEmpower);
           damagedSomething = true;
         }
@@ -3123,18 +3116,21 @@ export class PlayScene extends Phaser.Scene {
   private damageEnemyFromArea(
     area: Area,
     entity: EnemyEntity,
+    owner: WeaponRuntime | null,
     behaviors: readonly Behavior[],
     rawDamage: number,
     empowered: number,
   ): void {
     const parts = splitAreaDamage(area, rawDamage);
     const convertedTotal = parts.physical + parts.elemental;
-    const damage = this.applyStatusDamageBonus(convertedTotal, entity.state, behaviors);
+    const statusHit = resolveStatusHit(convertedTotal, entity.state, owner?.weapon.status, behaviors);
+    const damage = statusHit.damage * incomingDamageMultiplier(entity.state) * empowered + statusHit.woundBonus;
 
     if (parts.elemental > 0) {
       hitSpark(this, entity.state.x, entity.state.y, AREA_COLORS[area.kind]);
     }
-    this.damageEnemy(entity, damage * incomingDamageMultiplier(entity.state) * empowered);
+    this.showWoundConsumeFeedback(entity, statusHit.woundStacksConsumed, statusHit.woundBonus);
+    this.damageEnemy(entity, damage);
   }
 
   private updateProjectiles(dt: number): void {
