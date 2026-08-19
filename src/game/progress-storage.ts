@@ -1,6 +1,12 @@
 import { WEAPON_IDS, type WeaponId } from '@/data/weapons';
 import { reconcileLayout } from '@/game/inventory';
-import { createInitialProgress, type ManifestationConfig, type PlayerProgress, type WheelSlot } from '@/game/progression';
+import {
+  createInitialProgress,
+  reconcileManifestationConfigs,
+  type ManifestationConfig,
+  type PlayerProgress,
+  type WheelSlot,
+} from '@/game/progression';
 
 export const PROGRESS_STORAGE_KEY = 'nan2026.progress.v1';
 export const RUN_CHECKPOINT_STORAGE_KEY = 'nan2026.run-checkpoint.v2';
@@ -138,7 +144,10 @@ function sanitizeProgress(raw: Record<string, unknown>): PlayerProgress {
   // `inventory` 필드가 없던 시절의 저장에는 배치가 통째로 비어 있어서, 활·방패를
   // 보유하고 있어도 인벤토리 격자가 텅 빈 채로 보인다. 손상된 배치도 마찬가지다.
   // 보유 목록에 맞춰 정리해야 새로 얻은 것이 빈 칸에 들어가고 없는 것이 빠진다.
-  return { ...parsed, inventory: reconcileLayout(parsed, parsed.inventory) };
+  return reconcileManifestationConfigs({
+    ...parsed,
+    inventory: reconcileLayout(parsed, parsed.inventory),
+  });
 }
 
 function sanitizeRunCheckpoint(raw: Record<string, unknown>): RunCheckpoint {

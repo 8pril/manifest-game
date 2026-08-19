@@ -1,6 +1,6 @@
 import { WEAPON_IDS, basicSkillsOf, weaponOf, type WeaponId } from '@/data/weapons';
 import { findSupport } from '@/data/supports';
-import { supportSlotType, type Skill, type Support } from '@/engine/support';
+import { canAttach, supportSlotType, type Skill, type Support } from '@/engine/support';
 import { createEmptyLayout, reconcileLayout, autoSortLayout, swapCells } from '@/game/inventory';
 
 /**
@@ -286,21 +286,95 @@ export function configureManifestation(
 ): PlayerProgress {
   if (!hasWeapon(progress, weapon)) return progress;
   const accepted = sanitizeManifestationPatch(progress, weapon, patch);
+  const merged = reconcileManifestationConfig(progress, weapon, {
+    ...progress.configs[weapon],
+    ...accepted,
+  });
   let configs: ManifestationConfigs = {
     ...progress.configs,
-    [weapon]: {
-      ...progress.configs[weapon],
-      ...accepted,
-    },
+    [weapon]: merged,
   };
 
-  configs = clearEquippedSupportElsewhere(configs, weapon, 'primary', accepted.primarySupportId);
-  configs = clearEquippedSupportElsewhere(configs, weapon, 'synergy', accepted.synergySupportId);
+  configs = clearEquippedSupportElsewhere(
+    configs,
+    weapon,
+    'primary',
+    patch.primarySupportId !== undefined ? merged.primarySupportId : undefined,
+  );
+  configs = clearEquippedSupportElsewhere(
+    configs,
+    weapon,
+    'synergy',
+    patch.synergySupportId !== undefined ? merged.synergySupportId : undefined,
+  );
 
   return {
     ...progress,
     configs,
   };
+}
+
+/**
+ * 저장 복원용. 보유 상태·현재 기본스킬과 맞지 않는 설정을 화면에 남기지 않는다.
+ * 같은 보조가 여러 무기에 중복된 옛 저장은 무기 목록에서 먼저 나온 한 곳만 유지한다.
+ */
+export function reconcileManifestationConfigs(progress: PlayerProgress): PlayerProgress {
+  const usedSupportIds = new Set<string>();
+  let configs = progress.configs;
+
+  for (const weapon of WEAPON_IDS) {
+    const config = reconcileManifestationConfig({ ...progress, configs }, weapon, configs[weapon], usedSupportIds);
+    if (config !== configs[weapon]) configs = { ...configs, [weapon]: config };
+  }
+
+  return configs === progress.configs ? progress : { ...progress, configs };
+}
+
+function reconcileManifestationConfig(
+  progress: PlayerProgress,
+  weapon: WeaponId,
+  config: ManifestationConfig,
+  usedSupportIds: Set<string> = new Set(),
+): ManifestationConfig {
+  if (!hasWeapon(progress, weapon)) {
+    return config.basicSkillId === null && config.primarySupportId === null && config.synergySupportId === null
+      ? config
+      : { basicSkillId: null, primarySupportId: null, synergySupportId: null };
+  }
+
+  const basicSkillId = config.basicSkillId !== null
+    && canEquipBasicSkill(weapon, config.basicSkillId)
+    && hasBasicSkill(progress, config.basicSkillId)
+    ? config.basicSkillId
+    : null;
+  const progressWithSkill: PlayerProgress = {
+    ...progress,
+    configs: {
+      ...progress.configs,
+      [weapon]: { ...config, basicSkillId },
+    },
+  };
+  const skill = equippedBasicSkill(progressWithSkill, weapon);
+  const attached: Support[] = [];
+
+  const accept = (id: string | null, slot: 'primary' | 'synergy'): string | null => {
+    if (!id || usedSupportIds.has(id) || !canUseSupportInSlot(progress, id, slot)) return null;
+    const support = findSupport(id);
+    if (!support || !canAttach(skill, support, attached).ok) return null;
+    attached.push(support);
+    usedSupportIds.add(id);
+    return id;
+  };
+
+  const primarySupportId = accept(config.primarySupportId, 'primary');
+  const synergySupportId = accept(config.synergySupportId, 'synergy');
+  if (
+    basicSkillId === config.basicSkillId
+    && primarySupportId === config.primarySupportId
+    && synergySupportId === config.synergySupportId
+  ) return config;
+
+  return { basicSkillId, primarySupportId, synergySupportId };
 }
 
 function clearEquippedSupportElsewhere(

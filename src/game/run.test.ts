@@ -421,17 +421,21 @@ describe('무적 시간', () => {
 
 describe('저장된 진행으로 새 판을 시작할 때', () => {
   it('보유와 세팅은 이어받는다', () => {
-    const saved = configureManifestation(
-      unlockWeaponSwitch(unlockSupports(unlockWeapons(createInitialProgress(), ['bow', 'shield']), ['earthquake'])),
-      'sword',
-      { primarySupportId: 'earthquake', synergySupportId: null },
-    );
+    let saved = unlockWeapons(createInitialProgress(), ['bow', 'shield']);
+    saved = unlockWeaponSwitch(unlockBasicSkills(saved, ['annihilation']));
+    saved = unlockSupports(saved, ['earthquake']);
+    saved = configureManifestation(saved, 'sword', {
+      basicSkillId: 'annihilation',
+      primarySupportId: 'earthquake',
+      synergySupportId: null,
+    });
 
     const run = createRun('sword', null, saved);
 
     expect(run.progress.unlockedWeapons).toEqual(['sword', 'bow', 'shield']);
     expect(run.progress.ownedSupports).toContain('earthquake');
     expect(run.progress.weaponSwitchUnlocked).toBe(true);
+    expect(run.progress.configs.sword.basicSkillId).toBe('annihilation');
     expect(run.progress.configs.sword.primarySupportId).toBe('earthquake');
   });
 

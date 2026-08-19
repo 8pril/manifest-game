@@ -114,13 +114,21 @@ describe('loadoutFromProgress', () => {
     let progress = unlockBasicSkills(unlockWeapons(createInitialProgress(), ['arcane']), ['arcane-bloom']);
     progress = unlockSupports(progress, ['wound-resonance']);
     progress = configureManifestation(progress, 'arcane', { synergySupportId: 'wound-resonance' });
+    expect(progress.configs.arcane.synergySupportId).toBeNull();
     expect(supportsFor(loadoutFromProgress(progress), 'arcane-bolt')).toEqual([]);
     expect(supportsFor(loadoutFromProgress(progress), 'arcane-bloom')).toEqual([]);
 
-    progress = configureManifestation(progress, 'arcane', { basicSkillId: 'arcane-bloom' });
+    progress = configureManifestation(progress, 'arcane', {
+      basicSkillId: 'arcane-bloom',
+      synergySupportId: 'wound-resonance',
+    });
     expect(supportsFor(loadoutFromProgress(progress), 'arcane-bloom').map((s) => s.id)).toEqual([
       'wound-resonance',
     ]);
+
+    progress = configureManifestation(progress, 'arcane', { basicSkillId: null });
+    expect(progress.configs.arcane.synergySupportId).toBeNull();
+    expect(supportsFor(loadoutFromProgress(progress), 'arcane-bolt')).toEqual([]);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   hasWeapon,
   setWheelSlot,
   swapWheelSlots,
+  unlockBasicSkills,
   unlockSupports,
   unlockWeapons,
   unlockWeaponSwitch,
@@ -188,6 +189,45 @@ describe('manifestation config', () => {
     expect(bow.configs.bow.primarySupportId).toBe('bold-resolve');
     expect(configuredSupports(bow, 'sword')).toEqual([]);
     expect(configuredSupports(bow, 'bow').map((support) => support.id)).toEqual(['bold-resolve']);
+  });
+
+  it('기본스킬 변경 후 호환되지 않는 보조와 연계만 해제한다', () => {
+    let progress = unlockWeapons(createInitialProgress(), ['arcane']);
+    progress = unlockBasicSkills(progress, ['arcane-bloom', 'arcane-daggers']);
+    progress = unlockSupports(progress, ['explosive-ground', 'wound-resonance']);
+    progress = configureManifestation(progress, 'arcane', {
+      basicSkillId: 'arcane-bloom',
+      primarySupportId: 'explosive-ground',
+      synergySupportId: 'wound-resonance',
+    });
+
+    const changed = configureManifestation(progress, 'arcane', { basicSkillId: 'arcane-daggers' });
+
+    expect(changed.configs.arcane).toEqual({
+      basicSkillId: 'arcane-daggers',
+      primarySupportId: null,
+      synergySupportId: null,
+    });
+    expect(changed.ownedSupports).toEqual(expect.arrayContaining(['explosive-ground', 'wound-resonance']));
+    expect(changed.inventory).toEqual(expect.arrayContaining(['explosive-ground', 'wound-resonance']));
+  });
+
+  it('새 기본스킬에도 호환되는 보조와 연계는 유지한다', () => {
+    let progress = unlockWeapons(createInitialProgress(), ['bow']);
+    progress = unlockBasicSkills(progress, ['scattershot']);
+    progress = unlockSupports(progress, ['multiple-projectiles', 'wound-seeker']);
+    progress = configureManifestation(progress, 'bow', {
+      primarySupportId: 'multiple-projectiles',
+      synergySupportId: 'wound-seeker',
+    });
+
+    const changed = configureManifestation(progress, 'bow', { basicSkillId: 'scattershot' });
+
+    expect(changed.configs.bow).toEqual({
+      basicSkillId: 'scattershot',
+      primarySupportId: 'multiple-projectiles',
+      synergySupportId: 'wound-seeker',
+    });
   });
 
   it('아직 해금되지 않은 무기 설정은 바꾸지 않는다', () => {

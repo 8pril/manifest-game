@@ -170,13 +170,41 @@ describe('progress storage', () => {
 
     expect(restored?.unlockedWeapons).toEqual(['sword', 'bow']);
     expect(restored?.ownedSupports).toEqual(['combo-imprint']);
-    // 설정에서 남은 키는 사라지고 소켓 세 칸만 남는다.
+    // 설정에서 남은 키와 존재하지 않는 옛 보조 장착도 사라지고 소켓 세 칸만 남는다.
     expect(restored?.configs.sword).toEqual({
       basicSkillId: null,
       primarySupportId: null,
-      synergySupportId: 'combo-imprint',
+      synergySupportId: null,
     });
     expect(restored).not.toHaveProperty('ownedComboSkills');
+  });
+
+  it('현재 기본스킬과 호환되지 않는 옛 저장의 보조 장착을 해제한다', () => {
+    const restored = parseProgress(JSON.stringify({
+      version: 1,
+      progress: {
+        unlockedWeapons: ['sword', 'arcane'],
+        ownedBasicSkills: ['arcane-bloom'],
+        ownedSupports: ['multiple-projectiles'],
+        active: { left: 'sword', right: 'arcane' },
+        wheel: { left: ['sword', null], right: ['arcane', null] },
+        configs: {
+          arcane: {
+            basicSkillId: 'arcane-bloom',
+            primarySupportId: 'multiple-projectiles',
+            synergySupportId: null,
+          },
+        },
+      },
+    }));
+
+    expect(restored?.configs.arcane).toEqual({
+      basicSkillId: 'arcane-bloom',
+      primarySupportId: null,
+      synergySupportId: null,
+    });
+    expect(restored?.ownedSupports).toContain('multiple-projectiles');
+    expect(restored?.inventory).toContain('multiple-projectiles');
   });
 });
 
