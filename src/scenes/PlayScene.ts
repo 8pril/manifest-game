@@ -112,7 +112,8 @@ import {
   COMBO_REQUIRED,
   type ComboState,
 } from '@/game/combo';
-import { grantEmpower, empowerMore, spendEmpower, tickEmpower, type EmpowerByHand, type EmpowerState } from '@/game/empower';
+import { empowerForAttack, grantEmpower, empowerMore, spendEmpower, tickEmpower, type EmpowerByHand, type EmpowerState } from '@/game/empower';
+import { snapshotAttackSource, type AttackComboRule, type AttackSource } from '@/game/attack-source';
 import {
   createRun,
   clearRoom,
@@ -395,8 +396,8 @@ interface EnemyEntity {
 interface ProjectileEntity {
   state: Projectile;
   view: Phaser.GameObjects.Arc | Phaser.GameObjects.Sprite;
-  /** 이 투사체를 쏜 무기. 명중 시 콤보와 상태이상을 누구에게 귀속할지 결정한다. */
-  weapon: Weapon;
+  /** 발사 뒤 장비를 바꿔도 명중 소유권과 콤보 수치를 잃지 않는다. */
+  source: AttackSource;
   behaviors: readonly Behavior[];
 }
 
@@ -608,8 +609,8 @@ export class PlayScene extends Phaser.Scene {
   private aimLine!: Phaser.GameObjects.Line;
   private enemies: EnemyEntity[] = [];
   private projectiles: ProjectileEntity[] = [];
-  /** 지대는 어느 무기가 만들었는지 함께 들고 있는다. 지속피해로도 콤보가 유지되게 하기 위함이다. */
-  private areas: { state: Area; view: Phaser.GameObjects.Arc; owner: WeaponRuntime | null; behaviors: readonly Behavior[] }[] = [];
+  /** 지대는 생성 당시 공격 출처를 보존한다. 지속피해가 현재 장비 설정을 다시 읽으면 안 된다. */
+  private areas: { state: Area; view: Phaser.GameObjects.Arc; source: AttackSource; behaviors: readonly Behavior[] }[] = [];
   /** 적이 쏜 투사체. 플레이어 투사체와 충돌 대상이 반대라 따로 관리한다. */
   private enemyShots: { state: Projectile; view: Phaser.GameObjects.Arc | Phaser.GameObjects.Sprite; damage: number }[] = [];
 
@@ -1094,15 +1095,18 @@ export class PlayScene extends Phaser.Scene {
     return equippedBasicSkill(this.run.progress, runtime.weapon.id).id !== runtime.weapon.basic.id;
   }
 
-  /** 장착된 연계 중 하나라도 이 손의 명중을 집계하는가. */
-  private tracksComboFor(hand: Hand): boolean {
-    for (const owner of [this.left, this.right]) {
-      if (!owner) continue;
-      if (this.comboRulesFor(owner).some(({ trigger }) => comboTriggerTracksHand(owner.hand, hand, trigger))) {
-        return true;
-      }
-    }
-    return false;
+  /** 현재 양손에 장착된 콤보 규칙을 공격 생성 시점의 형태로 펼친다. */
+  private attackComboRules(): AttackComboRule[] {
+    return [this.left, this.right].flatMap((runtime) =>
+      runtime
+        ? this.comboRulesFor(runtime).map(({ trigger, effect, support }) => ({
+            ownerHand: runtime.hand,
+            trigger,
+            effect,
+            supportName: support.name,
+          }))
+        : [],
+    );
   }
 
   /**
@@ -1113,29 +1117,26 @@ export class PlayScene extends Phaser.Scene {
    * 부른다. 소모하지 않는 규칙은 조건이 유지되는 동안 계속 켜져 있어야 해서
    * 매 프레임 다시 본다(`refreshSustainedEmpower`).
    */
-  private applyComboEffects(): void {
-    for (const runtime of [this.left, this.right]) {
-      if (!runtime) continue;
-      for (const { trigger, effect, support } of this.comboRulesFor(runtime)) {
-        if (effect.kind !== 'empower' || !effect.consumes) continue;
-        if (!comboTriggerMet(this.combo, runtime.hand, trigger)) continue;
+  private applyComboEffects(rules: readonly AttackComboRule[]): void {
+    for (const { ownerHand, trigger, effect, supportName } of rules) {
+      if (effect.kind !== 'empower' || !effect.consumes) continue;
+      if (!comboTriggerMet(this.combo, ownerHand, trigger)) continue;
 
-        const target = effect.hand === 'self' ? runtime.hand : otherHand(runtime.hand);
-        this.empower = grantEmpower(this.empower, target, {
-          more: effect.more,
-          hits: effect.hits,
-          seconds: effect.seconds,
-          source: support.name,
-        });
-        const scope =
-          effect.consumes === 'self'
-            ? runtime.hand
-            : effect.consumes === 'other'
-              ? otherHand(runtime.hand)
-              : 'total';
-        this.combo = consumeCombo(this.combo, scope);
-        floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, support.name, COLORS.accentText);
-      }
+      const target = effect.hand === 'self' ? ownerHand : otherHand(ownerHand);
+      this.empower = grantEmpower(this.empower, target, {
+        more: effect.more,
+        hits: effect.hits,
+        seconds: effect.seconds,
+        source: supportName,
+      });
+      const scope =
+        effect.consumes === 'self'
+          ? ownerHand
+          : effect.consumes === 'other'
+            ? otherHand(ownerHand)
+            : 'total';
+      this.combo = consumeCombo(this.combo, scope);
+      floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, supportName, COLORS.accentText);
     }
   }
 
@@ -1174,24 +1175,35 @@ export class PlayScene extends Phaser.Scene {
    * **`basic` 구분은 없어졌다.** 첫 소켓에 무엇을 끼웠든 그것이 그 무기의 기본 공격이다.
    * 옛 콤보 전환 시절의 `basic` 값은 명중 처리에서 완전히 걷어냈다.
    *
-   * **지대에는 `owner`를 반드시 넘긴다.** 지대는 직접 명중이 없어서, owner가 없으면
+   * **지대에는 `source`를 반드시 넘긴다.** 지대는 직접 명중이 없어서, 출처가 없으면
    * 상태이상도 안 걸리고 콤보 지속시간도 안 늘어난다. 비전 개화(지대형 기본스킬)를
    * 끼우면 콤보가 아예 안 오르던 것이 이 때문이다.
    */
   private useSkill(runtime: WeaponRuntime, skill: Skill, angle: number): void {
     const resolved = resolveFor(this.run.loadout, skill);
+    const comboRules = this.attackComboRules();
+    const source = snapshotAttackSource({
+      weapon: runtime.weapon,
+      hand: runtime.hand,
+      comboStats: resolved.stats,
+      tracksCombo: comboRules.some(({ ownerHand, trigger }) =>
+        comboTriggerTracksHand(ownerHand, runtime.hand, trigger),
+      ),
+      comboRules,
+      empowerId: this.empower[runtime.hand]?.id,
+    });
     this.showPrimarySupportFeedback(runtime, skill);
     playSfx('attack');
 
     switch (deliveryOf(skill)) {
       case 'projectile':
-        this.fireProjectiles(runtime.weapon, skill, resolved.stats, resolved.behaviors, angle);
+        this.fireProjectiles(source, resolved.stats, resolved.behaviors, angle);
         break;
       case 'melee':
-        this.swingMelee(runtime, skill, resolved.stats, resolved.behaviors, angle);
+        this.swingMelee(source, resolved.stats, resolved.behaviors, angle);
         break;
       case 'area':
-        this.dropArea(resolved.stats, resolved.behaviors, angle, runtime);
+        this.dropArea(resolved.stats, resolved.behaviors, angle, source);
         break;
     }
   }
@@ -1216,8 +1228,7 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private fireProjectiles(
-    weapon: Weapon,
-    _skill: Skill,
+    source: AttackSource,
     stats: ReturnType<typeof resolveFor>['stats'],
     behaviors: ReturnType<typeof resolveFor>['behaviors'],
     angle: number,
@@ -1226,23 +1237,22 @@ export class PlayScene extends Phaser.Scene {
     for (const state of spawnProjectiles(stats, behaviors, { x: this.player.x, y: this.player.y }, angle)) {
       this.projectiles.push({
         state,
-        view: this.createBoltView(BOLT_SPRITE[weapon.id], state.x, state.y, size, state.angle, weapon.color),
-        weapon,
+        view: this.createBoltView(BOLT_SPRITE[source.weapon.id], state.x, state.y, size, state.angle, source.weapon.color),
+        source,
         behaviors,
       });
     }
   }
 
   private swingMelee(
-    runtime: WeaponRuntime,
-    _skill: Skill,
+    source: AttackSource,
     stats: ReturnType<typeof resolveFor>['stats'],
     behaviors: ReturnType<typeof resolveFor>['behaviors'],
     angle: number,
   ): void {
     const range = stats.meleeRange ?? 90;
     const arc = stats.meleeArc ?? 1.7;
-    const duration = runtime.weapon.swingDuration || 140;
+    const duration = source.weapon.swingDuration || 140;
     // 무기 성격을 연출로 드러낸다.
     // 검은 짧고 빠르게 스쳐 지나가고, 방패는 느리게 밀고 나간다.
     const wedge = this.add
@@ -1253,7 +1263,7 @@ export class PlayScene extends Phaser.Scene {
         Phaser.Math.RadToDeg(angle - arc / 2),
         Phaser.Math.RadToDeg(angle + arc / 2),
         false,
-        runtime.weapon.color,
+        source.weapon.color,
         0.32,
       )
       .setDepth(7);
@@ -1281,7 +1291,7 @@ export class PlayScene extends Phaser.Scene {
       const entity = this.enemies.find((e) => e.state.id === target.id);
       if (!entity) continue;
 
-      this.resolveHit(entity, stats.damage ?? 0, runtime.weapon, runtime, behaviors);
+      this.resolveHit(entity, stats.damage ?? 0, source, behaviors);
       this.pushEnemy(entity, stats.knockback ?? 0, undefined, behaviors);
     }
   }
@@ -1335,7 +1345,7 @@ export class PlayScene extends Phaser.Scene {
     stats: ReturnType<typeof resolveFor>['stats'],
     behaviors: ReturnType<typeof resolveFor>['behaviors'],
     angle: number,
-    owner: WeaponRuntime | null,
+    source: AttackSource,
   ): void {
     // 지대는 조준 방향 앞쪽에 깔린다.
     const distance = 90;
@@ -1345,18 +1355,16 @@ export class PlayScene extends Phaser.Scene {
     this.areas.push({
       state: area,
       view: this.add.circle(area.x, area.y, area.radius, AREA_COLORS[area.kind], 0.3).setDepth(1),
-      owner,
+      source,
       behaviors,
     });
 
-    if (owner) {
-      for (const entity of this.enemies) {
-        if (!isAlive(entity.state) || !containsPoint(area, entity.state)) continue;
-        // 상태이상을 먼저 굴린다. 밀어내다 벽에 닿으면 그때 확정 기절이 덮어쓴다.
-        this.resolveHit(entity, 0, owner.weapon, owner, behaviors);
-        // 지대 중심에서 밀어낸다. 넉백이 있는 지대만 해당된다(균열 파동).
-        this.pushEnemy(entity, stats.knockback ?? 0, at, behaviors);
-      }
+    for (const entity of this.enemies) {
+      if (!isAlive(entity.state) || !containsPoint(area, entity.state)) continue;
+      // 상태이상을 먼저 굴린다. 밀어내다 벽에 닿으면 그때 확정 기절이 덮어쓴다.
+      this.resolveHit(entity, 0, source, behaviors);
+      // 지대 중심에서 밀어낸다. 넉백이 있는 지대만 해당된다(균열 파동).
+      this.pushEnemy(entity, stats.knockback ?? 0, at, behaviors);
     }
   }
 
@@ -1364,14 +1372,14 @@ export class PlayScene extends Phaser.Scene {
   private resolveHit(
     entity: EnemyEntity,
     rawDamage: number,
-    weapon: Weapon,
-    runtime?: WeaponRuntime,
+    source: AttackSource,
     behaviors: readonly Behavior[] = [],
   ): void {
     const enemy = entity.state;
     // 콤보로 얻은 손 강화를 여기서 곱한다. 스킬 수치가 아니라 손에 걸린 상태라
     // 수정자 파이프라인이 아니라 명중 시점에 적용한다.
-    const activeEmpower = runtime ? this.empower[runtime.hand] : undefined;
+    const { weapon } = source;
+    const activeEmpower = empowerForAttack(this.empower, source.hand, source.empowerId);
     const empowered = 1 + (activeEmpower?.more ?? 0);
     const statusHit = resolveStatusHit(rawDamage, enemy, weapon.status, behaviors);
     let damage = statusHit.damage * incomingDamageMultiplier(enemy) * empowered;
@@ -1425,25 +1433,21 @@ export class PlayScene extends Phaser.Scene {
       floatingText(this, enemy.x, enemy.y - radius - 12, `상처 폭발 ${WOUND_BURST_DAMAGE}`, '#ff9b9b');
     }
 
-    if (runtime) {
-      // 장착된 연계가 읽는 손만 콤보를 쌓는다. 합계 조건은 양손을 모두 읽고,
-      // 자기 손·반대손 조건은 필요한 쪽만 읽는다.
-      if (this.tracksComboFor(runtime.hand)) {
-        // **플레이어가 친 명중은 전부 콤보를 올린다.** 근접·투사체·지대를 가리지 않는다.
-        // 예전에는 `basic` 값으로 갈렸는데, 첫 소켓에 끼운 것이 곧 기본 공격이 되면서
-        // 그 구분이 없어졌다. 값만 남아 지대에서 `false`로 넘어가는 바람에 멸검·비전
-        // 개화·균열 파동을 끼우면 콤보가 아예 오르지 않았다. 값을 지워 되풀이를 막는다.
-        // 지대의 지속피해 틱은 여전히 올리지 않는다(`refreshCombo`). 그건 손으로 친 것이 아니다.
-        const skill = equippedBasicSkill(this.run.progress, runtime.weapon.id);
-        const stats = resolveFor(this.run.loadout, skill).stats;
-        this.combo = gainCombo(this.combo, runtime.hand, stats);
-        this.applyComboEffects();
-      }
-      // 강화된 손으로 때렸으면 횟수를 하나 쓴다.
-      if (rawDamage > 0 && activeEmpower) {
-        this.showEmpoweredHitFeedback(entity, runtime.hand, activeEmpower);
-        this.empower = spendEmpower(this.empower, runtime.hand);
-      }
+    // 발동할 때 장착된 연계가 읽던 손만 콤보를 쌓는다. 비행 중 R로 바꿔도
+    // 소유 손과 최종 콤보 수치는 공격 스냅샷에서 변하지 않는다.
+    if (source.tracksCombo) {
+      // **플레이어가 친 명중은 전부 콤보를 올린다.** 근접·투사체·지대를 가리지 않는다.
+      // 예전에는 `basic` 값으로 갈렸는데, 첫 소켓에 끼운 것이 곧 기본 공격이 되면서
+      // 그 구분이 없어졌다. 값만 남아 지대에서 `false`로 넘어가는 바람에 멸검·비전
+      // 개화·균열 파동을 끼우면 콤보가 아예 오르지 않았다. 값을 지워 되풀이를 막는다.
+      // 지대의 지속피해 틱은 여전히 올리지 않는다(`refreshCombo`). 그건 손으로 친 것이 아니다.
+      this.combo = gainCombo(this.combo, source.hand, source.comboStats);
+      this.applyComboEffects(source.comboRules);
+    }
+    // 강화된 손으로 때렸으면 횟수를 하나 쓴다.
+    if (rawDamage > 0 && activeEmpower) {
+      this.showEmpoweredHitFeedback(entity, source.hand, activeEmpower);
+      this.empower = spendEmpower(this.empower, source.hand);
     }
 
     this.damageEnemy(entity, damage);
@@ -3058,10 +3062,10 @@ export class PlayScene extends Phaser.Scene {
     for (const entity of this.enemies) entity.state.hindered = false;
 
     for (let i = this.areas.length - 1; i >= 0; i--) {
-      const { state, view, owner, behaviors } = this.areas[i];
+      const { state, view, source, behaviors } = this.areas[i];
       const result = tickArea(state, dt);
       let damagedSomething = false;
-      const activeEmpower = owner ? this.empower[owner.hand] : undefined;
+      const activeEmpower = empowerForAttack(this.empower, source.hand, source.empowerId);
       const empowered = 1 + (activeEmpower?.more ?? 0);
 
       if (result.detonated) {
@@ -3080,28 +3084,27 @@ export class PlayScene extends Phaser.Scene {
         if (state.hinders && canApplyCrowdControl(entity.state, behaviors)) entity.state.hindered = true;
 
         if (result.detonated && state.detonationDamage !== undefined) {
-          this.damageEnemyFromArea(state, entity, owner, behaviors, state.detonationDamage, empowered);
-          if (owner && activeEmpower) this.showEmpoweredHitFeedback(entity, owner.hand, activeEmpower);
+          this.damageEnemyFromArea(state, entity, source, behaviors, state.detonationDamage, empowered);
+          if (activeEmpower) this.showEmpoweredHitFeedback(entity, source.hand, activeEmpower);
           damagedSomething = true;
         }
 
         if (result.ticked) {
-          this.damageEnemyFromArea(state, entity, owner, behaviors, state.damagePerTick, empowered);
-          if (owner && activeEmpower) this.showEmpoweredHitFeedback(entity, owner.hand, activeEmpower);
+          this.damageEnemyFromArea(state, entity, source, behaviors, state.damagePerTick, empowered);
+          if (activeEmpower) this.showEmpoweredHitFeedback(entity, source.hand, activeEmpower);
           damagedSomething = true;
         }
       }
 
       // 지대 한 번의 피해 틱을 강화 1회로 센다. 범위 안 적 수만큼 차감하지 않는다.
-      if (damagedSomething && owner && activeEmpower) {
-        this.empower = spendEmpower(this.empower, owner.hand);
+      if (damagedSomething && activeEmpower) {
+        this.empower = spendEmpower(this.empower, source.hand);
       }
 
       // 지대형 발동 스킬도 지속피해가 들어가는 동안은 콤보를 유지시킨다.
-      if (damagedSomething && owner && this.tracksComboFor(owner.hand)) {
+      if (damagedSomething && source.tracksCombo) {
         // 지속시간만 늘린다. `직전 손`과 교차 연속은 플레이어가 친 것만 움직인다.
-        const skill = equippedBasicSkill(this.run.progress, owner.weapon.id);
-        this.combo = refreshCombo(this.combo, resolveFor(this.run.loadout, skill).stats);
+        this.combo = refreshCombo(this.combo, source.comboStats);
       }
 
       view.setAlpha(0.15 + 0.35 * remainingRatio(state));
@@ -3116,14 +3119,14 @@ export class PlayScene extends Phaser.Scene {
   private damageEnemyFromArea(
     area: Area,
     entity: EnemyEntity,
-    owner: WeaponRuntime | null,
+    source: AttackSource,
     behaviors: readonly Behavior[],
     rawDamage: number,
     empowered: number,
   ): void {
     const parts = splitAreaDamage(area, rawDamage);
     const convertedTotal = parts.physical + parts.elemental;
-    const statusHit = resolveStatusHit(convertedTotal, entity.state, owner?.weapon.status, behaviors);
+    const statusHit = resolveStatusHit(convertedTotal, entity.state, source.weapon.status, behaviors);
     const damage = statusHit.damage * incomingDamageMultiplier(entity.state) * empowered + statusHit.woundBonus;
 
     if (parts.elemental > 0) {
@@ -3155,14 +3158,13 @@ export class PlayScene extends Phaser.Scene {
 
         if (hit) {
           const outcome = onHitTarget(projectile, hit.state, alive);
-          const runtime = entity.weapon.id === this.left.weapon.id ? this.left : this.right ?? undefined;
-          this.resolveHit(hit, outcome.damage, entity.weapon, runtime, entity.behaviors);
+          this.resolveHit(hit, outcome.damage, entity.source, entity.behaviors);
 
           for (const spawned of outcome.spawned) {
             this.projectiles.push({
               state: spawned,
-              view: this.createBoltView(BOLT_SPRITE[entity.weapon.id], spawned.x, spawned.y, 22, spawned.angle, entity.weapon.color),
-              weapon: entity.weapon,
+              view: this.createBoltView(BOLT_SPRITE[entity.source.weapon.id], spawned.x, spawned.y, 22, spawned.angle, entity.source.weapon.color),
+              source: entity.source,
               behaviors: entity.behaviors,
             });
           }

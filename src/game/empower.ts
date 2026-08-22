@@ -11,6 +11,8 @@ import type { Hand } from '@/game/combo';
  * 보조도 있어서 각각 없을 수 있다.
  */
 export interface EmpowerState {
+  /** 공격 생성 뒤 같은 손에 새 강화가 덮여도 서로의 횟수를 소비하지 않게 구분한다. */
+  id: number;
   /** 피해 증폭 배율. 0.5면 50% 증폭. */
   more: number;
   /** 화면에 표시할 강화의 출처. 예: 연결 가속. */
@@ -23,6 +25,8 @@ export interface EmpowerState {
 
 export type EmpowerByHand = Partial<Record<Hand, EmpowerState>>;
 
+let nextEmpowerId = 1;
+
 export function grantEmpower(
   current: EmpowerByHand,
   hand: Hand,
@@ -33,6 +37,7 @@ export function grantEmpower(
   return {
     ...current,
     [hand]: {
+      id: nextEmpowerId++,
       more: grant.more,
       source: grant.source,
       hitsLeft: grant.hits,
@@ -44,6 +49,17 @@ export function grantEmpower(
 /** 이 손에 걸린 증폭 배율. 없으면 0이다. */
 export function empowerMore(current: EmpowerByHand, hand: Hand): number {
   return current[hand]?.more ?? 0;
+}
+
+/** 공격이 생성될 때 잡아 둔 강화와 지금 남은 강화가 같은 경우에만 반환한다. */
+export function empowerForAttack(
+  current: EmpowerByHand,
+  hand: Hand,
+  empowerId: number | undefined,
+): EmpowerState | undefined {
+  if (empowerId === undefined) return undefined;
+  const state = current[hand];
+  return state?.id === empowerId ? state : undefined;
 }
 
 /** 강화된 손으로 한 대 때렸을 때. 횟수를 하나 쓴다. */

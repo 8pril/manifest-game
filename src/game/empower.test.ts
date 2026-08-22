@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { grantEmpower, empowerMore, spendEmpower, tickEmpower } from './empower';
+import { empowerForAttack, grantEmpower, empowerMore, spendEmpower, tickEmpower } from './empower';
 
 describe('손 강화', () => {
   it('건 손에만 걸린다', () => {
@@ -54,5 +54,16 @@ describe('손 강화', () => {
 
     expect(state.right?.hitsLeft).toBe(3);
     expect(empowerMore(state, 'right')).toBe(0.8);
+  });
+
+  it('공격은 생성 당시와 같은 강화만 적용하고 새 강화 횟수를 훔치지 않는다', () => {
+    let state = grantEmpower({}, 'left', { more: 0.3 });
+    const oldId = state.left!.id;
+    expect(empowerForAttack(state, 'left', oldId)?.more).toBe(0.3);
+
+    state = grantEmpower(state, 'left', { more: 0.8, hits: 3 });
+    expect(empowerForAttack(state, 'left', oldId)).toBeUndefined();
+    expect(empowerForAttack(state, 'left', state.left!.id)?.more).toBe(0.8);
+    expect(empowerForAttack(state, 'right', state.left!.id)).toBeUndefined();
   });
 });
