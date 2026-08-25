@@ -138,11 +138,12 @@ describe('스킬별 장착 가능 보조능력', () => {
 });
 
 describe('실제 조합 결과', () => {
-  it("'과감한 결단'을 붙인 멸검은 명중당 콤보를 1.5 획득한다", () => {
+  it("'과감한 결단'을 붙인 멸검은 콤보를 1.5 획득하고 10초 유지한다", () => {
     const boldResolve = SUPPORTS.filter((s) => s.id === 'bold-resolve');
     const resolved = resolveSkill(ANNIHILATION_, boldResolve);
 
     expect(resolved.stats.comboGain).toBe(1.5);
+    expect(resolved.stats.comboDuration).toBe(10);
     expect(resolved.rejected).toHaveLength(0);
   });
 

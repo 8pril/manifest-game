@@ -250,10 +250,10 @@ const SYNERGY_SUPPORTS: Support[] = [
       {
         kind: 'combo',
         trigger: { reads: 'self', required: 5 },
-        effect: { kind: 'empower', hand: 'other', more: 0.8, hits: 3, seconds: 6, consumes: 'total' },
+        effect: { kind: 'empower', hand: 'other', more: 0.8, attacks: 3, seconds: 6, consumes: 'total' },
       },
     ],
-    description: '이 무기 콤보 5에서 전체 콤보를 소모하고 반대손 피해 80% 증폭 (3회 또는 6초)',
+    description: '이 무기 콤보 5에서 전체 콤보를 소모하고 반대손의 다음 3회 공격 피해 80% 증폭 (또는 6초)',
   },
   {
     id: 'wound-seeker',

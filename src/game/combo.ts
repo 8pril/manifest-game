@@ -87,11 +87,14 @@ export function comboTotal(combo: ComboState): number {
 export function gainCombo(combo: ComboState, hand: Hand, stats: StatBlock): ComboState {
   const gain = Math.max(1, stats.comboGain ?? 1);
   const duration = stats.comboDuration ?? COMBO_BASE_DURATION;
+  // 양손이 하나의 타이머를 공유하므로 짧은 쪽 명중이 긴 지속시간을 줄이면 안 된다.
+  // 콤보가 비어 있으면 과거 잔여값을 무시하고 이번 공격의 지속시간으로 새로 연다.
+  const remaining = comboTotal(combo) > 0 ? Math.max(combo.remaining, duration) : duration;
 
   return {
     ...combo,
     [hand]: Math.min(COMBO_MAX, comboOf(combo, hand) + gain),
-    remaining: duration,
+    remaining,
   };
 }
 
@@ -104,7 +107,8 @@ export function gainCombo(combo: ComboState, hand: Hand, stats: StatBlock): Comb
  */
 export function refreshCombo(combo: ComboState, stats: StatBlock): ComboState {
   if (comboTotal(combo) === 0) return combo;
-  return { ...combo, remaining: stats.comboDuration ?? COMBO_BASE_DURATION };
+  const duration = stats.comboDuration ?? COMBO_BASE_DURATION;
+  return { ...combo, remaining: Math.max(combo.remaining, duration) };
 }
 
 export function tickCombo(combo: ComboState, deltaSeconds: number): ComboState {

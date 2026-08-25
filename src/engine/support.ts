@@ -65,7 +65,7 @@ export type ComboEffect =
   /**
    * 콤보를 소모하고 지정한 손을 한동안 강화한다.
    *
-   * `hits`와 `seconds`는 둘 다 상한이며, 먼저 닿는 쪽에서 끝난다.
+   * `attacks`와 `seconds`는 둘 다 상한이며, 먼저 닿는 쪽에서 끝난다.
    * 둘 중 하나만 적어도 된다.
    */
   | {
@@ -73,7 +73,7 @@ export type ComboEffect =
       hand: 'self' | 'other';
       /** 피해 증폭 배율. 0.5면 50% 증폭. */
       more: number;
-      hits?: number;
+      attacks?: number;
       seconds?: number;
       /** 발동하며 소모할 범위. 생략하면 소모하지 않는다. */
       consumes?: 'total' | 'self' | 'other';

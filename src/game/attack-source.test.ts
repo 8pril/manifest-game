@@ -10,7 +10,7 @@ describe('snapshotAttackSource', () => {
       hand: 'left',
       comboStats,
       tracksCombo: true,
-      empowerId: 17,
+      empower: { id: 17, more: 0.8, attacksLeft: 3, secondsLeft: 6, source: '연계 방출' },
       comboRules: [{
         ownerHand: 'right',
         trigger: { reads: 'total', required: 6 },
@@ -23,7 +23,8 @@ describe('snapshotAttackSource', () => {
     input.weapon = weaponOf('shield');
     input.hand = 'right';
     input.tracksCombo = false;
-    input.empowerId = 22;
+    input.empower!.more = 0.3;
+    input.empower!.attacksLeft = 1;
     input.comboRules[0]!.trigger.required = 9;
     comboStats.comboGain = 9;
     comboStats.comboDuration = 1;
@@ -31,7 +32,7 @@ describe('snapshotAttackSource', () => {
     expect(snapshot.weapon.id).toBe('bow');
     expect(snapshot.hand).toBe('left');
     expect(snapshot.tracksCombo).toBe(true);
-    expect(snapshot.empowerId).toBe(17);
+    expect(snapshot.empower).toMatchObject({ id: 17, more: 0.8, attacksLeft: 3, secondsLeft: 6 });
     expect(snapshot.comboStats).toEqual({ comboGain: 1.5, comboDuration: 10 });
     expect(snapshot.comboRules[0]).toMatchObject({
       ownerHand: 'right',

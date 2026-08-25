@@ -2,6 +2,7 @@ import type { Weapon } from '@/data/weapons';
 import type { StatBlock } from '@/engine/modifiers';
 import type { ComboEffect, ComboTrigger } from '@/engine/support';
 import type { Hand } from '@/game/combo';
+import type { EmpowerState } from '@/game/empower';
 
 export interface AttackComboRule {
   ownerHand: Hand;
@@ -22,8 +23,8 @@ export interface AttackSource {
   comboStats: StatBlock;
   tracksCombo: boolean;
   comboRules: readonly AttackComboRule[];
-  /** 발동 순간 이 손에 걸려 있던 강화. 명중 전에 생긴 새 강화는 소급 적용하지 않는다. */
-  empowerId?: number;
+  /** 발동 순간 확보한 강화. 이 공격의 모든 전달체가 공유한다. */
+  empower?: EmpowerState;
 }
 
 export function snapshotAttackSource(source: AttackSource): AttackSource {
@@ -32,7 +33,7 @@ export function snapshotAttackSource(source: AttackSource): AttackSource {
     hand: source.hand,
     comboStats: { ...source.comboStats },
     tracksCombo: source.tracksCombo,
-    empowerId: source.empowerId,
+    empower: source.empower ? { ...source.empower } : undefined,
     comboRules: source.comboRules.map((rule) => ({
       ownerHand: rule.ownerHand,
       trigger: { ...rule.trigger },

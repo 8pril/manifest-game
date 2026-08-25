@@ -78,6 +78,24 @@ describe('콤보 만료', () => {
     expect(combo.remaining).toBe(5);
     expect(comboTotal(combo)).toBe(2);
   });
+
+  it('10초 지속 콤보를 반대손의 5초 명중이 줄이지 않는다', () => {
+    let combo = gainCombo(createCombo(), 'left', { comboDuration: 10 });
+    combo = tickCombo(combo, 2);
+    combo = gainCombo(combo, 'right', { comboDuration: 5 });
+
+    expect(combo.remaining).toBe(8);
+    expect(combo.left).toBe(1);
+    expect(combo.right).toBe(1);
+  });
+
+  it('긴 지속시간이 5초보다 적게 남으면 반대손 명중도 최소 5초까지 연장한다', () => {
+    let combo = gainCombo(createCombo(), 'left', { comboDuration: 10 });
+    combo = tickCombo(combo, 6);
+    combo = gainCombo(combo, 'right', { comboDuration: 5 });
+
+    expect(combo.remaining).toBe(5);
+  });
 });
 
 describe('콤보 소모', () => {
@@ -155,6 +173,15 @@ describe('지대 지속피해', () => {
     expect(after.left).toBe(combo.left);
     expect(after.right).toBe(combo.right);
     expect(after.remaining).toBe(COMBO_BASE_DURATION);
+  });
+
+  it('짧은 지대 틱이 다른 손이 만든 긴 콤보 시간을 줄이지 않는다', () => {
+    let combo = gainCombo(createCombo(), 'left', { comboDuration: 10 });
+    combo = tickCombo(combo, 2);
+
+    const after = refreshCombo(combo, { comboDuration: 5 });
+
+    expect(after.remaining).toBe(8);
   });
 });
 

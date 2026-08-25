@@ -112,7 +112,7 @@ import {
   COMBO_REQUIRED,
   type ComboState,
 } from '@/game/combo';
-import { empowerForAttack, grantEmpower, empowerMore, spendEmpower, tickEmpower, type EmpowerByHand, type EmpowerState } from '@/game/empower';
+import { claimEmpowerForAttack, grantEmpower, empowerMore, tickEmpower, type EmpowerByHand, type EmpowerState } from '@/game/empower';
 import { snapshotAttackSource, type AttackComboRule, type AttackSource } from '@/game/attack-source';
 import {
   createRun,
@@ -1125,7 +1125,7 @@ export class PlayScene extends Phaser.Scene {
       const target = effect.hand === 'self' ? ownerHand : otherHand(ownerHand);
       this.empower = grantEmpower(this.empower, target, {
         more: effect.more,
-        hits: effect.hits,
+        attacks: effect.attacks,
         seconds: effect.seconds,
         source: supportName,
       });
@@ -1158,7 +1158,7 @@ export class PlayScene extends Phaser.Scene {
         if (met && !on) {
           this.empower = grantEmpower(this.empower, target, { more: effect.more, source: support.name });
           floatingText(this, this.player.x, this.player.y - PLAYER_RADIUS - 34, support.name, COLORS.accentText);
-        } else if (!met && on && this.empower[target]?.hitsLeft === undefined && this.empower[target]?.secondsLeft === undefined) {
+        } else if (!met && on && this.empower[target]?.attacksLeft === undefined && this.empower[target]?.secondsLeft === undefined) {
           // 횟수·시간 제한이 없는 것만 끈다. 소모형으로 받은 강화는 조건과 무관하게 남는다.
           const next = { ...this.empower };
           delete next[target];
@@ -1182,6 +1182,7 @@ export class PlayScene extends Phaser.Scene {
   private useSkill(runtime: WeaponRuntime, skill: Skill, angle: number): void {
     const resolved = resolveFor(this.run.loadout, skill);
     const comboRules = this.attackComboRules();
+    const claimedEmpower = claimEmpowerForAttack(this.empower, runtime.hand);
     const source = snapshotAttackSource({
       weapon: runtime.weapon,
       hand: runtime.hand,
@@ -1190,8 +1191,9 @@ export class PlayScene extends Phaser.Scene {
         comboTriggerTracksHand(ownerHand, runtime.hand, trigger),
       ),
       comboRules,
-      empowerId: this.empower[runtime.hand]?.id,
+      empower: claimedEmpower.empower,
     });
+    this.empower = claimedEmpower.remaining;
     this.showPrimarySupportFeedback(runtime, skill);
     playSfx('attack');
 
@@ -1379,7 +1381,7 @@ export class PlayScene extends Phaser.Scene {
     // 콤보로 얻은 손 강화를 여기서 곱한다. 스킬 수치가 아니라 손에 걸린 상태라
     // 수정자 파이프라인이 아니라 명중 시점에 적용한다.
     const { weapon } = source;
-    const activeEmpower = empowerForAttack(this.empower, source.hand, source.empowerId);
+    const activeEmpower = source.empower;
     const empowered = 1 + (activeEmpower?.more ?? 0);
     const statusHit = resolveStatusHit(rawDamage, enemy, weapon.status, behaviors);
     let damage = statusHit.damage * incomingDamageMultiplier(enemy) * empowered;
@@ -1444,10 +1446,9 @@ export class PlayScene extends Phaser.Scene {
       this.combo = gainCombo(this.combo, source.hand, source.comboStats);
       this.applyComboEffects(source.comboRules);
     }
-    // 강화된 손으로 때렸으면 횟수를 하나 쓴다.
+    // 강화 횟수는 공격 생성 시 한 번만 쓴다. 이 명중은 스냅샷 피해와 피드백만 적용한다.
     if (rawDamage > 0 && activeEmpower) {
       this.showEmpoweredHitFeedback(entity, source.hand, activeEmpower);
-      this.empower = spendEmpower(this.empower, source.hand);
     }
 
     this.damageEnemy(entity, damage);
@@ -3065,7 +3066,7 @@ export class PlayScene extends Phaser.Scene {
       const { state, view, source, behaviors } = this.areas[i];
       const result = tickArea(state, dt);
       let damagedSomething = false;
-      const activeEmpower = empowerForAttack(this.empower, source.hand, source.empowerId);
+      const activeEmpower = source.empower;
       const empowered = 1 + (activeEmpower?.more ?? 0);
 
       if (result.detonated) {
@@ -3094,11 +3095,6 @@ export class PlayScene extends Phaser.Scene {
           if (activeEmpower) this.showEmpoweredHitFeedback(entity, source.hand, activeEmpower);
           damagedSomething = true;
         }
-      }
-
-      // 지대 한 번의 피해 틱을 강화 1회로 센다. 범위 안 적 수만큼 차감하지 않는다.
-      if (damagedSomething && activeEmpower) {
-        this.empower = spendEmpower(this.empower, source.hand);
       }
 
       // 지대형 발동 스킬도 지속피해가 들어가는 동안은 콤보를 유지시킨다.
@@ -3992,12 +3988,12 @@ export class PlayScene extends Phaser.Scene {
           : rule.effect.consumes === 'other'
             ? `${otherRuntime?.weapon.name ?? '반대손'} 콤보 소모`
             : null;
-    const limit = [rule.effect.hits ? `${rule.effect.hits}회` : '', rule.effect.seconds ? `${rule.effect.seconds}초` : '']
+    const limit = [rule.effect.attacks ? `${rule.effect.attacks}회 공격` : '', rule.effect.seconds ? `${rule.effect.seconds}초` : '']
       .filter(Boolean)
       .join('/');
     const remaining = activeEmpower
       ? [
-          activeEmpower.hitsLeft !== undefined ? `${activeEmpower.hitsLeft}회` : '',
+          activeEmpower.attacksLeft !== undefined ? `${activeEmpower.attacksLeft}회 공격` : '',
           activeEmpower.secondsLeft !== undefined ? `${activeEmpower.secondsLeft.toFixed(1)}초` : '',
         ].filter(Boolean).join(' / ')
       : '';

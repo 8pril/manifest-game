@@ -7,7 +7,7 @@ import type { Hand } from '@/game/combo';
  * 한시적 상태다. 콤보와 별개로 관리하는 이유는 **소모한 뒤에도 남아 있어야** 하기
  * 때문이다. 콤보를 털어서 강화로 바꾸는 것이므로 둘의 수명이 다르다.
  *
- * 횟수와 시간은 **둘 다 상한**이고 먼저 닿는 쪽에서 끝난다. 둘 중 하나만 있는
+ * 공격 횟수와 시간은 **둘 다 상한**이고 먼저 닿는 쪽에서 끝난다. 둘 중 하나만 있는
  * 보조도 있어서 각각 없을 수 있다.
  */
 export interface EmpowerState {
@@ -17,8 +17,8 @@ export interface EmpowerState {
   more: number;
   /** 화면에 표시할 강화의 출처. 예: 연결 가속. */
   source?: string;
-  /** 남은 사용 횟수. 없으면 횟수 제한이 없다. */
-  hitsLeft?: number;
+  /** 남은 강화 공격 횟수. 없으면 횟수 제한이 없다. */
+  attacksLeft?: number;
   /** 남은 시간(초). 없으면 시간 제한이 없다. */
   secondsLeft?: number;
 }
@@ -30,7 +30,7 @@ let nextEmpowerId = 1;
 export function grantEmpower(
   current: EmpowerByHand,
   hand: Hand,
-  grant: { more: number; hits?: number; seconds?: number; source?: string },
+  grant: { more: number; attacks?: number; seconds?: number; source?: string },
 ): EmpowerByHand {
   // 이미 걸려 있으면 덮어쓴다. 겹쳐 쌓으면 콤보를 모아뒀다가 한 번에 터뜨리는 것이
   // 항상 이득이 되어, 조건을 채우는 재미가 아니라 참는 재미가 된다.
@@ -40,7 +40,7 @@ export function grantEmpower(
       id: nextEmpowerId++,
       more: grant.more,
       source: grant.source,
-      hitsLeft: grant.hits,
+      attacksLeft: grant.attacks,
       secondsLeft: grant.seconds,
     },
   };
@@ -51,29 +51,31 @@ export function empowerMore(current: EmpowerByHand, hand: Hand): number {
   return current[hand]?.more ?? 0;
 }
 
-/** 공격이 생성될 때 잡아 둔 강화와 지금 남은 강화가 같은 경우에만 반환한다. */
-export function empowerForAttack(
-  current: EmpowerByHand,
-  hand: Hand,
-  empowerId: number | undefined,
-): EmpowerState | undefined {
-  if (empowerId === undefined) return undefined;
-  const state = current[hand];
-  return state?.id === empowerId ? state : undefined;
-}
-
-/** 강화된 손으로 한 대 때렸을 때. 횟수를 하나 쓴다. */
+/** 강화된 손으로 공격을 하나 생성했을 때 횟수를 하나 쓴다. */
 export function spendEmpower(current: EmpowerByHand, hand: Hand): EmpowerByHand {
   const state = current[hand];
-  if (!state || state.hitsLeft === undefined) return current;
+  if (!state || state.attacksLeft === undefined) return current;
 
-  const hitsLeft = state.hitsLeft - 1;
-  if (hitsLeft <= 0) {
+  const attacksLeft = state.attacksLeft - 1;
+  if (attacksLeft <= 0) {
     const next = { ...current };
     delete next[hand];
     return next;
   }
-  return { ...current, [hand]: { ...state, hitsLeft } };
+  return { ...current, [hand]: { ...state, attacksLeft } };
+}
+
+/**
+ * 이번 공격에 적용할 강화를 복사하고 전역 상태에서는 공격 1회를 즉시 차감한다.
+ * 복사본은 투사체 전탄·다중 대상·지대 전체가 공유한다.
+ */
+export function claimEmpowerForAttack(
+  current: EmpowerByHand,
+  hand: Hand,
+): { empower?: EmpowerState; remaining: EmpowerByHand } {
+  const state = current[hand];
+  if (!state) return { remaining: current };
+  return { empower: { ...state }, remaining: spendEmpower(current, hand) };
 }
 
 export function tickEmpower(current: EmpowerByHand, deltaSeconds: number): EmpowerByHand {
