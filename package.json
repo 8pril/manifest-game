@@ -1,9 +1,9 @@
 {
-  "name": "nan2026-game",
+  "name": "manifest-game",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "NAN 2026 Game x AI Hackathon 예선 제출작",
+  "description": "MANIFEST: LOST ECHOES - browser-based 2D top-down hack-and-slash",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

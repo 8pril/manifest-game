@@ -2,13 +2,13 @@
 
 검 하나로 시작해 보스 드랍과 마을 장비 설정으로 양손 무기 조합을 확장하는 웹 기반 2D 탑다운 핵앤슬래시.
 
-NHN **NAN 2026 (Next AI Network) Game × AI Hackathon** 사전 과제 제출물입니다.
+보스가 떨어뜨린 무기와 스킬을 조합해 전투 방을 돌파하는 독립 웹 게임 프로젝트입니다.
 
 ## 플레이
 
 브라우저에서 바로 실행됩니다. 설치가 필요 없습니다.
 
-- **플레이 링크: https://8pril.github.io/nan2026-game/**
+- **플레이 링크: https://8pril.github.io/manifest-game/**
 
 | 입력 | 동작 |
 | --- | --- |
@@ -50,7 +50,7 @@ NHN **NAN 2026 (Next AI Network) Game × AI Hackathon** 사전 과제 제출물�
 **첫 칸이 무엇을 붙일 수 있는지까지 바꿉니다.** 비전에 비전 개화를 끼우면 기본 공격이
 지대가 되므로, 그때부터 `지대`를 요구하는 보조형스킬이 들어갑니다.
 
-보조/연계 전체 목록은 `docs/support-skill-reference.md`에서 관리합니다.
+보조/연계 정의는 `src/data/supports.ts`에서 관리합니다.
 
 **콤보는 양손을 오갈 때 쌓입니다.** 그것을 읽는 연계를 붙인 무기만 콤보가 돌아갑니다.
 
@@ -167,7 +167,6 @@ src/
   audio/
     sfx.ts         절차형 WebAudio 효과음
   scenes/          Phaser 씬. 상태를 그리고 입력을 전달한다
-docs/              기획 및 진행 문서
 ```
 
 보조형스킬은 전용 코드를 갖지 않습니다. 투사체 조합 엔진, 지대 엔진,
@@ -176,23 +175,11 @@ docs/              기획 및 진행 문서
 
 `engine/`은 Phaser를 import 하지 않습니다. 전투 규칙을 브라우저 없이 테스트로 고정하기 위해서입니다.
 
-## 문서
-
-- [예선 요구사항 및 실행 플랜](docs/preliminary-requirements-and-plan.md)
-- [기획 원형 구현 플랜](docs/full-concept-implementation-plan.md)
-- [예선 빌드 스코프](docs/game-scope.md)
-- [플레이 테스트 요청](docs/playtest-brief.md)
-- [액션 트래커](docs/action-tracker.md)
-- [AI 활용 기록 로그](docs/ai-usage-log.md)
-- [기획 도해와 구현 결과](docs/design/README.md)
-
 ## 라이선스 및 출처
 
-이 공개 저장소는 NAN 2026 예선 심사를 위해 빌드·전체 소스·커밋 기록을 공개한 것입니다.
-출품작 자체 코드·문서·생성 아트에는 별도의 오픈소스 라이선스를 부여하지 않았으며,
+이 저장소의 코드·문서·생성 아트에는 별도의 오픈소스 라이선스를 부여하지 않았으며,
 저장소 공개만으로 복제·수정·재배포 권한을 허용하지 않습니다.
 
-외부 에셋과 오픈소스 출처는 사용 시점에 기록하며, 최종 제출 시 AI 활용 기술 문서에 정리합니다.
+외부 에셋과 오픈소스 출처는 사용 시점에 기록합니다.
 현재 게임 내 이미지는 OpenAI `gpt-image-1`로 생성한 원본을 `assets-raw/`에 보관하고,
-게임용 축소본을 `public/sprites/`에서 사용합니다. 생성 프롬프트와 출처 기록은
-`docs/art-spec.md`에 정리되어 있습니다. 효과음은 에셋 파일 없이 WebAudio로 합성합니다.
+게임용 축소본을 `public/sprites/`에서 사용합니다. 효과음은 에셋 파일 없이 WebAudio로 합성합니다.
